@@ -1,0 +1,4 @@
+
+It's a service that answers one question: a security advisory says package X version Y is vulnerable — is that flaw actually reachable from your code, or is it noise you can ignore? You point it at a Python repo or a package you're considering adopting, and it returns REACHABLE, NOT_REACHABLE, or UNKNOWN, with file-and-line evidence backing the verdict.
+
+The engineering underneath: an agent loop against the raw LLM API that investigates using tools you built — search_symbol, find_callers, resolve_import over an AST index of the repo — instead of being handed a precomputed call graph. Around it sits a FastAPI + Postgres backend with a background worker, an eval suite gating every prompt change in CI, and an injection-resistance layer, since advisory text and repo source are both attacker-controlled input flowing into an agent with tool access.
