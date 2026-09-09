@@ -15,7 +15,7 @@ TRIAGE_DB: dict[uuid.UUID, dict] = {}
 
 # --- Exception Handlers (Uniform Error Shape) ---
 @app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+async def starlette_http_exception_handler(request: Request, exc: StarletteHTTPException):
     # Unpack custom detail dicts, or fallback to standard Starlette strings
     if isinstance(exc.detail, dict) and "code" in exc.detail:
         code = exc.detail.get("code")
@@ -30,7 +30,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     )
     
 @app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
+async def fastapi_http_exception_handler(request: Request, exc: HTTPException):
     # If detail is structured as a dict with code and message, unwrap it cleanly
     if isinstance(exc.detail, dict) and "code" in exc.detail:
         payload = {
@@ -52,20 +52,13 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     errors = exc.errors()
-    
-    # 1. Catch malformed JSON explicitly
-    if errors and errors[0].get("type") == "json_invalid":
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={"error": {"code": "MALFORMED_JSON", "message": "Malformed JSON payload."}}
-        )
 
-    # 2. Guard against 500s safely using 'or'
+    # 1. Guard against 500s safely using 'or'
     first_msg = errors[0].get("msg") or "Validation error" if errors else "Validation error"
     if first_msg.startswith("Value error, "):
         first_msg = first_msg[len("Value error, "):]
 
-    # 3. Strip Pydantic internals
+    # 2. Strip Pydantic internals
     safe_details = [{"loc": err.get("loc", []), "msg": err.get("msg", "")} for err in errors]
 
     return JSONResponse(
