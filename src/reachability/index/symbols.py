@@ -152,16 +152,14 @@ def _walk_scope(stmts, parent_qualname, parent_is_class, inherited_conditional, 
 
 
 def _resolve_name_ref(name, module_top_level_index, import_table):
+    if name in module_top_level_index:
+        return module_top_level_index[name]  # local claim always wins; None if unresolvable
+
     eligible_aliases = [
         a
         for a in import_table.aliases
         if a.local_name == name and not a.conditional and not a.type_checking_only
     ]
-
-    if name in module_top_level_index:
-        if eligible_aliases:
-            return None  # ambiguous: local def and import binding share this name
-        return module_top_level_index[name]
 
     if not eligible_aliases:
         return None
@@ -297,6 +295,7 @@ def build_module_symbol_table(module: ModuleRecord, tree: ast.Module, import_tab
     for candidate in alias_candidates:
         groups.setdefault(candidate.name, []).append(("alias", candidate))
 
+    qualname_renames: list[tuple[str, str]] = []
     for name, members in groups.items():
         if len(members) == 1:
             member_kind, item = members[0]
@@ -307,18 +306,34 @@ def build_module_symbol_table(module: ModuleRecord, tree: ast.Module, import_tab
         else:
             for member_kind, item in members:
                 if member_kind == "def":
-                    item.qualname = f"{name}@{item.lineno}"
+                    old_qualname = item.qualname
+                    new_qualname = f"{name}@{item.lineno}"
+                    if old_qualname != new_qualname:
+                        qualname_renames.append((old_qualname, new_qualname))
+                    item.qualname = new_qualname
                 else:
                     item.segment = f"{name}@{item.lineno}"
 
-    module_top_level_index = {
-        p.qualname: f"{module.dotted_name}:{p.qualname}"
-        for p in pending
-        if "." not in p.qualname
-        and "@" not in p.qualname
-        and not p.conditional
-        and not p.type_checking_only
-    }
+    for old_qualname, new_qualname in qualname_renames:
+        prefix = f"{old_qualname}."
+        for p in pending:
+            if p.qualname.startswith(prefix):
+                p.qualname = new_qualname + p.qualname[len(old_qualname):]
+
+    depth0_index_groups: dict[str, list[PendingNode]] = {}
+    for p in depth0_defs:
+        depth0_index_groups.setdefault(p.ast_node.name, []).append(p)
+
+    module_top_level_index: dict[str, str | None] = {}
+    for name, members in depth0_index_groups.items():
+        if len(members) == 1:
+            item = members[0]
+            if item.conditional or item.type_checking_only:
+                module_top_level_index[name] = None
+            else:
+                module_top_level_index[name] = f"{module.dotted_name}:{item.qualname}"
+        else:
+            module_top_level_index[name] = None
 
     nodes: list[SymbolNode] = []
     nodes.append(

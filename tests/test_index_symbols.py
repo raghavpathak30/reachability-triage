@@ -431,6 +431,60 @@ def test_decorator_call_form_bare_name(tmp_path):
     assert f.decorators == ["?:task"]
 
 
+def test_nested_descendant_qualname_follows_late_discovered_collision(tmp_path):
+    source = (
+        "def foo():\n"
+        "    def inner():\n"
+        "        pass\n"
+        "\n"
+        "\n"
+        "something_else = 1\n"
+        "foo = something_else\n"
+    )
+    write_tree(tmp_path, {"mod.py": source})
+
+    report = build_l1_index(tmp_path)
+    tables = build_symbol_index(report)
+
+    node_ids = {n.node_id: n for n in tables["mod"].nodes}
+    assert "mod:foo@1" in node_ids
+    assert "mod:foo@7" in node_ids
+    assert "mod:foo" not in node_ids
+    assert "mod:foo.inner" not in node_ids
+    assert "mod:foo@1.inner" in node_ids
+
+
+def test_ambiguous_local_defs_block_import_fallthrough(tmp_path):
+    write_tree(
+        tmp_path,
+        {
+            "x.py": "def foo():\n    pass\n",
+            "mod.py": (
+                "from x import foo\n"
+                "\n"
+                "\n"
+                "def foo():\n"
+                "    pass\n"
+                "\n"
+                "\n"
+                "def foo():\n"
+                "    pass\n"
+                "\n"
+                "\n"
+                "@foo\n"
+                "def g():\n"
+                "    pass\n"
+            ),
+        },
+    )
+
+    report = build_l1_index(tmp_path)
+    tables = build_symbol_index(report)
+
+    g = next(n for n in tables["mod"].nodes if n.qualname == "g")
+    assert g.decorators == ["?:foo"]
+
+
 def test_alias_target_id_resolution(tmp_path):
     source = (
         "def do_thing():\n"
