@@ -1,4 +1,6 @@
 from .build import build_l1_index
+from .edges import build_edge_index, build_module_call_edges
+from .edges_models import CallEdge, Confidence, ResolutionRule
 from .models import (
     DiscoveryReport,
     ImportAlias,
@@ -27,4 +29,9 @@ __all__ = [
     "NodeKind",
     "SymbolNode",
     "ModuleSymbolTable",
+    "build_edge_index",
+    "build_module_call_edges",
+    "CallEdge",
+    "Confidence",
+    "ResolutionRule",
 ]

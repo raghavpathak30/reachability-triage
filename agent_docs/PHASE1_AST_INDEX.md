@@ -40,7 +40,15 @@ pkg.module:Class.method
 pkg.module:function
 pkg.module                     # module-level code
 ?:name                         # unresolved callee, name-only
+ext:dotted.path                # resolved third-party/stdlib callee, e.g. ext:yaml.load
 ```
+
+`ext:` is a callee ID only — it never names a first-party node. It marks a call resolved with
+`high` confidence (an explicit, unambiguous import statement) whose target lives outside the
+repo, so there is no first-party node to point at. Introduced in L3; L4's BFS target-match logic
+must treat a node whose module is `P` the same way whether that edge landed on it via a
+`pkg.module:qualname` ID or, for a dependency being reasoned about only as an import target,
+an `ext:` one.
 
 Every node carries `file`, `lineno`, `kind` (function/asyncfunction/class/method/module),
 `decorators` (list of resolved decorator IDs).
