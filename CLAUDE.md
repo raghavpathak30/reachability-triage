@@ -58,7 +58,8 @@ gap, since an unresolved callee carries no module information to check.
 Both gaps are accepted consequences of resolving toward `unknown` over a
 wrong confident answer, not something L4 attempts to fix (would require
 L3 to record call-site argument literals or track receiver-module
-provenance; L3 is frozen).
+provenance). L3 is frozen against new resolution capability, not against
+fixes that reduce confidence.
 
 ## Handoff protocol
 - Agents communicate through files in `.agent/`. Read the previous phase's

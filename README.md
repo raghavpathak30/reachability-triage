@@ -18,8 +18,10 @@ is where security teams lose their week. This service does that triage.
 Fixed on 18 Aug 2026. Not revisited.
 
 - Python only.
-- Direct imports and direct calls only.
-- No dynamic dispatch, no `getattr`, no decorator indirection.
+- Direct imports and direct calls, transitively, across modules.
+- Dynamic dispatch (`getattr`, `eval`/`exec`, module-level `__getattr__`,
+  callback-by-reference) is modeled, not ignored: where it cannot be resolved to a
+  confident call target, the verdict is `unknown`, never a false `not_reachable`.
 
 Anything outside this line is out of scope, permanently. The analyzer is not the
 point of the project; the agent, the evals and the injection work are.
