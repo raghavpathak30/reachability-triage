@@ -33,6 +33,7 @@ Docker · Docker Compose · GitHub Actions · AWS EC2
 
 - `main.py` — the API
 - `src/reachability/index/` — AST index (see `agent_docs/PHASE1_AST_INDEX.md`). L1
-  (module discovery + import map), L2 (symbol table), and L3 (call edge extraction)
-  are built; L4–L5 are not.
+  (module discovery + import map), L2 (symbol table), L3 (call edge extraction), and
+  L4 (entrypoint detection, BFS, reachability verdicts, query layer) are built; L5 is
+  not.
 - `DECISIONS.md` — dated design decisions and their reasoning

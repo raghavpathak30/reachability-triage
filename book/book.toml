@@ -1,0 +1,10 @@
+[book]
+title = "reachability-triage — CVE Reachability from Zero"
+authors = ["Raghav Pathak"]
+src = "src"
+language = "en"
+
+[output.html]
+default-theme = "ayu"
+preferred-dark-theme = "ayu"
+git-repository-url = "CHANGE ME"

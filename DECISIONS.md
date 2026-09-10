@@ -11,6 +11,16 @@ The engineering underneath: an agent loop against the raw LLM API that investiga
 - `QUEUED`: Request accepted, assigned an ID, and waiting for worker execution.
 - `RUNNING`: Analysis is actively executing.
 - `COMPLETED`: Analysis ran to completion without unhandled crashes. Reachability findings (`REACHABLE`, `NOT_REACHABLE`, `UNKNOWN`) are recorded as payload attributes inside this state, not separate top-level states.
+
+  **Status note (L4, shipped):** the AST-index layer's actual verdict set is four
+  values, not three — `agent_docs/PHASE1_AST_INDEX.md` §3.4 and
+  `src/reachability/index/reachability_models.py::Verdict` also distinguish
+  `REACHABLE_ONLY_FROM_TESTS` (a confident path exists, but only via test-function
+  entrypoints, not production code) from plain `REACHABLE`. This document's three-value
+  list above was written before that distinction was introduced; not rewritten here to
+  preserve the original rationale, but the FastAPI layer's `COMPLETED` payload should
+  expect four possible finding values, not three, whenever it starts consuming L4's
+  output.
 - `FAILED`: Analysis aborted due to a crash, hard error, or worker failure.
 
 ### State Transitions

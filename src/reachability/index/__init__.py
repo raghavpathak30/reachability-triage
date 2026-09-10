@@ -1,6 +1,8 @@
 from .build import build_l1_index
 from .edges import build_edge_index, build_module_call_edges
 from .edges_models import CallEdge, Confidence, ResolutionRule
+from .entrypoint_models import Entrypoint, EntrypointSource
+from .entrypoints import build_entrypoint_index
 from .models import (
     DiscoveryReport,
     ImportAlias,
@@ -11,6 +13,9 @@ from .models import (
     TargetKind,
     UnparsedFile,
 )
+from .query import find_callers, resolve_import, search_symbol
+from .reachability import compute_reachability
+from .reachability_models import ReachabilityResult, Verdict
 from .symbol_models import ModuleSymbolTable, NodeKind, SymbolNode
 from .symbols import build_module_symbol_table, build_symbol_index
 
@@ -34,4 +39,13 @@ __all__ = [
     "CallEdge",
     "Confidence",
     "ResolutionRule",
+    "Entrypoint",
+    "EntrypointSource",
+    "build_entrypoint_index",
+    "Verdict",
+    "ReachabilityResult",
+    "compute_reachability",
+    "search_symbol",
+    "find_callers",
+    "resolve_import",
 ]
