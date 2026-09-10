@@ -504,3 +504,71 @@ def test_alias_target_id_resolution(tmp_path):
 
     handler2 = next(n for n in tables["mod"].nodes if n.node_id == "mod:handler2")
     assert handler2.target_id == "?:some_undefined_name"
+
+
+def test_multiway_collision_with_deep_nesting_no_dangling_nodes(tmp_path):
+    source = (
+        "def foo():\n"
+        "    def inner_a():\n"
+        "        def deepest():\n"
+        "            pass\n"
+        "def foo():\n"
+        "    def inner_b():\n"
+        "        pass\n"
+        "something_else = 1\n"
+        "foo = something_else\n"
+    )
+    write_tree(tmp_path, {"mod.py": source})
+
+    report = build_l1_index(tmp_path)
+    tables = build_symbol_index(report)
+
+    node_ids = {n.node_id: n for n in tables["mod"].nodes}
+
+    # No unsuffixed / stale-prefix variant may exist.
+    assert "mod:foo" not in node_ids
+    assert "mod:foo.inner_a" not in node_ids
+    assert "mod:foo.inner_a.deepest" not in node_ids
+    assert "mod:foo.inner_b" not in node_ids
+
+    # Three-way collision (two defs + one alias) — every member suffixed by its own lineno.
+    assert "mod:foo@1" in node_ids
+    assert "mod:foo@5" in node_ids
+    assert "mod:foo@9" in node_ids
+    assert node_ids["mod:foo@1"].kind == NodeKind.FUNCTION
+    assert node_ids["mod:foo@5"].kind == NodeKind.FUNCTION
+    assert node_ids["mod:foo@9"].kind == NodeKind.ALIAS
+
+    # Descendants two levels deep follow the suffixed parent, not the stale one.
+    assert "mod:foo@1.inner_a" in node_ids
+    assert "mod:foo@1.inner_a.deepest" in node_ids
+    assert "mod:foo@5.inner_b" in node_ids
+
+
+def test_single_conditional_def_collision_with_import_blocks_fallthrough(tmp_path):
+    write_tree(
+        tmp_path,
+        {
+            "x.py": "def foo():\n    pass\n",
+            "mod.py": (
+                "from typing import TYPE_CHECKING\n"
+                "from x import foo\n"
+                "\n"
+                "\n"
+                "if TYPE_CHECKING:\n"
+                "    def foo():\n"
+                "        pass\n"
+                "\n"
+                "\n"
+                "@foo\n"
+                "def g():\n"
+                "    pass\n"
+            ),
+        },
+    )
+
+    report = build_l1_index(tmp_path)
+    tables = build_symbol_index(report)
+
+    g = next(n for n in tables["mod"].nodes if n.qualname == "g")
+    assert g.decorators == ["?:foo"]
