@@ -408,3 +408,69 @@ The remaining 0.65 ratio / 27.7% masked-name figure is the accepted D3 trade-off
 already documented above (a common name referenced anywhere outside a call
 position suppresses `not_reachable` for that name repo-wide) — now measuring the
 intended trade-off rather than an inflated one.
+
+## 6. Phase 2 U1/U2 — open items carried forward (11 Sep 2026)
+
+Both units (`agent_docs/PHASE2_TRIAGE_AGENT.md` §3) shipped with 0 critical review
+findings and are committed (`f5647ca`, `74985d7`), but each left one class of
+accepted, documented gap open rather than closing it inside the unit's own gate.
+Recorded here so a later phase doesn't have to rediscover them from commit
+messages.
+
+### U1 — an existing-but-empty `repo_root` still produces a confidently-wrong-looking result
+
+`build_repo_index`'s precondition check (`src/reachability/triage/index_adapter.py:29-30`)
+raises `IndexBuildError` for a `repo_root` that doesn't exist or isn't a directory,
+closing the gap where `pathlib.rglob` silently returns nothing on a missing path. It
+does **not** close the adjacent case: a `repo_root` that exists but is empty (or is a
+directory one level off — a typo'd subpath) still produces a structurally valid,
+"successful" empty `RepoIndex` (zero modules, zero entrypoints). Fed into
+`compute_reachability`, this yields a confident `NOT_REACHABLE` ("no entrypoints
+detected in repository", `src/reachability/index/reachability.py:115-122`) that is
+indistinguishable from "this repo genuinely has no triageable code" — the same class
+of confidently-wrong-verdict problem D1/D3/D5 (§4 above) exist to eliminate at the
+AST-index layer, now reappearing one layer up. Not closed in U1; worth addressing
+before U5 exposes `build_repo_index` to a live HTTP path, where a caller's typo'd
+acquisition result could otherwise present as a clean "not reachable" instead of a
+visible error.
+
+### U2 — three residual gaps (documented in code), plus one forward-looking near-miss
+
+`acquire_source` (`src/reachability/triage/acquisition.py`) documents three accepted
+gaps directly in its own docstring, not just here — repeated in this log for
+discoverability alongside U1's open item above:
+
+1. **pip failure-string ambiguity** (`acquisition.py:46-55`): pip emits identical
+   stderr text ("Could not find a version that satisfies the requirement" / "No
+   matching distribution found") for a package+version with no wheel and for one
+   that doesn't exist at all (e.g. a typo). Both are classified as `"no wheel
+   available for X==Y"` — still fail-loud either way, never a silent failure or a
+   build fallback, but the message may misname a plain typo as a missing-wheel
+   condition.
+2. **Unverified core assumption** (`acquisition.py:57-65`): that
+   `--only-binary=:all:` never invokes the target package's own PEP 517 build
+   backend even when no wheel exists. This rests on documented pip behavior, not an
+   empirical observation in this sandbox — no genuinely sdist-only package could be
+   found in this environment's package index after 8 probe attempts during U2's
+   planning. The "no wheel available" test exercises `acquire_source`'s own
+   response to a *mocked* pip failure, not a live observation of pip refusing to
+   build for the target package.
+3. **No zip-bomb/decompression-size guard** on wheel extraction (recorded in U2's
+   plan under Out of Scope, not in the docstring): `zipfile.ZipFile(...).extractall(...)`
+   has no cap on total uncompressed size or file count. Path traversal itself is
+   not a gap — stdlib `zipfile` already sanitizes `..`/absolute-path components
+   before joining onto the extraction root (verified directly against the
+   installed CPython 3.13 `zipfile` source during both U2's critique and review
+   passes, independently). A small-compressed/huge-uncompressed malicious wheel is
+   a real, separate risk in exactly the class this unit's wheel-only rationale
+   exists to guard against, left open pending Docker/sandboxing (still project-wide
+   NOT BUILT per `CLAUDE.md`).
+
+**Forward-looking near-miss, not yet a defect:** `acquire_source`'s docstring states
+it "creates only a `download` and an `extracted` subdirectory" beneath `workdir`,
+but the code also silently `mkdir`s `workdir` itself (`acquisition.py:72`) if it
+doesn't already exist, rather than treating a missing `workdir` as a precondition
+failure the way U1's `build_repo_index` does for `repo_root`. Harmless today (every
+current caller is a test using pytest's own `tmp_path`, which always exists), but
+worth resolving explicitly if U5's job-lifecycle wiring ever needs a "workdir must
+already exist" contract.
