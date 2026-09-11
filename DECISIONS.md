@@ -474,3 +474,16 @@ failure the way U1's `build_repo_index` does for `repo_root`. Harmless today (ev
 current caller is a test using pytest's own `tmp_path`, which always exists), but
 worth resolving explicitly if U5's job-lifecycle wiring ever needs a "workdir must
 already exist" contract.
+
+### U3/U4 — `_on_raw_tool_result` is test-only instrumentation, not a production hook
+
+`run_triage_loop`'s `_on_raw_tool_result` parameter (`src/reachability/triage/agent_loop.py`)
+exists purely so `tests/test_triage_agent_loop_l5.py` can observe the real,
+structured tool-call return values (e.g. the actual `list[CallEdge]` a
+`find_callers` dispatch produced) for gate (ii)'s path-provenance check, without
+resorting to a test-side recomputation that would prove nothing about the loop's
+real behavior. It is underscore-prefixed, not part of the public contract, and is
+never called by any production caller. Recorded here so U5's FastAPI job-lifecycle
+wiring (or any later unit) doesn't rediscover — the hard way — that it was never
+meant to become load-bearing production surface: do not wire it into U5's job
+lifecycle or any other production caller.
