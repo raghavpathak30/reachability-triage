@@ -99,3 +99,157 @@ Enforced via Pydantic model-level validation (`@model_validator(mode="after")`).
 
 ### Error Envelope Contract
 - In the error envelope, `code` and `message` are strictly required strings; `details` is an optional list that defaults to empty when no granular field breakdown is available.
+
+---
+
+## 4. L5 — what the adversarial corpus caught (11 Sep 2026)
+
+L1-L4 shipped with 104/104 tests green, which only proved the code matched its own
+assumptions. L5 built a 20-fixture adversarial corpus with hand-derived labels
+(`tests/fixtures/l5/`, `agent_docs/L5_PROTOCOL.md`) and measured the real engine
+against it (`scripts/measure_l5.py`). The first run was red: 6 of 20 fixtures
+produced a false `not_reachable` (G1 violation) — the corpus did its job. This
+section records what was over-confident and what changed.
+
+### A4 — L3-freeze wording corrected (Stage A)
+
+`CLAUDE.md`'s L3-specific-gaps paragraph originally read as a blanket freeze. It
+was reworded, before any fixture existed, to: "L3 is frozen against new
+resolution capability, not against fixes that reduce confidence." A freeze that
+blocks fixing a confidently-wrong resolution inverts this project's own severity
+ordering (a confident wrong answer is worse than an unresolved one) — the two
+`edges.py` fixes below (D5, and D1/D3's use of data `edges.py` already exposes)
+rely on this reading. Recorded here so a later reader does not mistake this for a
+silently loosened policy.
+
+### D1 — nameless dynamic dispatch and eval/exec (`src/reachability/index/reachability.py`)
+
+**Bug found:** `compute_reachability`'s Step 3 (any-confidence BFS, previously
+lines 149-165, now the block preceding the new Step 4) fell straight through to a
+confident `NOT_REACHABLE` even when the reachable set contained an opaque call —
+`getattr(obj, name)()` with no literal name, or `eval`/`exec` of a string this
+engine never parses as code. Neither carries a name to bridge on the way a named
+`?:name` unresolved call already does.
+
+**Fix:** before concluding `NOT_REACHABLE`, `compute_reachability` now checks
+whether the any-confidence reachable set contains `"?:<dynamic>"`
+(`ResolutionRule.DYNAMIC_DISPATCH`, from `edges.py:347-349`) or
+`"ext:builtins.eval"` / `"ext:builtins.exec"` (`ResolutionRule.BUILTIN`, from
+`edges.py:182-183`), and returns `UNKNOWN` instead. Fixes L5 fixtures 13 and 18.
+
+**Trade-off, and it is a big one — read this before assuming G1's pass means the
+gap is small:** this check is **repo-wide, not scoped to the query target**. It
+cannot be, because neither marker carries a name to filter on (unlike the
+already-accepted named-`?:`-bridge trade-off in the pre-L5 CLAUDE.md text).
+Concretely: once a repo has *one* reachable opaque call anywhere on a path from
+an entrypoint, **no symbol in that repo can ever again receive a confident
+`not_reachable` verdict from this engine** — not just the symbol near the opaque
+call. Scoping this more tightly would require tracking which candidate call
+sites could plausibly resolve to the queried symbol specifically (literal/value
+tracking), which is a materially larger analysis capability, out of scope for
+this loop. This is a deliberate, accepted trade-off in the same direction as
+every other L5 fix (never let a false `not_reachable` through), but it is
+**broader** than D3's version below — do not conflate the two.
+
+**Correction to the L5 plan's own prediction — fixture 14 was NOT fixed by D3 as
+planned, it was fixed by D1:** the plan assumed getattr-call dispatch (fixture
+13) and registry-dict dispatch (fixture 14) were "distinct mechanisms." They are
+not. `edges.py:346-349` treats `isinstance(func, (ast.Call, ast.Subscript))`
+identically — a call through `HANDLERS[key]()` (a `Subscript`) produces the exact
+same nameless `"?:<dynamic>"` marker as `getattr(...)()` (a `Call`), with zero
+name information preserved in either case. D1's fix therefore closes fixture 14
+as a side effect, before D3 was even written. Verified directly: after D1 alone
+(before D3 existed), `scripts/measure_l5.py` showed fixture 14 as `unknown`
+already, `resolution_rule=dynamic_dispatch`. D3 was still required for fixtures
+17 and 19, which go through a different, genuine gap (see below).
+
+### D3 — name referenced outside a call position (`src/reachability/index/edges.py`, `reachability.py`)
+
+**Bug found:** L3's edge extraction (`build_module_call_edges`) only ever
+inspects `call.func`; it never inspects `call.args` or `call.keywords`. A
+function handed to a framework by reference (`app.on_event("startup",
+target_func)`, L5 fixture 17) or substituted via `monkeypatch.setattr(mod,
+"name", target_func)` (L5 fixture 19) produces **no call edge naming it at
+all** — not even an unresolved `?:name` one — so the engine had no signal
+whatsoever that the symbol was reachable through anything.
+
+**Fix:** new `collect_load_referenced_names(report)` in `edges.py` walks every
+module's AST once and records every `ast.Name`/`ast.Attribute` identifier loaded
+somewhere that is *not* the `.func` of the `Call` it belongs to. `
+compute_reachability` gained a **required** `report: DiscoveryReport` parameter
+and computes this set **unconditionally, as its own first action** — not as a
+caller-supplied value. An earlier draft of this fix made the set an optional
+parameter defaulting to empty; that was rejected during planning specifically
+because a caller (including a future real one) could satisfy the signature with
+`frozenset()` and silently disable the check, making a measurement harness green
+without protecting the actual query path. Making `report` required and deriving
+the set internally means no caller decision can skip it. Fixes L5 fixtures 17
+and 19 (and, redundantly with D1, fixture 14).
+
+**Trade-off:** also repo-wide, not per-target — a common name (`run`, `load`,
+`get`, `safe`) referenced anywhere outside a call position anywhere in the repo
+will suppress `not_reachable` for that name repo-wide. Unlike D1, this is at
+least filtered by name, so it is the **same size** of trade-off as the
+already-accepted `UNRESOLVED_ATTRIBUTE` / named-`?:`-bridge behavior documented
+in CLAUDE.md before L5 — not a new class of consequence.
+
+**Deliberately not implemented — Phase 2 backlog:** a `ResolutionRule
+.CALLBACK_REFERENCE` edge type that would trace *which* call eventually invokes
+a by-reference callback (rather than a blunt name-level escape) was considered
+and rejected for this loop. It is new analysis capability, not a bug fix to
+existing logic, and the task spec explicitly scoped it out. If a future phase
+wants tighter precision on the callback-reference class of gap (D3, and the
+repo-wide side of D1), this is the starting point.
+
+### D5 — module-attribute existence check (`src/reachability/index/edges.py`, `_resolve_attribute_callee`)
+
+**Bug found, most severe of the three:** for a module-level attribute access
+(`lazy.target_func()`) resolving through a plain module-alias import,
+`_resolve_attribute_callee`'s `MODULE_ATTRIBUTE` branch (previously
+`edges.py:279-287`) constructed a node id from the attribute name **without
+checking it actually exists** in the target module's own symbol table. A module
+with a PEP 562 `__getattr__` that synthesizes an attribute at access time (L5
+fixture 16: `pkg/lazy.py` has no `target_func` written anywhere in its own
+source, only a `__getattr__` that fetches the real one from `pkg/sink.py` on
+demand) produced a confidently **wrong** `HIGH`-confidence edge to a symbol that
+was never defined in the module the edge claimed to point at. This is a worse
+bug than a dead end: not merely unresolved, but confidently resolved to the
+wrong place.
+
+**Note on measurement order:** by the time D5 was written, D3 had already
+flipped fixture 16's verdict to `UNKNOWN` — but via a coincidence specific to
+this one fixture (`pkg/lazy.py`'s `__getattr__` body contains a bare `return
+target_func`, which D3's collector picks up as a Load-outside-call-position
+reference), not because the underlying `MODULE_ATTRIBUTE` bug was fixed. A
+hypothetical variant where the target is fetched without ever binding it to a
+bare name (e.g. via `getattr(importlib.import_module(...), name)` inside
+`__getattr__`) would still trigger the original bug, undetected by D3. D5 was
+implemented anyway, on the merits, not to move a gate that had already turned
+green — this is the actual root-cause fix. Verified: `resolution_rule` for
+fixture 16 changed from `module_attribute` (pre-fix) to `unresolved_attribute`
+(post-fix) even though the verdict was `unknown` both before and after D5, for
+different underlying reasons.
+
+**Fix:** before returning a confident `MODULE_ATTRIBUTE` resolution for a
+single-attribute access on a first-party module alias, check the attribute name
+against `module_qualname_indices[alias.resolved_absolute]`; if absent, fall
+through to the existing `UNRESOLVED_ATTRIBUTE` fallback instead of fabricating a
+resolution. Scoped deliberately to the single-attribute, first-party case only
+(matching what fixture 16 and the two pre-existing `MODULE_ATTRIBUTE` tests in
+`tests/test_index_edges.py` exercise) — the multi-attribute chain branch and the
+external-package branch were left untouched, since neither has a target symbol
+table this engine can check against. Committed alone (no other `src/` file in
+that commit), per the plan, since it reopens the L3 freeze A4 reworded above.
+
+### G4 — no sign-off needed
+
+Post-fix, the `unknown` count among the 13 `decidable: true` fixtures is 0 (see
+`results/l5_<sha>.json` after Stage D). No sign-off paragraph is required this
+round.
+
+### Result
+
+All five gates pass on the post-fix run: G1 = 0 false `not_reachable`, G2 = 5/5
+(exceeds the 4/5 floor), G3 = 2/2, G4 = 0 (reported), G5 = 0 crashes. Bare
+`pytest` from the venv: 110 passed (104 baseline + 6 regression tests: 2 for D1,
+2 for D3, 1 incidental-but-pinned for D1's fixture-14 side effect, 1 for D5).

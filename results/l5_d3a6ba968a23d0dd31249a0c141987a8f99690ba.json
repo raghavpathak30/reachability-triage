@@ -1,0 +1,476 @@
+{
+  "git_sha": "d3a6ba968a23d0dd31249a0c141987a8f99690ba",
+  "timestamp_utc": "2026-09-11T11:16:54Z",
+  "fixtures": [
+    {
+      "id": "01_direct_console_entrypoint",
+      "scenario": "Direct call to the vulnerable symbol from a console-script entrypoint.",
+      "target_module": "app.sink",
+      "target_symbol": "vulnerable",
+      "verdict": "reachable",
+      "allowed_verdicts": [
+        "reachable"
+      ],
+      "forbidden_verdicts": [
+        "not_reachable",
+        "unknown",
+        "reachable_only_from_tests"
+      ],
+      "decidable": true,
+      "pass": true,
+      "resolution_rule": "import_alias",
+      "confidence": "high",
+      "reason": null,
+      "error": null,
+      "elapsed_seconds": 0.0007
+    },
+    {
+      "id": "02_transitive_three_hop",
+      "scenario": "Three-hop transitive call chain (entry -> layer_a -> layer_b -> sink) from a dunder-main entrypoint to the sink.",
+      "target_module": "pkg.sink",
+      "target_symbol": "vulnerable",
+      "verdict": "reachable",
+      "allowed_verdicts": [
+        "reachable"
+      ],
+      "forbidden_verdicts": [
+        "not_reachable",
+        "unknown",
+        "reachable_only_from_tests"
+      ],
+      "decidable": true,
+      "pass": true,
+      "resolution_rule": "import_alias",
+      "confidence": "high",
+      "reason": null,
+      "error": null,
+      "elapsed_seconds": 0.0008
+    },
+    {
+      "id": "03_aliased_import",
+      "scenario": "Reachable via an aliased whole-module import.",
+      "target_module": "pkg.sinkmod",
+      "target_symbol": "vulnerable",
+      "verdict": "reachable",
+      "allowed_verdicts": [
+        "reachable"
+      ],
+      "forbidden_verdicts": [
+        "not_reachable",
+        "unknown",
+        "reachable_only_from_tests"
+      ],
+      "decidable": true,
+      "pass": true,
+      "resolution_rule": "module_attribute",
+      "confidence": "high",
+      "reason": null,
+      "error": null,
+      "elapsed_seconds": 0.0004
+    },
+    {
+      "id": "04_reexport_init",
+      "scenario": "Reachable via a symbol re-exported through the package __init__.",
+      "target_module": "pkg.sinkmod",
+      "target_symbol": "vulnerable",
+      "verdict": "reachable",
+      "allowed_verdicts": [
+        "reachable"
+      ],
+      "forbidden_verdicts": [
+        "not_reachable",
+        "unknown",
+        "reachable_only_from_tests"
+      ],
+      "decidable": true,
+      "pass": true,
+      "resolution_rule": "import_alias",
+      "confidence": "high",
+      "reason": null,
+      "error": null,
+      "elapsed_seconds": 0.0004
+    },
+    {
+      "id": "05_decorator_wraps_sink",
+      "scenario": "Reachable through a decorator that returns the original function unchanged.",
+      "target_module": "pkg.sink",
+      "target_symbol": "vulnerable",
+      "verdict": "reachable",
+      "allowed_verdicts": [
+        "reachable"
+      ],
+      "forbidden_verdicts": [
+        "not_reachable",
+        "unknown",
+        "reachable_only_from_tests"
+      ],
+      "decidable": true,
+      "pass": true,
+      "resolution_rule": "import_alias",
+      "confidence": "high",
+      "reason": null,
+      "error": null,
+      "elapsed_seconds": 0.0005
+    },
+    {
+      "id": "06_subclass_method_call",
+      "scenario": "Reachable via self.method() resolved up the class hierarchy to a base-class method.",
+      "target_module": "pkg.base",
+      "target_symbol": "vulnerable",
+      "verdict": "reachable",
+      "allowed_verdicts": [
+        "reachable"
+      ],
+      "forbidden_verdicts": [
+        "not_reachable",
+        "unknown",
+        "reachable_only_from_tests"
+      ],
+      "decidable": true,
+      "pass": true,
+      "resolution_rule": "self_mro",
+      "confidence": "medium",
+      "reason": null,
+      "error": null,
+      "elapsed_seconds": 0.0007
+    },
+    {
+      "id": "07_test_only_call",
+      "scenario": "Called only from a test function, never from production code.",
+      "target_module": "pkg.sink",
+      "target_symbol": "vulnerable",
+      "verdict": "reachable_only_from_tests",
+      "allowed_verdicts": [
+        "reachable_only_from_tests"
+      ],
+      "forbidden_verdicts": [
+        "reachable",
+        "not_reachable",
+        "unknown"
+      ],
+      "decidable": true,
+      "pass": true,
+      "resolution_rule": "import_alias",
+      "confidence": "high",
+      "reason": null,
+      "error": null,
+      "elapsed_seconds": 0.0005
+    },
+    {
+      "id": "08_conftest_fixture_only",
+      "scenario": "Called only inside a pytest fixture, never from production code.",
+      "target_module": "pkg.sink",
+      "target_symbol": "vulnerable",
+      "verdict": "reachable_only_from_tests",
+      "allowed_verdicts": [
+        "reachable_only_from_tests"
+      ],
+      "forbidden_verdicts": [
+        "reachable",
+        "not_reachable",
+        "unknown"
+      ],
+      "decidable": true,
+      "pass": true,
+      "resolution_rule": "import_alias",
+      "confidence": "high",
+      "reason": null,
+      "error": null,
+      "elapsed_seconds": 0.0005
+    },
+    {
+      "id": "09_never_imported",
+      "scenario": "Sink defined in a module that nothing imports at all.",
+      "target_module": "pkg.sink",
+      "target_symbol": "vulnerable",
+      "verdict": "not_reachable",
+      "allowed_verdicts": [
+        "not_reachable"
+      ],
+      "forbidden_verdicts": [
+        "reachable",
+        "reachable_only_from_tests",
+        "unknown"
+      ],
+      "decidable": true,
+      "pass": true,
+      "resolution_rule": null,
+      "confidence": null,
+      "reason": "no call path found from any entrypoint to pkg.sink:vulnerable",
+      "error": null,
+      "elapsed_seconds": 0.0005
+    },
+    {
+      "id": "10_name_collision_diff_module",
+      "scenario": "Same-named function defined in a different module than the one actually called.",
+      "target_module": "pkg.real",
+      "target_symbol": "vulnerable",
+      "verdict": "not_reachable",
+      "allowed_verdicts": [
+        "not_reachable"
+      ],
+      "forbidden_verdicts": [
+        "reachable",
+        "reachable_only_from_tests",
+        "unknown"
+      ],
+      "decidable": true,
+      "pass": true,
+      "resolution_rule": null,
+      "confidence": null,
+      "reason": "no call path found from any entrypoint to pkg.real:vulnerable",
+      "error": null,
+      "elapsed_seconds": 0.0005
+    },
+    {
+      "id": "11_dead_function_call_site",
+      "scenario": "Only call site to the sink is inside a function that is itself never called.",
+      "target_module": "pkg.sink",
+      "target_symbol": "vulnerable",
+      "verdict": "not_reachable",
+      "allowed_verdicts": [
+        "not_reachable"
+      ],
+      "forbidden_verdicts": [
+        "reachable",
+        "reachable_only_from_tests",
+        "unknown"
+      ],
+      "decidable": true,
+      "pass": true,
+      "resolution_rule": null,
+      "confidence": null,
+      "reason": "no call path found from any entrypoint to pkg.sink:vulnerable",
+      "error": null,
+      "elapsed_seconds": 0.0006
+    },
+    {
+      "id": "12_local_shadow",
+      "scenario": "Sink shadowed by a local definition of the same name at the call site.",
+      "target_module": "pkg.sink",
+      "target_symbol": "vulnerable",
+      "verdict": "not_reachable",
+      "allowed_verdicts": [
+        "not_reachable"
+      ],
+      "forbidden_verdicts": [
+        "reachable",
+        "reachable_only_from_tests",
+        "unknown"
+      ],
+      "decidable": true,
+      "pass": true,
+      "resolution_rule": null,
+      "confidence": null,
+      "reason": "no call path found from any entrypoint to pkg.sink:vulnerable",
+      "error": null,
+      "elapsed_seconds": 0.0005
+    },
+    {
+      "id": "13_getattr_dynamic_dispatch",
+      "scenario": "getattr(module, computed_name)() dynamic dispatch with no literal name at the call site.",
+      "target_module": "pkg.sink",
+      "target_symbol": "vulnerable",
+      "verdict": "unknown",
+      "allowed_verdicts": [
+        "unknown",
+        "reachable"
+      ],
+      "forbidden_verdicts": [
+        "not_reachable"
+      ],
+      "decidable": false,
+      "pass": true,
+      "resolution_rule": "dynamic_dispatch",
+      "confidence": "low",
+      "reason": "a reachable opaque call (?:<dynamic>) at /home/raghavp/reachability/tests/fixtures/l5/13_getattr_dynamic_dispatch/repo/pkg/entry.py:5 carries no literal target name, so a not_reachable verdict cannot be trusted",
+      "error": null,
+      "elapsed_seconds": 0.0005
+    },
+    {
+      "id": "14_registry_dict_dispatch",
+      "scenario": "Call through a registry dict populated with a named function at import time.",
+      "target_module": "pkg.sink",
+      "target_symbol": "vulnerable",
+      "verdict": "unknown",
+      "allowed_verdicts": [
+        "unknown",
+        "reachable"
+      ],
+      "forbidden_verdicts": [
+        "not_reachable"
+      ],
+      "decidable": false,
+      "pass": true,
+      "resolution_rule": "dynamic_dispatch",
+      "confidence": "low",
+      "reason": "a reachable opaque call (?:<dynamic>) at /home/raghavp/reachability/tests/fixtures/l5/14_registry_dict_dispatch/repo/pkg/entry.py:5 carries no literal target name, so a not_reachable verdict cannot be trusted",
+      "error": null,
+      "elapsed_seconds": 0.0009
+    },
+    {
+      "id": "15_conditional_import_tryexcept",
+      "scenario": "Import guarded by try/except ImportError, with a None fallback assignment.",
+      "target_module": "pkg.sink",
+      "target_symbol": "vulnerable",
+      "verdict": "unknown",
+      "allowed_verdicts": [
+        "unknown",
+        "reachable"
+      ],
+      "forbidden_verdicts": [
+        "not_reachable"
+      ],
+      "decidable": false,
+      "pass": true,
+      "resolution_rule": "unresolved_name",
+      "confidence": "low",
+      "reason": "reachable only via low-confidence edge(s): unresolved_name",
+      "error": null,
+      "elapsed_seconds": 0.0005
+    },
+    {
+      "id": "16_module_getattr_pep562",
+      "scenario": "Module-level __getattr__ (PEP 562) synthesizes the attribute at access time.",
+      "target_module": "pkg.sink",
+      "target_symbol": "vulnerable",
+      "verdict": "unknown",
+      "allowed_verdicts": [
+        "unknown",
+        "reachable"
+      ],
+      "forbidden_verdicts": [
+        "not_reachable"
+      ],
+      "decidable": false,
+      "pass": true,
+      "resolution_rule": "unresolved_attribute",
+      "confidence": "low",
+      "reason": "reachable only via low-confidence edge(s): unresolved_attribute",
+      "error": null,
+      "elapsed_seconds": 0.0006
+    },
+    {
+      "id": "17_framework_callback_reference",
+      "scenario": "Callback registered with a framework's event API and invoked by the framework, never called directly in visible code.",
+      "target_module": "pkg.sink",
+      "target_symbol": "vulnerable",
+      "verdict": "unknown",
+      "allowed_verdicts": [
+        "unknown",
+        "reachable"
+      ],
+      "forbidden_verdicts": [
+        "not_reachable"
+      ],
+      "decidable": false,
+      "pass": true,
+      "resolution_rule": null,
+      "confidence": null,
+      "reason": "'vulnerable' is referenced by name outside any call position elsewhere in the repo (e.g. passed as a callback, stored in a container, or reassigned); a confident not_reachable verdict cannot be given",
+      "error": null,
+      "elapsed_seconds": 0.0008
+    },
+    {
+      "id": "18_eval_string_call",
+      "scenario": "Call to the sink hidden inside a string executed by eval.",
+      "target_module": "pkg.sink",
+      "target_symbol": "vulnerable",
+      "verdict": "unknown",
+      "allowed_verdicts": [
+        "unknown",
+        "reachable"
+      ],
+      "forbidden_verdicts": [
+        "not_reachable"
+      ],
+      "decidable": false,
+      "pass": true,
+      "resolution_rule": "builtin",
+      "confidence": "high",
+      "reason": "a reachable opaque call (ext:builtins.eval) at /home/raghavp/reachability/tests/fixtures/l5/18_eval_string_call/repo/pkg/entry.py:5 carries no literal target name, so a not_reachable verdict cannot be trusted",
+      "error": null,
+      "elapsed_seconds": 0.0005
+    },
+    {
+      "id": "19_monkeypatched_test_target",
+      "scenario": "Monkeypatched attribute in a test redirects the real call target to the sink.",
+      "target_module": "pkg.sink",
+      "target_symbol": "vulnerable",
+      "verdict": "unknown",
+      "allowed_verdicts": [
+        "unknown",
+        "reachable_only_from_tests"
+      ],
+      "forbidden_verdicts": [
+        "not_reachable",
+        "reachable"
+      ],
+      "decidable": false,
+      "pass": true,
+      "resolution_rule": null,
+      "confidence": null,
+      "reason": "'vulnerable' is referenced by name outside any call position elsewhere in the repo (e.g. passed as a callback, stored in a container, or reassigned); a confident not_reachable verdict cannot be given",
+      "error": null,
+      "elapsed_seconds": 0.0008
+    },
+    {
+      "id": "20_vendored_duplicate_module",
+      "scenario": "Vendored duplicate module: two identical copies of the sink, only one ever imported.",
+      "target_module": "pkg._vendor.sink",
+      "target_symbol": "vulnerable",
+      "verdict": "not_reachable",
+      "allowed_verdicts": [
+        "not_reachable"
+      ],
+      "forbidden_verdicts": [
+        "reachable",
+        "reachable_only_from_tests",
+        "unknown"
+      ],
+      "decidable": true,
+      "pass": true,
+      "resolution_rule": null,
+      "confidence": null,
+      "reason": "no call path found from any entrypoint to pkg._vendor.sink:vulnerable",
+      "error": null,
+      "elapsed_seconds": 0.0006
+    }
+  ],
+  "gates": {
+    "G1": {
+      "pass": true,
+      "false_not_reachable_count": 0,
+      "offending_fixtures": []
+    },
+    "G2": {
+      "pass": true,
+      "correct_count": 5,
+      "total": 5,
+      "threshold": 4,
+      "correct_fixtures": [
+        "09_never_imported",
+        "10_name_collision_diff_module",
+        "11_dead_function_call_site",
+        "12_local_shadow",
+        "20_vendored_duplicate_module"
+      ]
+    },
+    "G3": {
+      "pass": true,
+      "total": 2,
+      "failing_fixtures": []
+    },
+    "G4": {
+      "reported_only": true,
+      "unknown_count": 0,
+      "target": 0,
+      "fixtures": []
+    },
+    "G5": {
+      "pass": true,
+      "crashed_fixtures": []
+    },
+    "overall_pass": true
+  }
+}
