@@ -279,7 +279,20 @@ def _resolve_attribute_callee(
             if alias.resolved_absolute is not None:
                 if alias.target_kind == TargetKind.FIRST_PARTY:
                     if len(attrs) == 1:
-                        return f"{alias.resolved_absolute}:{attrs[0]}", ResolutionRule.MODULE_ATTRIBUTE
+                        # Verify the attribute actually exists in the target module's own
+                        # symbol table before resolving confidently. Without this check, a
+                        # module-level __getattr__ (PEP 562) that synthesizes an attribute
+                        # at access time -- one that is never actually defined in the target
+                        # module's own source -- produces a fabricated HIGH-confidence node
+                        # id pointing at a symbol that was never there, which is worse than
+                        # an unresolved dead end: it is confidently wrong. Fall through to
+                        # the UNRESOLVED_ATTRIBUTE fallback at the end of this function
+                        # instead of fabricating a resolution (do NOT fall into the `ext:`
+                        # branch below -- this is still a first-party target, just an
+                        # unverifiable one).
+                        if attrs[0] in module_qualname_indices.get(alias.resolved_absolute, {}):
+                            return f"{alias.resolved_absolute}:{attrs[0]}", ResolutionRule.MODULE_ATTRIBUTE
+                        return f"?:{attr_node.attr}", ResolutionRule.UNRESOLVED_ATTRIBUTE
                     return (
                         f"{alias.resolved_absolute}.{'.'.join(attrs[:-1])}:{attrs[-1]}",
                         ResolutionRule.MODULE_ATTRIBUTE,

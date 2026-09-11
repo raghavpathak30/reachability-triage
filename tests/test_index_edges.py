@@ -467,3 +467,32 @@ def test_alias_with_unresolved_target_does_not_produce_false_high_confidence_edg
     assert edge.callee_id == "?:totally_unknown_name"
     assert edge.resolution_rule == ResolutionRule.UNRESOLVED_NAME
     assert edge.confidence == Confidence.LOW
+
+
+def test_l5_fixture16_module_attribute_not_found_falls_back_to_unresolved(tmp_path):
+    # Pins L5 fixture 16 (tests/fixtures/l5/16_module_getattr_pep562): a module
+    # with a PEP 562 __getattr__ that synthesizes an attribute at access time --
+    # one that is never actually defined as a real symbol in the target module's
+    # own symbol table -- must not be confidently resolved via MODULE_ATTRIBUTE.
+    # Before this fix, `_resolve_attribute_callee` constructed a node id from the
+    # attribute name without checking it exists, producing a confidently wrong
+    # HIGH-confidence edge pointing at a symbol that was never defined there.
+    edges = _build_edges(
+        tmp_path,
+        {
+            "sink.py": "def target_func():\n    return 1\n",
+            "lazy.py": (
+                "def __getattr__(name):\n"
+                '    if name == "target_func":\n'
+                "        from sink import target_func\n"
+                "        return target_func\n"
+                "    raise AttributeError(name)\n"
+            ),
+            "entry.py": ("import lazy\n\nlazy.target_func()\n"),
+        },
+    )
+
+    edge = next(e for e in edges if e.caller_id == "entry")
+    assert edge.callee_id == "?:target_func"
+    assert edge.resolution_rule == ResolutionRule.UNRESOLVED_ATTRIBUTE
+    assert edge.confidence == Confidence.LOW
