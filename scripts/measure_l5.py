@@ -111,7 +111,7 @@ def measure_fixture(fixture_dir: Path) -> dict:
         row["target_module"] = target_module
         row["target_symbol"] = target_symbol
 
-        result = compute_reachability(target_module, target_symbol, entrypoints, edges)
+        result = compute_reachability(target_module, target_symbol, entrypoints, edges, report)
 
         row["verdict"] = result.verdict.value
         row["reason"] = result.reason

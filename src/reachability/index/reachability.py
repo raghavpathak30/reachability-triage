@@ -1,7 +1,9 @@
 from collections.abc import Iterable
 
+from .edges import collect_load_referenced_names
 from .edges_models import CallEdge, Confidence
 from .entrypoint_models import Entrypoint
+from .models import DiscoveryReport
 from .reachability_models import ReachabilityResult, Verdict
 
 
@@ -108,6 +110,7 @@ def compute_reachability(
     target_symbol: str | None,
     entrypoints: list[Entrypoint],
     edges: list[CallEdge],
+    report: DiscoveryReport,
 ) -> ReachabilityResult:
     if not entrypoints:
         return ReachabilityResult(
@@ -117,6 +120,11 @@ def compute_reachability(
             path=None,
             reason="no entrypoints detected in repository",
         )
+
+    # Computed unconditionally, every call -- not an opt-in a caller can skip or
+    # override with an empty set. See DECISIONS.md for why this must not be a
+    # caller-supplied parameter.
+    referenced_outside_call = collect_load_referenced_names(report)
 
     by_caller = _build_by_caller(edges)
     non_test_ids = _dedupe_preserve_order(ep.node_id for ep in entrypoints if not ep.is_test)
@@ -188,7 +196,30 @@ def compute_reachability(
             ),
         )
 
-    # Step 5: no path found even ignoring confidence, and no opaque call to blame it on.
+    # Step 5: before concluding NOT_REACHABLE, check whether target_symbol's name is
+    # loaded anywhere in the repo outside a call position -- passed as a callback
+    # argument, stored in a container, reassigned, etc. L3 only extracts edges from
+    # `call.func`; it never inspects `call.args`/`call.keywords`, so a function
+    # handed to a framework or a dict by reference produces no call edge naming it
+    # at all. A NOT_REACHABLE verdict cannot be trusted for a symbol that is
+    # genuinely referenced by name elsewhere in the repo. Name-level check only: no
+    # target resolution, no guessing who the eventual caller is. Like Step 4, this
+    # is repo-wide, not scoped to the query target -- see DECISIONS.md.
+    if target_symbol is not None and target_symbol in referenced_outside_call:
+        return ReachabilityResult(
+            target_module=target_module,
+            target_symbol=target_symbol,
+            verdict=Verdict.UNKNOWN,
+            path=None,
+            reason=(
+                f"'{target_symbol}' is referenced by name outside any call position elsewhere in the "
+                "repo (e.g. passed as a callback, stored in a container, or reassigned); a confident "
+                "not_reachable verdict cannot be given"
+            ),
+        )
+
+    # Step 6: no path found even ignoring confidence, and no opaque call or bare
+    # name reference to blame it on.
     target = f"{target_module}:{target_symbol}" if target_symbol else target_module
     return ReachabilityResult(
         target_module=target_module,

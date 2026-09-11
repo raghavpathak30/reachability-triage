@@ -371,3 +371,43 @@ def build_edge_index(report: DiscoveryReport, symbol_index: dict[str, ModuleSymb
         edges.extend(build_module_call_edges(module_table, tree, import_table, module_qualname_indices))
 
     return edges
+
+
+class _LoadOutsideCallCollector(ast.NodeVisitor):
+    """Collects every Name/Attribute identifier loaded somewhere that isn't the
+    `.func` of the Call it belongs to -- e.g. passed as a callback argument, stored
+    in a container, or reassigned. Used by compute_reachability to avoid concluding
+    NOT_REACHABLE for a symbol that is genuinely referenced by name elsewhere, even
+    though L3 never extracts a call edge for it (L3 only inspects `call.func`, never
+    `call.args`/`call.keywords`)."""
+
+    def __init__(self) -> None:
+        self.names: set[str] = set()
+        self._call_func_ids: set[int] = set()
+
+    def visit_Call(self, node: ast.Call) -> None:
+        self._call_func_ids.add(id(node.func))
+        self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if isinstance(node.ctx, ast.Load) and id(node) not in self._call_func_ids:
+            self.names.add(node.id)
+        self.generic_visit(node)
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        if isinstance(node.ctx, ast.Load) and id(node) not in self._call_func_ids:
+            self.names.add(node.attr)
+        self.generic_visit(node)
+
+
+def collect_load_referenced_names(report: DiscoveryReport) -> frozenset[str]:
+    """Corpus-wide (not per-target) set of identifiers loaded somewhere outside a
+    call position, across every module in the repo. See _LoadOutsideCallCollector."""
+    collector = _LoadOutsideCallCollector()
+    for module in report.modules:
+        if module.dotted_name not in report.import_tables:
+            continue
+        source = module.file_path.read_text()
+        tree = ast.parse(source, filename=str(module.file_path))
+        collector.visit(tree)
+    return frozenset(collector.names)
