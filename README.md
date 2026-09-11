@@ -35,7 +35,27 @@ Docker · Docker Compose · GitHub Actions · AWS EC2
 
 - `main.py` — the API
 - `src/reachability/index/` — AST index (see `agent_docs/PHASE1_AST_INDEX.md`). L1
-  (module discovery + import map), L2 (symbol table), L3 (call edge extraction), and
-  L4 (entrypoint detection, BFS, reachability verdicts, query layer) are built; L5 is
-  not.
+  (module discovery + import map), L2 (symbol table), L3 (call edge extraction), L4
+  (entrypoint detection, BFS, reachability verdicts, query layer), and L5 (fixture
+  corpus + measurement) are built.
 - `DECISIONS.md` — dated design decisions and their reasoning
+
+## L5 measurement
+
+`tests/fixtures/l5/` is a frozen, adversarial 20-fixture corpus with hand-derived
+ground-truth labels (see `agent_docs/L5_PROTOCOL.md` for the pre-registered gates).
+Run it with:
+
+```
+make measure-l5
+```
+
+or directly:
+
+```
+python scripts/measure_l5.py
+```
+
+It builds the real index for each fixture, checks the resulting verdict against
+its label, and exits nonzero if a hard gate (G1/G2/G3/G5) fails. Results are
+written to `results/l5_<git-sha>.json`.
