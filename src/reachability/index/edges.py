@@ -387,29 +387,67 @@ def build_edge_index(report: DiscoveryReport, symbol_index: dict[str, ModuleSymb
 
 
 class _LoadOutsideCallCollector(ast.NodeVisitor):
-    """Collects every Name/Attribute identifier loaded somewhere that isn't the
-    `.func` of the Call it belongs to -- e.g. passed as a callback argument, stored
-    in a container, or reassigned. Used by compute_reachability to avoid concluding
-    NOT_REACHABLE for a symbol that is genuinely referenced by name elsewhere, even
-    though L3 never extracts a call edge for it (L3 only inspects `call.func`, never
-    `call.args`/`call.keywords`)."""
+    """Collects identifiers that are value-bound outside a call's `.func` position --
+    the RHS of an assignment, or an argument passed to a call (including elements of
+    a list/dict/tuple/set literal that is itself assigned or passed as a whole) --
+    e.g. passed as a callback argument, stored in a container, or reassigned. Used by
+    compute_reachability to avoid concluding NOT_REACHABLE for a symbol that is
+    genuinely referenced by name elsewhere, even though L3 never extracts a call edge
+    for it (L3 only inspects `call.func`, never `call.args`/`call.keywords`).
+
+    Deliberately narrower than "every Name/Attribute Load anywhere outside
+    call.func": an earlier version walked every Load unconditionally, which (a)
+    treated an intermediate attribute-chain segment (the `sink`/`pkg` in
+    `pkg.sink.run()`) as an escape -- it is not value-bound anywhere, just a receiver
+    on the way to a call -- and (b) caught comparisons, conditions, return values,
+    and any other bare read, none of which are "referenced by name" in the sense
+    this check exists to catch. Measured against a real mid-sized third-party
+    package (see DECISIONS.md's D3 scaling finding), the unconditional version's
+    escape set exceeded the package's total symbol count and masked ~44% of its
+    distinct callable names -- too broad to trust on real code. This version only
+    records a Name/Attribute as escaped when it is itself the value-bound
+    expression (or a direct element of a literal that is), never a sub-expression
+    reached by descending further into it."""
 
     def __init__(self) -> None:
         self.names: set[str] = set()
-        self._call_func_ids: set[int] = set()
+
+    def _record_value_bound(self, expr: ast.expr) -> None:
+        if isinstance(expr, (ast.List, ast.Tuple, ast.Set)):
+            for elt in expr.elts:
+                self._record_value_bound(elt)
+        elif isinstance(expr, ast.Dict):
+            for value in expr.values:
+                if value is not None:
+                    self._record_value_bound(value)
+        elif isinstance(expr, ast.Starred):
+            self._record_value_bound(expr.value)
+        elif isinstance(expr, ast.Name):
+            self.names.add(expr.id)
+        elif isinstance(expr, ast.Attribute):
+            self.names.add(expr.attr)
+        # Anything else (a Call, a literal, a comprehension, ...) is not a bare-name
+        # escape at this position; generic_visit still walks into it normally so any
+        # Call/Assign nested inside gets its own visit_Call/visit_Assign.
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        self._record_value_bound(node.value)
+        self.generic_visit(node)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        if node.value is not None:
+            self._record_value_bound(node.value)
+        self.generic_visit(node)
+
+    def visit_AugAssign(self, node: ast.AugAssign) -> None:
+        self._record_value_bound(node.value)
+        self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
-        self._call_func_ids.add(id(node.func))
-        self.generic_visit(node)
-
-    def visit_Name(self, node: ast.Name) -> None:
-        if isinstance(node.ctx, ast.Load) and id(node) not in self._call_func_ids:
-            self.names.add(node.id)
-        self.generic_visit(node)
-
-    def visit_Attribute(self, node: ast.Attribute) -> None:
-        if isinstance(node.ctx, ast.Load) and id(node) not in self._call_func_ids:
-            self.names.add(node.attr)
+        for arg in node.args:
+            self._record_value_bound(arg)
+        for kw in node.keywords:
+            self._record_value_bound(kw.value)
         self.generic_visit(node)
 
 

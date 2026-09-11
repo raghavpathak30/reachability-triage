@@ -516,3 +516,53 @@ def test_l5_fixture16b_module_attribute_not_found_falls_back_to_unresolved(tmp_p
     assert edge.callee_id == "?:target_func"
     assert edge.resolution_rule == ResolutionRule.UNRESOLVED_ATTRIBUTE
     assert edge.confidence == Confidence.LOW
+
+
+def test_load_outside_call_collector_excludes_attribute_chain_segments(tmp_path):
+    # Narrowing regression (see DECISIONS.md's D3 scaling finding): an earlier
+    # version of _LoadOutsideCallCollector walked every Name/Attribute Load
+    # anywhere outside a call's `.func` position unconditionally, which meant an
+    # intermediate attribute-chain segment -- the `sink`/`pkg` in `pkg.sink.run()`,
+    # neither of which is value-bound anywhere, just a receiver on the way to a
+    # call -- leaked into the escape set. Measured against a real mid-sized
+    # third-party package, that version's escape set exceeded the package's total
+    # symbol count. The narrowed collector only records a Name/Attribute when it is
+    # itself an assignment's value or a call argument (or a direct element of a
+    # literal in one of those positions) -- never a sub-expression reached by
+    # descending further into an attribute chain or a call's receiver.
+    names = _build_referenced_names(
+        tmp_path,
+        {
+            "mod.py": (
+                "import pkg.sink\n"
+                "\n"
+                "def caller():\n"
+                "    pkg.sink.run()\n"
+            )
+        },
+    )
+
+    assert "run" not in names  # excluded: it's the call's .func attribute itself
+    assert "sink" not in names  # excluded: intermediate attribute-chain segment
+    assert "pkg" not in names  # excluded: intermediate attribute-chain segment
+
+
+def test_load_outside_call_collector_still_catches_value_bound_references(tmp_path):
+    # Companion to the exclusion test above: confirms the narrowing didn't throw out
+    # the legitimate cases D3 exists to catch -- a name stored in a container that is
+    # itself assigned, and a name passed as a call argument.
+    names = _build_referenced_names(
+        tmp_path,
+        {
+            "mod.py": (
+                "import target_module\n"
+                "\n"
+                "HANDLERS = {\"go\": target_module.handler}\n"
+                "\n"
+                "def register(app):\n"
+                "    app.on_event(\"startup\", target_module.handler)\n"
+            )
+        },
+    )
+
+    assert "handler" in names
