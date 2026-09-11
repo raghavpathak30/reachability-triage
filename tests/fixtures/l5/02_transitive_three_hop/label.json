@@ -1,0 +1,9 @@
+{
+  "scenario": "Three-hop transitive call chain (entry -> layer_a -> layer_b -> sink) from a dunder-main entrypoint to the sink.",
+  "sink": {"file": "repo/pkg/sink.py", "line": 1},
+  "entrypoints": [{"file": "repo/pkg/entry.py", "line": 3}],
+  "allowed_verdicts": ["reachable"],
+  "forbidden_verdicts": ["not_reachable", "unknown", "reachable_only_from_tests"],
+  "decidable": true,
+  "human_note": "Running pkg/entry.py directly calls step_a, which calls step_b, which calls vulnerable. Each hop is a plain, unconditional, by-name function call."
+}

@@ -1,0 +1,9 @@
+{
+  "scenario": "Reachable via a symbol re-exported through the package __init__.",
+  "sink": {"file": "repo/pkg/sinkmod.py", "line": 1},
+  "entrypoints": [{"file": "repo/pkg/entry.py", "line": 3}],
+  "allowed_verdicts": ["reachable"],
+  "forbidden_verdicts": ["not_reachable", "unknown", "reachable_only_from_tests"],
+  "decidable": true,
+  "human_note": "pkg/__init__.py re-exports vulnerable from sinkmod, so importing it from pkg or from pkg.sinkmod is the identical function. entry.py imports it the package-level way and calls it unconditionally."
+}

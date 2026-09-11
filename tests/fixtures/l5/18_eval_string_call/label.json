@@ -1,0 +1,9 @@
+{
+  "scenario": "Call to the sink hidden inside a string executed by eval.",
+  "sink": {"file": "repo/pkg/sink.py", "line": 1},
+  "entrypoints": [{"file": "repo/pkg/entry.py", "line": 4}],
+  "allowed_verdicts": ["unknown", "reachable"],
+  "forbidden_verdicts": ["not_reachable"],
+  "decidable": false,
+  "human_note": "run calls eval on the literal string \"vulnerable()\", which executes that string as Python code and calls vulnerable. The call target exists only inside a string, not as ordinary Python call syntax."
+}

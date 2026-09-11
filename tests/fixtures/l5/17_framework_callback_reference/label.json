@@ -1,0 +1,9 @@
+{
+  "scenario": "Callback registered with a framework's event API and invoked by the framework, never called directly in visible code.",
+  "sink": {"file": "repo/pkg/sink.py", "line": 1},
+  "entrypoints": [{"file": "repo/pkg/entry.py", "line": 7}],
+  "allowed_verdicts": ["unknown", "reachable"],
+  "forbidden_verdicts": ["not_reachable"],
+  "decidable": false,
+  "human_note": "vulnerable is registered with app.on_event(\"startup\", vulnerable) -- passed by reference, not called directly here. The actual dispatch logic that would invoke it lives inside the framework, not in this repository's own code."
+}

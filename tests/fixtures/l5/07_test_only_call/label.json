@@ -1,0 +1,9 @@
+{
+  "scenario": "Called only from a test function, never from production code.",
+  "sink": {"file": "repo/pkg/sink.py", "line": 1},
+  "entrypoints": [{"file": "repo/tests/test_sink.py", "line": 4}],
+  "allowed_verdicts": ["reachable_only_from_tests"],
+  "forbidden_verdicts": ["reachable", "not_reachable", "unknown"],
+  "decidable": true,
+  "human_note": "The only place vulnerable is ever called in this repository is inside test_it, a test function. Nothing outside tests/ imports or calls it, and there is no production entrypoint anywhere."
+}

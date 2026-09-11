@@ -1,0 +1,9 @@
+{
+  "scenario": "Vendored duplicate module: two identical copies of the sink, only one ever imported.",
+  "sink": {"file": "repo/pkg/_vendor/sink.py", "line": 1},
+  "entrypoints": [],
+  "allowed_verdicts": ["not_reachable"],
+  "forbidden_verdicts": ["reachable", "reachable_only_from_tests", "unknown"],
+  "decidable": true,
+  "human_note": "pkg/_vendor/sink.py defines a byte-for-byte identical vulnerable(), but no file in this repository imports from pkg._vendor at all -- only pkg.sink's copy is ever imported and called."
+}

@@ -1,0 +1,9 @@
+{
+  "scenario": "Sink shadowed by a local definition of the same name at the call site.",
+  "sink": {"file": "repo/pkg/sink.py", "line": 1},
+  "entrypoints": [],
+  "allowed_verdicts": ["not_reachable"],
+  "forbidden_verdicts": ["reachable", "reachable_only_from_tests", "unknown"],
+  "decidable": true,
+  "human_note": "run defines its own local function also named vulnerable before calling vulnerable(). Python's name resolution finds the local definition first, so the call inside run always invokes the local shadow, never the vulnerable imported from pkg.sink."
+}

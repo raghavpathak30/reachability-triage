@@ -1,0 +1,9 @@
+{
+  "scenario": "getattr(module, computed_name)() dynamic dispatch with no literal name at the call site.",
+  "sink": {"file": "repo/pkg/sink.py", "line": 1},
+  "entrypoints": [{"file": "repo/pkg/entry.py", "line": 4}],
+  "allowed_verdicts": ["unknown", "reachable"],
+  "forbidden_verdicts": ["not_reachable"],
+  "decidable": false,
+  "human_note": "dispatch looks up an attribute on the sink module by name at run time via getattr, using whatever string is passed to dispatch. The one call site passes the literal string \"vulnerable\", but dispatch takes name as a parameter, so nothing in the source guarantees it is never called with a different string."
+}

@@ -1,0 +1,9 @@
+{
+  "scenario": "Monkeypatched attribute in a test redirects the real call target to the sink.",
+  "sink": {"file": "repo/pkg/sink.py", "line": 1},
+  "entrypoints": [{"file": "repo/tests/test_monkeypatch.py", "line": 6}],
+  "allowed_verdicts": ["unknown", "reachable_only_from_tests"],
+  "forbidden_verdicts": ["not_reachable", "reachable"],
+  "decidable": false,
+  "human_note": "Normally run calls pkg.decoy.safe, which does nothing interesting. The test test_it replaces pkg.decoy.safe with vulnerable via monkeypatch.setattr before calling run(); for the duration of that test, calling run really does call vulnerable."
+}

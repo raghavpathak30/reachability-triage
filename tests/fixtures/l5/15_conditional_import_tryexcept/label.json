@@ -1,0 +1,9 @@
+{
+  "scenario": "Import guarded by try/except ImportError, with a None fallback assignment.",
+  "sink": {"file": "repo/pkg/sink.py", "line": 1},
+  "entrypoints": [{"file": "repo/pkg/entry.py", "line": 12}],
+  "allowed_verdicts": ["unknown", "reachable"],
+  "forbidden_verdicts": ["not_reachable"],
+  "decidable": false,
+  "human_note": "vulnerable is imported inside a try/except ImportError block, so whether it is a real function or None depends on whether pkg.sink is actually importable in whatever environment runs this. run only calls it if it is truthy."
+}

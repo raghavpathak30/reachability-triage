@@ -1,0 +1,9 @@
+{
+  "scenario": "Reachable via self.method() resolved up the class hierarchy to a base-class method.",
+  "sink": {"file": "repo/pkg/base.py", "line": 2},
+  "entrypoints": [{"file": "repo/pkg/sub.py", "line": 17}],
+  "allowed_verdicts": ["reachable"],
+  "forbidden_verdicts": ["not_reachable", "unknown", "reachable_only_from_tests"],
+  "decidable": true,
+  "human_note": "run is registered as a route handler on Sub, a subclass of Base. Inside run, self.vulnerable() resolves up the class hierarchy to Base.vulnerable, since Sub itself defines no vulnerable."
+}

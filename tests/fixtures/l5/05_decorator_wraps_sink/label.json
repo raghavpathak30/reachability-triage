@@ -1,0 +1,9 @@
+{
+  "scenario": "Reachable through a decorator that returns the original function unchanged.",
+  "sink": {"file": "repo/pkg/sink.py", "line": 6},
+  "entrypoints": [{"file": "repo/pkg/entry.py", "line": 3}],
+  "allowed_verdicts": ["reachable"],
+  "forbidden_verdicts": ["not_reachable", "unknown", "reachable_only_from_tests"],
+  "decidable": true,
+  "human_note": "vulnerable is decorated with @audit, whose body is `return func` — it hands the original function back unchanged. entry.py calls vulnerable directly and the decorator does not intercept or block the call."
+}

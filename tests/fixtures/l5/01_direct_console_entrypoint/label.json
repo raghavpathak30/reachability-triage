@@ -1,0 +1,9 @@
+{
+  "scenario": "Direct call to the vulnerable symbol from a console-script entrypoint.",
+  "sink": {"file": "repo/app/sink.py", "line": 1},
+  "entrypoints": [{"file": "repo/app/cli.py", "line": 4}],
+  "allowed_verdicts": ["reachable"],
+  "forbidden_verdicts": ["not_reachable", "unknown", "reachable_only_from_tests"],
+  "decidable": true,
+  "human_note": "mycli is declared as a console script pointing at app.cli:main; main imports vulnerable by name and calls it directly, unconditionally."
+}

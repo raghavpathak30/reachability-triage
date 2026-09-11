@@ -1,0 +1,9 @@
+{
+  "scenario": "Called only inside a pytest fixture, never from production code.",
+  "sink": {"file": "repo/pkg/sink.py", "line": 1},
+  "entrypoints": [{"file": "repo/tests/conftest.py", "line": 7}],
+  "allowed_verdicts": ["reachable_only_from_tests"],
+  "forbidden_verdicts": ["reachable", "not_reachable", "unknown"],
+  "decidable": true,
+  "human_note": "vulnerable is only ever called inside a pytest fixture in conftest.py. A pytest fixture only runs when pytest collects and executes tests that request it, never in a production run."
+}

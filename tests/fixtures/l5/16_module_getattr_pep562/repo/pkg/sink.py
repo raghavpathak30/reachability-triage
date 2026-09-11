@@ -1,0 +1,2 @@
+def vulnerable():
+    return "vulnerable"

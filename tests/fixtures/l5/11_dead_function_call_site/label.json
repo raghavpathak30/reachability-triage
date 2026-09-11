@@ -1,0 +1,9 @@
+{
+  "scenario": "Only call site to the sink is inside a function that is itself never called.",
+  "sink": {"file": "repo/pkg/sink.py", "line": 1},
+  "entrypoints": [],
+  "allowed_verdicts": ["not_reachable"],
+  "forbidden_verdicts": ["reachable", "reachable_only_from_tests", "unknown"],
+  "decidable": true,
+  "human_note": "wrapper, in dead.py, calls vulnerable, but nothing in this repository ever calls wrapper. The only thing that runs when this package is executed is do_other in other.py, which has no path to wrapper or vulnerable."
+}
