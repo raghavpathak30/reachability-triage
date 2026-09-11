@@ -193,6 +193,22 @@ least filtered by name, so it is the **same size** of trade-off as the
 already-accepted `UNRESOLVED_ATTRIBUTE` / named-`?:`-bridge behavior documented
 in CLAUDE.md before L5 — not a new class of consequence.
 
+**Status note (code review, 11 Sep 2026): the trade-off above is broader in
+practice than this write-up describes.** `_LoadOutsideCallCollector`
+(`edges.py`) only excludes the outermost node of a call's `.func` chain from
+the "referenced outside a call" set — for an attribute-chain call like
+`pkg.sink.run()`, `generic_visit` still walks into the inner `Attribute`/`Name`
+nodes (`sink`, `pkg`) and incorrectly adds them too. So `target_symbol="sink"`
+(any intermediate module/attribute qualifier of *any* attribute-chain call
+anywhere in the repo, not just names passed by value) also gets the escape.
+This still only pushes toward more `unknown`, never toward a false
+`not_reachable`, so it does not violate G1 — but it is a materially wider
+trade-off than "a common name referenced outside a call position." Uncaught by
+L5's corpus because none of the `not_reachable`-labeled fixtures (09/10/11/12/20)
+use attribute-chain calls. Not fixed in this loop; tracked as a fast-follow
+(walk the full `.func` attribute chain into `_call_func_ids`, add a direct unit
+test for `collect_load_referenced_names`, add a fixture exercising this case).
+
 **Deliberately not implemented — Phase 2 backlog:** a `ResolutionRule
 .CALLBACK_REFERENCE` edge type that would trace *which* call eventually invokes
 a by-reference callback (rather than a blunt name-level escape) was considered

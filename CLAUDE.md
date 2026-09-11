@@ -27,9 +27,11 @@ edge extraction — every `ast.Call` resolved to a `CallEdge` with
 section 3), and L4 (entrypoint detection — `if __name__ == "__main__"`,
 `[project.scripts]`, route/celery/CLI decorators, `test_*`/pytest-fixture
 functions — plus BFS-based reachability verdicts and the
-`search_symbol`/`find_callers`/`resolve_import` query layer) are built,
-all in `src/reachability/index/`. Not built: L5 (fixture corpus +
-measurement) and `.reachability/index.json` serialization.
+`search_symbol`/`find_callers`/`resolve_import` query layer), and L5
+(a 20-fixture adversarial measurement corpus + `scripts/measure_l5.py`,
+see DECISIONS.md §4) are built, all in `src/reachability/index/` (L5's
+corpus lives in `tests/fixtures/l5/`). Not built: `.reachability/index.json`
+serialization.
 `compute_reachability` returns one of four verdicts —
 `reachable`/`reachable_only_from_tests`/`not_reachable`/`unknown` — each
 with a `path: list[CallEdge] | None` or a `reason: str`, never a bare
@@ -47,19 +49,30 @@ Django URLconf and argparse `set_defaults(func=...)` dispatch-target
 detection are not implemented (spec names both; deliberate deviation, not
 an oversight — see plan for rationale); `setup.py`/`[tool.poetry.scripts]`
 console-script parsing is not implemented (only PEP 621
-`[project.scripts]`/`[project.gui-scripts]` via stdlib `tomllib`); BFS
-never bridges through a nameless `?:<dynamic>` dead end (a
-`getattr(obj, name)()` call with no literal name available) even when it
-truly is the only route to the target — this is a known false-negative
-gap; conversely, a *named* unresolved call (e.g. `obj.load()`) bridges to
-`unknown` for **any** query whose `target_symbol` matches that name,
-regardless of `target_module` — a known false-positive-toward-`unknown`
-gap, since an unresolved callee carries no module information to check.
-Both gaps are accepted consequences of resolving toward `unknown` over a
-wrong confident answer, not something L4 attempts to fix (would require
-L3 to record call-site argument literals or track receiver-module
-provenance). L3 is frozen against new resolution capability, not against
-fixes that reduce confidence.
+`[project.scripts]`/`[project.gui-scripts]` via stdlib `tomllib`).
+
+A *named* unresolved call (e.g. `obj.load()`) bridges to `unknown` for
+**any** query whose `target_symbol` matches that name, regardless of
+`target_module` — a known false-positive-toward-`unknown` gap, since an
+unresolved callee carries no module information to check. This is an
+accepted consequence of resolving toward `unknown` over a wrong confident
+answer, not something L4 attempts to fix (would require L3 to record
+receiver-module provenance). L3 is frozen against new resolution
+capability, not against fixes that reduce confidence.
+
+L5 (DECISIONS.md §4) found and fixed the more severe, nameless version of
+this same class of gap: `getattr(obj, name)()` with no literal name, or
+`eval`/`exec` of a string, previously fell through to a confident
+`NOT_REACHABLE` — the worst class of bug this project defines.
+`compute_reachability` now degrades to `unknown` whenever such a call is
+reachable anywhere in the repo (D1), and does the same for any symbol
+referenced by name outside a call position anywhere in the repo — e.g. a
+function passed by reference to a framework callback or
+`monkeypatch.setattr` (D3). Both checks are corpus-wide, not scoped to the
+query target — see DECISIONS.md §4 for why that's an accepted trade-off,
+and for a code-review-found gap (documented, not yet fixed) where an
+intermediate attribute-chain segment of an unrelated call can also trigger
+D3's escape unintentionally.
 
 ## Handoff protocol
 - Agents communicate through files in `.agent/`. Read the previous phase's
