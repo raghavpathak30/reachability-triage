@@ -164,7 +164,31 @@ def compute_reachability(
             reason=reason,
         )
 
-    # Step 4: no path found even ignoring confidence.
+    # Step 4: before concluding NOT_REACHABLE, check whether the repo contains a
+    # reachable opaque call with no literal target name to filter on -- a nameless
+    # getattr(...)() dispatch, or eval()/exec() of a string whose contents this
+    # engine never parses as code. Neither carries a name to bridge on the way
+    # `?:<name>` unresolved calls already do, so a NOT_REACHABLE verdict cannot be
+    # trusted anywhere such a call is reachable: the opaque call could resolve to
+    # the queried symbol at runtime and this engine has no way to rule that out.
+    # This is deliberately repo-wide, not scoped to the query target -- see
+    # DECISIONS.md for the accepted trade-off this represents.
+    opaque_ids = {"?:<dynamic>", "ext:builtins.eval", "ext:builtins.exec"}
+    opaque_hit = next((oid for oid in opaque_ids if oid in paths), None)
+    if opaque_hit is not None:
+        opaque_edge = paths[opaque_hit][-1]
+        return ReachabilityResult(
+            target_module=target_module,
+            target_symbol=target_symbol,
+            verdict=Verdict.UNKNOWN,
+            path=paths[opaque_hit],
+            reason=(
+                f"a reachable opaque call ({opaque_hit}) at {opaque_edge.file}:{opaque_edge.lineno} "
+                "carries no literal target name, so a not_reachable verdict cannot be trusted"
+            ),
+        )
+
+    # Step 5: no path found even ignoring confidence, and no opaque call to blame it on.
     target = f"{target_module}:{target_symbol}" if target_symbol else target_module
     return ReachabilityResult(
         target_module=target_module,

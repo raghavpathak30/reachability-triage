@@ -180,3 +180,81 @@ def test_not_reachable_no_entrypoints(tmp_path):
     assert result.verdict == Verdict.NOT_REACHABLE
     assert result.path is None
     assert result.reason == "no entrypoints detected in repository"
+
+
+def test_l5_fixture13_nameless_getattr_dispatch_yields_unknown_not_not_reachable(tmp_path):
+    # Pins L5 fixture 13 (tests/fixtures/l5/13_getattr_dynamic_dispatch): a call
+    # target reached only through getattr(mod, name)() with no literal name at the
+    # call site must not be confidently ruled not_reachable.
+    entrypoints, edges = _build(
+        tmp_path,
+        {
+            "sink.py": "def target_func():\n    return 1\n",
+            "entry.py": (
+                "import sink\n"
+                "\n"
+                "def dispatch(name):\n"
+                "    getattr(sink, name)()\n"
+                "\n"
+                'if __name__ == "__main__":\n'
+                '    dispatch("target_func")\n'
+            ),
+        },
+    )
+
+    result = compute_reachability("sink", "target_func", entrypoints, edges)
+    assert result.verdict == Verdict.UNKNOWN
+    assert result.verdict != Verdict.NOT_REACHABLE
+
+
+def test_l5_fixture18_eval_call_yields_unknown_not_not_reachable(tmp_path):
+    # Pins L5 fixture 18 (tests/fixtures/l5/18_eval_string_call): a call target
+    # that exists only inside a string executed by eval() must not be confidently
+    # ruled not_reachable, since this engine never parses eval'd strings as code.
+    entrypoints, edges = _build(
+        tmp_path,
+        {
+            "sink.py": "def target_func():\n    return 1\n",
+            "entry.py": (
+                "from sink import target_func\n"
+                "\n"
+                "def run():\n"
+                '    eval("target_func()")\n'
+                "\n"
+                'if __name__ == "__main__":\n'
+                "    run()\n"
+            ),
+        },
+    )
+
+    result = compute_reachability("sink", "target_func", entrypoints, edges)
+    assert result.verdict == Verdict.UNKNOWN
+    assert result.verdict != Verdict.NOT_REACHABLE
+
+
+def test_l5_fixture14_registry_dict_dispatch_yields_unknown_not_not_reachable(tmp_path):
+    # Pins L5 fixture 14 (tests/fixtures/l5/14_registry_dict_dispatch): a call
+    # through HANDLERS[key]() hits the same nameless dynamic-dispatch marker as
+    # getattr dispatch (edges.py's `isinstance(func, (ast.Call, ast.Subscript))`
+    # branch), so it must also not be confidently ruled not_reachable. Fixed as a
+    # side effect of D1, before D3 existed -- see DECISIONS.md.
+    entrypoints, edges = _build(
+        tmp_path,
+        {
+            "sink.py": "def target_func():\n    return 1\n",
+            "registry.py": ("from sink import target_func\n\nHANDLERS = {\"go\": target_func}\n"),
+            "entry.py": (
+                "from registry import HANDLERS\n"
+                "\n"
+                "def dispatch(key):\n"
+                "    HANDLERS[key]()\n"
+                "\n"
+                'if __name__ == "__main__":\n'
+                '    dispatch("go")\n'
+            ),
+        },
+    )
+
+    result = compute_reachability("sink", "target_func", entrypoints, edges)
+    assert result.verdict == Verdict.UNKNOWN
+    assert result.verdict != Verdict.NOT_REACHABLE
