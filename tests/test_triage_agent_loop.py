@@ -9,9 +9,11 @@ implementation."
 
 from pathlib import Path
 
+import pytest
+
 from reachability.index.reachability_models import Verdict
 from reachability.triage import agent_loop
-from reachability.triage.agent_loop import run_triage_loop
+from reachability.triage.agent_loop import AgentLoopError, run_triage_loop
 from reachability.triage.agent_models import Message
 from reachability.triage.index_adapter import build_repo_index
 from reachability.triage.stub_llm import DeterministicPolicyStubLLMClient, FinalAnswerAction, ToolCallAction
@@ -116,6 +118,38 @@ def test_malformed_tool_argument_degrades_to_unknown_wrong_type():
     assert finding.result.verdict == Verdict.UNKNOWN
     assert "malformed_tool_call_argument" in finding.result.reason
     assert finding.tool_calls == []
+
+
+def test_malformed_tool_argument_degrades_to_unknown_non_dict_arguments():
+    # Review (.agent/review.md) Warning #6: a non-dict `arguments` must
+    # degrade through the malformed-argument path, not raise `TypeError`.
+    client = MalformedArgumentStubLLMClient("find_callers", None)
+    repo_index = build_repo_index(FIXTURE_REPO)
+
+    finding = run_triage_loop(client, repo_index, "app.sink", "vulnerable", budget=10)
+
+    assert finding.result.verdict == Verdict.UNKNOWN
+    assert "malformed_tool_call_argument" in finding.result.reason
+    assert finding.tool_calls == []
+
+
+class ReturnsUnrecognizedActionStubLLMClient:
+    """Returns a value that is neither a `ToolCallAction` nor a
+    `FinalAnswerAction`, to exercise the explicit `AgentLoopError` guard
+    for an `llm_client` that violates its own contract (review .agent/
+    review.md Warning #5).
+    """
+
+    def next_action(self, context):
+        return object()
+
+
+def test_unrecognized_action_raises_agent_loop_error():
+    client = ReturnsUnrecognizedActionStubLLMClient()
+    repo_index = build_repo_index(FIXTURE_REPO)
+
+    with pytest.raises(AgentLoopError):
+        run_triage_loop(client, repo_index, "app.sink", "vulnerable", budget=10)
 
 
 def test_tool_results_are_tool_role_only(monkeypatch):

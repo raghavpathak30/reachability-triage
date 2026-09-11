@@ -41,11 +41,12 @@ degradation cases must each produce a `TriageFinding` with verdict
   *before* any tool is dispatched, so a malformed call never reaches
   `sandbox_untrusted_text` in either the stub or the real implementation.
 
-`AgentLoopError` is reserved for genuine internal-consistency bugs in
-this module's own dispatch table (a tool name that passed
-`TOOL_SCHEMAS` validation but has no matching branch in `_dispatch_tool`)
--- it is never raised for cases (a)/(b)/(c), which always degrade to a
-returned `TriageFinding` instead.
+`AgentLoopError` is reserved for genuine internal-consistency bugs: a
+tool name that passed `TOOL_SCHEMAS` validation but has no matching
+branch in `_dispatch_tool`, or an `llm_client.next_action` return value
+that is neither a `ToolCallAction` nor a `FinalAnswerAction` -- it is
+never raised for cases (a)/(b)/(c), which always degrade to a returned
+`TriageFinding` instead.
 """
 
 from __future__ import annotations
@@ -74,13 +75,16 @@ TOOL_SCHEMAS: dict[str, tuple[tuple[str, type], ...]] = {
 
 
 class AgentLoopError(RuntimeError):
-    """Raised only for a genuine programming error in this module's own
-    dispatch table -- never for a gate-(i) degradation case."""
+    """Raised only for a genuine internal-consistency bug in this module
+    (its own dispatch table, or an `llm_client` returning an action type
+    it doesn't recognize) -- never for a gate-(i) degradation case."""
 
 
-def _is_well_formed_tool_call(tool_name: str, arguments: dict[str, object]) -> bool:
+def _is_well_formed_tool_call(tool_name: str, arguments: object) -> bool:
     schema = TOOL_SCHEMAS.get(tool_name)
     if schema is None:
+        return False
+    if not isinstance(arguments, dict):
         return False
     for key, expected_type in schema:
         if key not in arguments or not isinstance(arguments[key], expected_type):
@@ -221,7 +225,11 @@ def run_triage_loop(
             )
             continue
 
-        assert isinstance(action, FinalAnswerAction)
+        if not isinstance(action, FinalAnswerAction):
+            raise AgentLoopError(
+                f"llm_client.next_action returned neither a ToolCallAction nor a "
+                f"FinalAnswerAction: {type(action)!r}"
+            )
 
         if not any(
             _confirmed_id_matches_target(node_id, action.target_module, action.target_symbol)
