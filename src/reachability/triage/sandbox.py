@@ -31,13 +31,16 @@ trade-off, silently letting an attack through is not.
 1. **Verdict manipulation** -- imperative phrasing ("ignore previous
    instructions", "disregard", "report as", ...) appearing near a
    `Verdict` enum member's text (`REACHABLE`, `NOT_REACHABLE`, `UNKNOWN`,
-   `REACHABLE_ONLY_FROM_TESTS`, case-insensitive), or near a
-   `target_module=`/`target_symbol=`-shaped directive trying to redirect
-   the agent onto a different target. Matches are replaced with
-   `"[REDACTED: instruction-like text]"`.
+   `REACHABLE_ONLY_FROM_TESTS`, case-insensitive); a `target_module=`/
+   `target_symbol=`-shaped directive trying to redirect the agent onto a
+   different target; or natural-language paraphrases of either
+   ("disregard the above instructions", "ignore your prior instruction",
+   "the correct target is now X", "use X instead"). Matches are replaced
+   with `"[REDACTED: instruction-like text]"`.
 2. **Unauthorized tool-invocation instructions** -- phrasing like "call
    the `X` tool", "invoke `X`", "use `search_symbol`/`find_callers`/
-   `resolve_import`" in imperative context. Same redaction marker.
+   `resolve_import`", "run `X` again", "check ... via `X`", "you should
+   ... `X`" in imperative context. Same redaction marker.
 3. **Context echo**:
    a. a generic absolute-path regex, redacted **unconditionally** (not
       root-relative) -- `sandbox_untrusted_text`'s one-argument signature
@@ -68,10 +71,14 @@ _REDACTION_MARKER = "[REDACTED: instruction-like text]"
 
 # Category 1: verdict manipulation.
 _VERDICT_NAMES = r"(?:REACHABLE_ONLY_FROM_TESTS|NOT_REACHABLE|REACHABLE|UNKNOWN)"
+# One or more "prior"/"previous"/"the above"/"earlier"/"your" modifiers in
+# front of "instruction(s)", so both "previous instructions" and multi-word
+# phrasing like "your prior instruction" match, singular or plural, with no
+# requirement that any punctuation follow.
+_INSTRUCTION_MODIFIER = r"(?:(?:the\s+)?(?:all\s+)?(?:above|prior|previous|earlier|your)\s+)+"
 _VERDICT_MANIPULATION_PATTERNS = [
     re.compile(
-        r"(?:ignore\s+(?:all\s+)?previous\s+instructions|disregard\s+(?:all\s+)?(?:previous|prior)"
-        r"\s+instructions)[^.]*\." ,
+        r"(?:ignore|disregard)\s+" + _INSTRUCTION_MODIFIER + r"instructions?\b[^\n]*",
         re.IGNORECASE,
     ),
     re.compile(
@@ -86,18 +93,42 @@ _VERDICT_MANIPULATION_PATTERNS = [
         r"target_module\s*=\s*\S+\s+target_symbol\s*=\s*\S+",
         re.IGNORECASE,
     ),
+    # Natural-language target-switching phrasing ("target is now X", "the
+    # correct target is X") -- catches the directive as instruction-like
+    # text even though, unlike the wire-format pattern above, it cannot
+    # reliably extract which specific symbol was being injected.
+    re.compile(
+        r"\btarget\s+is(?:\s+now)?\b[^\n]*",
+        re.IGNORECASE,
+    ),
+    # "use X instead" / "answer for X instead" natural-language phrasing.
+    re.compile(
+        r"\buse\b[^\n]*?\binstead\b[^\n]*",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\banswer\s+for\b[^\n]*?\binstead\b[^\n]*",
+        re.IGNORECASE,
+    ),
 ]
 
 # Category 2: unauthorized tool-invocation instructions.
 _TOOL_NAMES = r"(?:search_symbol|find_callers|resolve_import)"
 _TOOL_INVOCATION_PATTERNS = [
-    re.compile(r"call\s+(?:the\s+)?" + _TOOL_NAMES + r"\b[^.]*", re.IGNORECASE),
-    re.compile(r"invoke\s+`?" + _TOOL_NAMES + r"`?[^.]*", re.IGNORECASE),
-    re.compile(r"use\s+`?" + _TOOL_NAMES + r"`?\s+(?:tool|to)\b[^.]*", re.IGNORECASE),
+    re.compile(r"call\s+(?:the\s+)?" + _TOOL_NAMES + r"\b[^\n]*", re.IGNORECASE),
+    re.compile(r"invoke\s+`?" + _TOOL_NAMES + r"`?[^\n]*", re.IGNORECASE),
+    re.compile(r"use\s+`?" + _TOOL_NAMES + r"`?\s+(?:tool|to)\b[^\n]*", re.IGNORECASE),
+    re.compile(r"run\s+`?" + _TOOL_NAMES + r"`?\b[^\n]*", re.IGNORECASE),
+    re.compile(r"check\b[^\n]*?\bvia\s+`?" + _TOOL_NAMES + r"`?\b[^\n]*", re.IGNORECASE),
+    re.compile(r"you\s+should\b[^\n]*?" + _TOOL_NAMES + r"\b[^\n]*", re.IGNORECASE),
 ]
 
-# Category 3a: absolute filesystem paths, redacted unconditionally.
-_ABSOLUTE_PATH_PATTERN = re.compile(r"(?<!\S)/[^\s\"']+")
+# Category 3a: absolute filesystem paths, redacted unconditionally. The
+# lookbehind blocks only an immediately-preceding word character (so an
+# interior slash in a relative path like "a/b" does not itself start a
+# match) -- it does not require whitespace-or-start-of-string, so a
+# quote- or colon-prefixed path ('"/etc/x"', "file:/etc/x") still matches.
+_ABSOLUTE_PATH_PATTERN = re.compile(r"(?<![A-Za-z0-9_])/[^\s\"']+")
 
 # Category 3b: high-entropy tokens (API-key/bearer-token shaped).
 _HIGH_ENTROPY_TOKEN_PATTERN = re.compile(r"(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{20,}")
