@@ -269,3 +269,142 @@ All five gates pass on the post-fix run: G1 = 0 false `not_reachable`, G2 = 5/5
 (exceeds the 4/5 floor), G3 = 2/2, G4 = 0 (reported), G5 = 0 crashes. Bare
 `pytest` from the venv: 110 passed (104 baseline + 6 regression tests: 2 for D1,
 2 for D3, 1 incidental-but-pinned for D1's fixture-14 side effect, 1 for D5).
+
+## 5. Phase 1 carryover closeout (11 Sep 2026)
+
+Three items were left open at the end of the L5 session (`agent_docs/L5_HANDOFF.md`).
+All three are closed here, before any Phase 2 work began.
+
+### 5.1 Revert-attribution check (D2/D4/D6)
+
+Each of D1's, D3's, and D5's `src/` fix was reverted independently (fix logic
+removed in place, test files untouched), bare `pytest` run, the result recorded,
+then the fix restored and 110/110 reconfirmed before moving to the next one.
+
+**D4 (pins D3): clean, as expected.** Reverting D3's Step 5 (bare-name-referenced-
+elsewhere check) sent exactly `test_l5_fixture17_bare_name_argument_yields_unknown_
+not_not_reachable` and `test_l5_fixture19_monkeypatch_reference_yields_unknown_not_
+not_reachable` red. No masking.
+
+**D6 (pins D5): the committed pytest test was never masked — but the corpus fixture
+it's named after was, confirming the original concern one level up.**
+`test_l5_fixture16_module_attribute_not_found_falls_back_to_unresolved` calls
+`build_edge_index` directly and asserts on `resolution_rule`; it never passes
+through `compute_reachability`'s Step 5 at all, so D3's bare-name mechanism was
+structurally incapable of masking it. Reverting D5 alone sent this test red, exactly
+as the code should behave. The predicted masking (L5_HANDOFF.md item 1) was real,
+but at the *corpus-measurement* level, not the unit-test level: re-running
+`scripts/measure_l5.py` with D5 reverted still reports fixture 16 as `unknown`
+(not a G1 violation) because `pkg/lazy.py`'s `__getattr__` body contains a bare
+`return target_func` that D3's Step 5 independently catches — so the adversarial
+corpus's coverage of the confidently-wrong-`MODULE_ATTRIBUTE` bug class was gone at
+the measurement-gate level even though the direct unit test was fine. Closed per
+item 5.2 below (fixture 16b).
+
+**D2 (pins D1): NOT clean — an unpredicted instance of the exact same masking
+class.** `test_l5_fixture13_...` and `test_l5_fixture18_...` went red cleanly on
+revert. `test_l5_fixture14_registry_dict_dispatch_yields_unknown_not_not_reachable`
+did **not** — it stayed green with D1 (Step 4, the nameless-dynamic-dispatch check)
+fully reverted. Root cause: its inline fixture builds `HANDLERS = {"go":
+target_func}` after `from sink import target_func` — `target_func` is a bare `Name`
+Load inside the dict literal, which D3's Step 5 independently catches, regardless of
+D1. `scripts/measure_l5.py` confirms the same thing for the real corpus fixture 14
+(`tests/fixtures/l5/14_registry_dict_dispatch`): reverting D1 alone still reports it
+`unknown`, not a G1 violation — masked the same way fixture 16 was, just never
+flagged as an open item because the original plan assumed 13/14/17/18/19 were one
+undifferentiated "named vs. nameless" split rather than checking each test's actual
+attribution. Fixed the same way as D6: rewrote the pytest test
+(`test_l5_fixture14b_registry_dict_dispatch_pins_dynamic_dispatch_not_d3`) against a
+no-bare-name variant and added an assertion on `result.path[-1].resolution_rule ==
+ResolutionRule.DYNAMIC_DISPATCH`, not just `verdict == UNKNOWN`, so the test cannot
+pass via D3's mechanism even by coincidence. Re-verified: red with D1 reverted,
+green with D1 restored.
+
+### 5.2 Fixture 16b / 14b — no-bare-name corpus variants
+
+Added `tests/fixtures/l5/16b_pep562_no_bare_name/` (for D5, per the original plan)
+and, per 5.1's finding, `tests/fixtures/l5/14b_registry_dict_no_bare_name/` (for
+D1) — same `label.json`/`RATIONALE.md` shape as their numbered counterparts, but
+the target symbol's name never appears as a bare `ast.Name`/`ast.Attribute` Load
+anywhere: `16b`'s `__getattr__` fetches the function via
+`getattr(importlib.import_module("pkg.sink"), "vulnerable")`, and `14b`'s registry
+is built via the same `getattr(importlib.import_module(...), "vulnerable")` pattern
+instead of a bare imported name in a dict literal. In both, `"vulnerable"` appears
+only as a string literal, so D3's collector has nothing to catch, and the
+MODULE_ATTRIBUTE-existence check (D5) / nameless-dynamic-dispatch check (D1)
+become the *only* route to a non-`not_reachable` verdict.
+
+Verified directly (not just by inspection): with each fix reverted, `scripts/
+measure_l5.py` correctly flips the `*b` variant to `not_reachable` (14b) or a
+confidently-wrong `not_reachable` via a misdirected edge (16b — the fabricated edge
+points at `pkg.lazy:vulnerable`, which doesn't match the query's
+`pkg.sink:vulnerable`, so the BFS reports no path and the bug presents as a false
+`not_reachable`, same shape as the original fixture-16 bug) — both correctly
+classified as `unknown`/`pass` with the fix present. `test_l5_fixture16b_module_
+attribute_not_found_falls_back_to_unresolved` (rewritten D6) and
+`test_l5_fixture14b_registry_dict_dispatch_pins_dynamic_dispatch_not_d3` (rewritten
+D2) cover the unit level; the two new corpus fixtures cover the measurement level.
+The original fixtures 14 and 16 are left in the corpus unchanged (still pass, still
+useful as a record of the masking coincidence) — `14b`/`16b` are additive, not
+replacements for the numbered IDs.
+
+### 5.3 Escape-set scaling check (blocking) and the D3 narrowing fix
+
+Measured `collect_load_referenced_names` / `_LoadOutsideCallCollector` against
+`starlette` (venv-installed, pure-Python, 35 modules / 6,890 lines — a real
+mid-sized third-party package already in this environment, not a new dependency):
+
+| | before narrowing | after narrowing |
+|---|---|---|
+| total resolvable symbols (all node kinds) | 659 | 659 |
+| escape set size | 833 | 428 |
+| escape/total_symbols ratio | 1.26 | 0.65 |
+| distinct callable (func/method/class) simple-names | 365 | 365 |
+| of those, masked (name also in escape set) | 159 (43.6%) | 101 (27.7%) |
+
+**Judgment: the pre-narrowing ratio was unambiguously too high to trust outside the
+corpus.** An escape set *larger than the package's entire symbol count*, and 43.6%
+of distinct callable names masked, would mean that for nearly half the named
+symbols in a real codebase, `compute_reachability` could never return a confident
+`not_reachable` verdict anywhere in that repo — not because the symbol is genuinely
+ambiguous, but because the collector was catching every bare Load anywhere (return
+values, comparisons, loop targets, and — the code-review-documented gap —
+intermediate attribute-chain segments like the `sink`/`pkg` in `pkg.sink.run()`),
+not just genuinely value-bound references.
+
+**Fix (`src/reachability/index/edges.py`, `_LoadOutsideCallCollector`):** narrowed
+to only record a `Name`/`Attribute` as escaped when it is itself the value-bound
+expression at an assignment (`Assign`/`AnnAssign`/`AugAssign`) or a call argument
+(positional or keyword) — including a direct element of a `list`/`tuple`/`set`/
+`dict` literal at one of those positions (so "stored in a container" stays
+covered) — never a sub-expression reached by descending further into an attribute
+chain or a call's receiver. Implemented via `visit_Assign`/`visit_AnnAssign`/
+`visit_AugAssign`/`visit_Call` each calling a `_record_value_bound` helper on the
+relevant expression, instead of the previous blanket `visit_Name`/`visit_Attribute`
+override that fired on every Load anywhere.
+
+**Conservative-direction check, same rule as every Stage D fix:** narrowing must
+never convert an existing fixture's `unknown` into a `not_reachable`. Re-ran
+`scripts/measure_l5.py` after the change — all gates still pass (G1–G5), all 22
+fixtures (20 original + 14b + 16b) unchanged in verdict. In particular, fixture 16
+(original) still resolves `unknown` via `resolution_rule=unresolved_attribute`: its
+`return target_func` is no longer caught by the narrowed collector (a bare `return`
+is neither an assignment nor a call argument), but D5's own fallback already
+produces an `UNRESOLVED_ATTRIBUTE` (`?:vulnerable`) edge, which the pre-existing
+Step 3 named-`?:`-bridge (documented before L5, see CLAUDE.md) still catches
+independently — so removing the over-broad part of D3's coverage didn't remove any
+fixture's actual protection, it just stopped being redundant-for-the-wrong-reason in
+that one case. Fixtures 17/19 (genuine argument-position references) and the new
+14b/16b (assignment-position references) are all still caught, since "argument
+position" and "assignment position" are exactly what the narrowed collector keeps.
+Added `test_load_outside_call_collector_excludes_attribute_chain_segments` and
+`test_load_outside_call_collector_still_catches_value_bound_references` in
+`tests/test_index_edges.py` as direct unit coverage of the narrowing itself. Bare
+`pytest`: 112 passed (110 + 2).
+
+This closes the BLOCKING item from `agent_docs/L5_HANDOFF.md`: the collector is now
+narrowed to value-bound name references before any real codebase gets indexed.
+The remaining 0.65 ratio / 27.7% masked-name figure is the accepted D3 trade-off
+already documented above (a common name referenced anywhere outside a call
+position suppresses `not_reachable` for that name repo-wide) — now measuring the
+intended trade-off rather than an inflated one.
