@@ -1,5 +1,5 @@
 from reachability.index.build import build_l1_index
-from reachability.index.edges import build_edge_index
+from reachability.index.edges import build_edge_index, collect_load_referenced_names
 from reachability.index.edges_models import Confidence, ResolutionRule
 from reachability.index.symbols import build_symbol_index
 
@@ -11,6 +11,12 @@ def _build_edges(tmp_path, files):
     report = build_l1_index(tmp_path)
     symbol_index = build_symbol_index(report)
     return build_edge_index(report, symbol_index)
+
+
+def _build_referenced_names(tmp_path, files):
+    write_tree(tmp_path, files)
+    report = build_l1_index(tmp_path)
+    return collect_load_referenced_names(report)
 
 
 def test_obj_load_does_not_resolve_to_same_named_first_party_function(tmp_path):
@@ -469,23 +475,37 @@ def test_alias_with_unresolved_target_does_not_produce_false_high_confidence_edg
     assert edge.confidence == Confidence.LOW
 
 
-def test_l5_fixture16_module_attribute_not_found_falls_back_to_unresolved(tmp_path):
-    # Pins L5 fixture 16 (tests/fixtures/l5/16_module_getattr_pep562): a module
-    # with a PEP 562 __getattr__ that synthesizes an attribute at access time --
-    # one that is never actually defined as a real symbol in the target module's
-    # own symbol table -- must not be confidently resolved via MODULE_ATTRIBUTE.
-    # Before this fix, `_resolve_attribute_callee` constructed a node id from the
-    # attribute name without checking it exists, producing a confidently wrong
-    # HIGH-confidence edge pointing at a symbol that was never defined there.
+def test_l5_fixture16b_module_attribute_not_found_falls_back_to_unresolved(tmp_path):
+    # Pins L5 fixture 16b (tests/fixtures/l5/16b_pep562_no_bare_name), not the
+    # original fixture 16. This test was never actually masked -- it calls
+    # build_edge_index directly and checks resolution_rule, never passing through
+    # compute_reachability's D3 (Step 5, bare-name-referenced-elsewhere) logic at all
+    # -- but the original fixture 16's lazy.py body (`from sink import target_func;
+    # return target_func`) binds target_func as a bare Name Load, which means the
+    # *corpus-level* measure_l5.py verdict for fixture 16 is masked by D3 regardless
+    # of whether this D5 fix exists (see DECISIONS.md's revert-attribution finding).
+    # Rewritten to match the no-bare-name fixture 16b added to close that corpus-level
+    # gap, so the unit test and the corpus fixture it's named after exercise the exact
+    # same source shape.
+    #
+    # A module with a PEP 562 __getattr__ that synthesizes an attribute at access
+    # time -- one that is never actually defined as a real symbol in the target
+    # module's own symbol table -- must not be confidently resolved via
+    # MODULE_ATTRIBUTE. Before this fix, `_resolve_attribute_callee` constructed a
+    # node id from the attribute name without checking it exists, producing a
+    # confidently wrong HIGH-confidence edge pointing at a symbol that was never
+    # defined there.
     edges = _build_edges(
         tmp_path,
         {
             "sink.py": "def target_func():\n    return 1\n",
             "lazy.py": (
+                "import importlib\n"
+                "\n"
                 "def __getattr__(name):\n"
                 '    if name == "target_func":\n'
-                "        from sink import target_func\n"
-                "        return target_func\n"
+                '        module = importlib.import_module("sink")\n'
+                '        return getattr(module, "target_func")\n'
                 "    raise AttributeError(name)\n"
             ),
             "entry.py": ("import lazy\n\nlazy.target_func()\n"),

@@ -1,6 +1,6 @@
 from reachability.index.build import build_l1_index
 from reachability.index.edges import build_edge_index
-from reachability.index.edges_models import Confidence
+from reachability.index.edges_models import Confidence, ResolutionRule
 from reachability.index.entrypoints import build_entrypoint_index
 from reachability.index.reachability import compute_reachability
 from reachability.index.reachability_models import Verdict
@@ -232,17 +232,29 @@ def test_l5_fixture18_eval_call_yields_unknown_not_not_reachable(tmp_path):
     assert result.verdict != Verdict.NOT_REACHABLE
 
 
-def test_l5_fixture14_registry_dict_dispatch_yields_unknown_not_not_reachable(tmp_path):
-    # Pins L5 fixture 14 (tests/fixtures/l5/14_registry_dict_dispatch): a call
-    # through HANDLERS[key]() hits the same nameless dynamic-dispatch marker as
-    # getattr dispatch (edges.py's `isinstance(func, (ast.Call, ast.Subscript))`
-    # branch), so it must also not be confidently ruled not_reachable. Fixed as a
-    # side effect of D1, before D3 existed -- see DECISIONS.md.
+def test_l5_fixture14b_registry_dict_dispatch_pins_dynamic_dispatch_not_d3(tmp_path):
+    # Pins L5 fixture 14b (tests/fixtures/l5/14b_registry_dict_no_bare_name), not the
+    # original fixture 14. Revert-attribution check (see DECISIONS.md) found that the
+    # original fixture-14 test below this one in history still passed with D1 (Step 4,
+    # the nameless-dynamic-dispatch check) reverted: registry.py's
+    # `HANDLERS = {"go": target_func}` binds target_func as a bare Name Load outside a
+    # call position, which D3's Step 5 (bare-name-referenced-elsewhere) independently
+    # catches -- masking whether D1 is actually doing anything here, the same
+    # coincidence documented for fixture 16/D5/D6. This rewrite builds HANDLERS via
+    # getattr(importlib.import_module(...), "target_func") instead, so "target_func"
+    # never appears as a Name/Attribute AST node anywhere -- D3's collector has nothing
+    # to catch -- and asserts the resolution_rule on the matched path is
+    # DYNAMIC_DISPATCH specifically, not just verdict == UNKNOWN, so this test cannot
+    # pass via D3's mechanism even by coincidence.
     entrypoints, edges, report = _build(
         tmp_path,
         {
             "sink.py": "def target_func():\n    return 1\n",
-            "registry.py": ("from sink import target_func\n\nHANDLERS = {\"go\": target_func}\n"),
+            "registry.py": (
+                "import importlib\n"
+                "\n"
+                'HANDLERS = {"go": getattr(importlib.import_module("sink"), "target_func")}\n'
+            ),
             "entry.py": (
                 "from registry import HANDLERS\n"
                 "\n"
@@ -258,6 +270,8 @@ def test_l5_fixture14_registry_dict_dispatch_yields_unknown_not_not_reachable(tm
     result = compute_reachability("sink", "target_func", entrypoints, edges, report)
     assert result.verdict == Verdict.UNKNOWN
     assert result.verdict != Verdict.NOT_REACHABLE
+    assert result.path is not None
+    assert result.path[-1].resolution_rule == ResolutionRule.DYNAMIC_DISPATCH
 
 
 def test_l5_fixture17_bare_name_argument_yields_unknown_not_not_reachable(tmp_path):

@@ -1,0 +1,9 @@
+{
+  "scenario": "Module-level __getattr__ (PEP 562) synthesizes the attribute at access time, with no bare-name binding anywhere in the module that could mask the MODULE_ATTRIBUTE bug behind the unrelated load-outside-call-position check.",
+  "sink": {"file": "repo/pkg/sink.py", "line": 1},
+  "entrypoints": [{"file": "repo/pkg/entry.py", "line": 3}],
+  "allowed_verdicts": ["unknown", "reachable"],
+  "forbidden_verdicts": ["not_reachable"],
+  "decidable": false,
+  "human_note": "Same scenario as fixture 16 (pkg/lazy.py has no attribute named vulnerable written anywhere, only a __getattr__ that synthesizes it), but lazy.py fetches the real function via importlib.import_module(...) + getattr(module, \"vulnerable\") -- the name 'vulnerable' appears only as a string literal, never as a bare ast.Name/Attribute Load. Fixture 16 had a coincidental `return target_func`-shaped bare-name binding that let D3's _LoadOutsideCallCollector mask the MODULE_ATTRIBUTE bug this scenario exists to catch, independent of whether the D5 fix is present. This variant removes that coincidence: the MODULE_ATTRIBUTE existence check (D5) is the only route to a correct (non-not_reachable) verdict here."
+}

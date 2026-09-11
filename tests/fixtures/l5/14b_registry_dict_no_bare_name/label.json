@@ -1,0 +1,9 @@
+{
+  "scenario": "Call through a registry dict populated via getattr(importlib.import_module(...), name) rather than a bare imported name, so no Name/Attribute AST node anywhere in the repo carries the target's identifier outside a call position.",
+  "sink": {"file": "repo/pkg/sink.py", "line": 1},
+  "entrypoints": [{"file": "repo/pkg/entry.py", "line": 4}],
+  "allowed_verdicts": ["unknown", "reachable"],
+  "forbidden_verdicts": ["not_reachable"],
+  "decidable": false,
+  "human_note": "Same scenario as fixture 14 (HANDLERS[key]() dynamic dispatch through a registry dict), but registry.py builds HANDLERS via getattr(importlib.import_module(\"pkg.sink\"), \"vulnerable\") instead of `from pkg.sink import vulnerable; HANDLERS = {\"go\": vulnerable}`. Fixture 14's registry.py binds `vulnerable` as a bare Name Load in the dict literal, which D3's _LoadOutsideCallCollector independently catches -- masking whether the nameless-dynamic-dispatch check (D1) is actually what's producing the unknown verdict. Here 'vulnerable' appears only as a string literal, so the nameless-dispatch marker on HANDLERS[key]() is the only route to a correct verdict."
+}
