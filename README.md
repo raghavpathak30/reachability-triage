@@ -38,6 +38,13 @@ Docker · Docker Compose · GitHub Actions · AWS EC2
   (module discovery + import map), L2 (symbol table), L3 (call edge extraction), L4
   (entrypoint detection, BFS, reachability verdicts, query layer), and L5 (fixture
   corpus + measurement) are built.
+- `src/reachability/triage/` — the triage agent (see `agent_docs/PHASE2_TRIAGE_AGENT.md`).
+  Source acquisition (`acquire_source`) and the index-pipeline adapter
+  (`build_repo_index`) are built; the stub-LLM agent loop (`run_triage_loop`) over
+  `search_symbol`/`find_callers`/`resolve_import`, with a hard tool-call budget and
+  an injection-resistance boundary (`sandbox_untrusted_text`) live from its first
+  commit, is built. Real LLM integration, FastAPI job-lifecycle wiring, and the eval
+  harness are not.
 - `DECISIONS.md` — dated design decisions and their reasoning
 
 ## L5 measurement

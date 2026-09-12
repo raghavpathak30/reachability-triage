@@ -487,3 +487,42 @@ never called by any production caller. Recorded here so U5's FastAPI job-lifecyc
 wiring (or any later unit) doesn't rediscover — the hard way — that it was never
 meant to become load-bearing production surface: do not wire it into U5's job
 lifecycle or any other production caller.
+
+### U3/U4 — gate (ii) fixture selection excludes bridging/dynamic-dispatch fixtures
+
+`tests/test_triage_agent_loop_l5.py`'s selected L5 fixtures
+(`02_transitive_three_hop`, `07_test_only_call`, `09_never_imported`,
+`17_framework_callback_reference`) deliberately exclude the
+dynamic-dispatch/bridging `unknown` fixtures (13/14/14b/15/16/16b/18).
+`compute_reachability`'s bridging rule matches those fixtures' paths against a
+synthetic `"?:"`-prefixed node id (`reachability.py`'s `_match_target`) that no
+real `CallEdge.caller_id` ever produces, so a backward BFS seeded from a
+`search_symbol`-confirmed literal node id cannot discover them — no tool-calling
+client could surface that evidence without hard-coding the reachability engine's
+internal bridging scheme, which would defeat gate (ii)'s purpose. The selected
+subset still covers all four `Verdict` values; the path-provenance check holds
+for every fixture in the subset with a non-`None` path, per the gate's actual
+wording, not the full L5 corpus.
+
+### U3/U4 — initial sandbox regexes were test-fitted, hardened after review
+
+The first `sandbox_untrusted_text` implementation (commit `4bda949`) passed
+every gated test but was fit to the literal wording of its own test fixtures,
+not the attack class: a missing trailing period defeated the
+"ignore instructions" pattern, the target-switch detector matched only its own
+internal wire format, the tool-invocation patterns matched only "call/invoke/use
+X" phrasing, and the absolute-path redaction (documented as unconditional)
+actually required whitespace immediately before the `/`. A senior review
+(`.agent/review.md`) hand-tested one-syntactic-step-away rephrasings of each
+category and found all four bypassed. Fixed in commit `68a03ba`: all three
+detection categories broadened to catch common paraphrases (not just the
+literal fixture wording), and the absolute-path lookbehind changed to no longer
+require a preceding whitespace character. Verified independently, post-fix,
+against the review's exact failing repro strings plus several additional novel
+paraphrases not used during the fix itself — all now redact, and the existing
+"benign text passes through unchanged" tests still hold. Recorded here because
+this is exactly the kind of gap L5's own protocol was built to catch one layer
+down (a heuristic detector that passes its own test suite while not
+generalizing to the class it claims to defend against) — worth remembering if
+a future unit adds a fourth detection category and is tempted to gate it only
+against the fixture it was written for.

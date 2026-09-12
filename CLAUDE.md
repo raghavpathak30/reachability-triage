@@ -15,9 +15,19 @@ Edits here do nothing until `/clear`, `/compact`, or restart.
 ## NOT BUILT — do not describe these as existing
 PostgreSQL, SQLAlchemy, Docker, async job submission,
 retries/backoff, idempotency, per-user quotas, cost accounting,
-content-hash caching, DB-stored prompt versioning, the eval harness.
+content-hash caching, DB-stored prompt versioning, the eval harness,
+live LLM API integration.
 These are in DECISIONS.md as intent. Check the code before claiming any
 of them work — in a README, docstring, commit message or comment.
+
+Phase 2 U3/U4 (`src/reachability/triage/agent_loop.py`,
+`src/reachability/triage/sandbox.py`, `src/reachability/triage/stub_llm.py`)
+are built: a stub-LLM tool-calling loop over `search_symbol`/`find_callers`/
+`resolve_import`, a hard tool-call budget, and a `sandbox_untrusted_text`
+injection-resistance boundary live from its first commit. The LLM in that loop
+is a deterministic stub (`stub_llm.py`), never a live API call — do not
+describe this as a working agent against a real model. FastAPI job-lifecycle
+wiring (U5) and the eval harness (U6) are not built.
 
 AST index (`agent_docs/PHASE1_AST_INDEX.md`): L1 (module discovery + import
 map), L2 (symbol table — functions, classes, methods, nested functions,
