@@ -487,3 +487,110 @@ never called by any production caller. Recorded here so U5's FastAPI job-lifecyc
 wiring (or any later unit) doesn't rediscover — the hard way — that it was never
 meant to become load-bearing production surface: do not wire it into U5's job
 lifecycle or any other production caller.
+
+## 7. Phase 2 U5 — job lifecycle wiring (12 Sep 2026)
+
+`main.py`'s `POST /v1/triage` now dispatches `run_triage_job`
+(`src/reachability/triage/job_runner.py`, new) via `BackgroundTasks`, chaining
+U2 (`acquire_source`) → U1 (`build_repo_index`) → U3/U4 (`run_triage_loop`)
+end to end and mutating `TRIAGE_DB[triage_id]` through
+`QUEUED → RUNNING → COMPLETED/FAILED`. Six decisions, mirrored from
+`job_runner.py`'s own module docstring:
+
+1. **target_module/target_symbol source**: `TriageRequest` gained
+   `target_module: str = Field(min_length=1)` (required) and
+   `target_symbol: str | None = None`, independent of the existing
+   package/version/repo_url exclusivity validator. A real caller (e.g.
+   triaging a CVE advisory) always names a specific vulnerable symbol; this
+   unit never derives a target automatically from the package.
+2. **Production "LLM" client**: `DeterministicPolicyStubLLMClient`
+   (`stub_llm.py`), instantiated fresh per job. This is **not** a real LLM —
+   it is a deterministic placeholder policy used until a later unit adds live
+   LLM integration, still NOT BUILT per project `CLAUDE.md`.
+3. **Tool-call budget**: `DEFAULT_TOOL_CALL_BUDGET = 30`, a fixed
+   module-level constant in `job_runner.py`, not exposed on `TriageRequest`
+   in this unit.
+4. **Workdir lifecycle**: `run_triage_job` opens one
+   `tempfile.TemporaryDirectory(prefix="reachability-triage-",
+   ignore_cleanup_errors=True)` per job, scoped to the whole chain via a
+   `with` block. `ignore_cleanup_errors=True` is required, not optional: it
+   makes a `shutil.rmtree` cleanup failure during `__exit__` be suppressed by
+   `tempfile` itself rather than raised, so it can never masquerade as a
+   chain failure. The chain itself uses an explicit `try`/`except`/`else`
+   structure (not a bare `try` wrapping the whole `with` block):
+   `record["finding"]`/`record["status"] = "completed"` are only set inside
+   the `else` clause, which Python guarantees runs only when the `try`
+   block's own body raised nothing, so a successful run can never be
+   miscategorized as a failure (or vice versa) by an unanticipated exception
+   source between the chain's success and the status assignment.
+5. **Empty `RepoIndex` → FAILED**: `build_repo_index` succeeding with zero
+   modules (`len(repo_index.report.modules) == 0`) is treated as a `FAILED`
+   job via a new `EmptyRepoIndexError(RuntimeError)`, raised inside the same
+   `try` block and caught by the same `except Exception` clause as any other
+   chain failure. Rationale: an empty index is far more likely a silent
+   acquisition/extraction defect (per §6's U1 open item above) than a
+   genuinely empty package, and letting it proceed would present that defect
+   as an indistinguishable, confident-looking `COMPLETED`/`NOT_REACHABLE` or
+   `COMPLETED`/`UNKNOWN` — exactly the "confident wrong answer" failure class
+   this project exists to avoid. **Accepted known limitation**: a genuinely
+   pure-native/C-extension wheel with zero `.py` modules will also FAIL under
+   this rule, since `EmptyRepoIndexError` cannot distinguish
+   "acquisition/extraction defect" from "package genuinely has no Python
+   source" — both present identically as a zero-module `RepoIndex`. (User
+   sign-off, this conversation.)
+6. **Error message detail**: the stored `error` string is
+   `f"{type(exc).__name__}: {exc}"`, passed through the existing
+   `sandbox_untrusted_text` (`sandbox.py`) — built for a different threat
+   model (prompt-injection redaction of untrusted tool-result text fed back
+   to an LLM context), reused here for a new one (HTTP response leakage) —
+   then truncated to 2000 characters. Its coverage for this new purpose was
+   checked, not assumed: `tests/test_triage_job_runner.py`'s
+   `test_sanitize_error_against_real_captured_exceptions` captures real
+   exceptions from U1/U2's actual failure paths (a real network call against
+   a nonexistent package; a real `subprocess.TimeoutExpired` instance raised
+   via a monkeypatched `subprocess.run`, which is the sub-case that actually
+   embeds an absolute workdir path via `acquisition.py`'s real `--dest`
+   argument; and a real `IndexBuildError` from `build_repo_index` against a
+   real nonexistent path) and confirms `_sanitize_error`'s redaction holds
+   for each — all three pass.
+
+**Pydantic dataclass-serialization verification (step 7)**: checked
+empirically before committing to an approach, not guessed. Pydantic v2
+natively serializes a `TriageFinding` — including a populated
+`path: list[CallEdge]` whose `CallEdge.file` is a real `pathlib.Path`, and
+`ToolCallRecord.arguments: dict[str, object]` — through both direct
+`model_dump_json()` and a real FastAPI `response_model=TriageOut` round trip
+via `TestClient`, with `Path` values serializing to plain JSON strings and no
+extra `model_config` needed. Verified directly against the real L5 fixture
+`tests/fixtures/l5/02_transitive_three_hop` (a genuine `REACHABLE` verdict
+with a 3-edge path) in
+`tests/test_triage_job_lifecycle.py::test_full_lifecycle_completed_via_monkeypatched_chain`.
+**Landed on the native path — no `dataclasses.asdict()`/custom
+`dict_factory` fallback was needed**, and `TriageOut.finding`'s type is
+`TriageFinding | None`, not `dict[str, object] | None`.
+
+**Discovered side effect, not a redesign**: making `target_module` required
+with no default (decision 1) breaks any pre-existing `TriageRequest(...)`
+construction or `POST /v1/triage` body that didn't already carry it. This
+was already anticipated for `tests/test_triage_acquisition.py`'s four direct
+`TriageRequest(...)` call sites; fixed the same way (`target_module=
+"placeholder"`) here. It was **not** anticipated for `tests/test_main.py`'s
+existing `POST /v1/triage` body-shape/response-shape tests, which also
+needed `target_module` added and, for the two tests asserting an exact
+response key set, updated to include the new `finding`/`error` keys. A
+second, related and also-undiscussed consequence: since `BackgroundTasks`
+runs synchronously (from the caller's perspective) under `TestClient`, those
+same `test_main.py` tests that POST a real `package`/`version` pair (e.g.
+`{"package": "requests", "version": "2.31.0"}`) now trigger a real,
+synchronous `acquire_source` call against real PyPI as a side effect of
+exercising unrelated request/response-shape assertions — none of them are
+marked `@pytest.mark.network`, unlike this project's convention for
+deliberate real-network tests. This does not break correctness (the
+assertions those tests make are unaffected by the job's real outcome, and
+this project's own `pytest.ini` convention already documents that a plain
+`pytest` run executes network-marked tests too, i.e. real network
+dependence during a bare run is already an accepted norm here), but it is a
+newly-introduced, unmarked real-network dependency in previously-fast,
+network-independent tests, worth a deliberate look (e.g. monkeypatching
+`job_runner`'s collaborators from `test_main.py`, or marking those tests
+`@pytest.mark.network`) in a follow-up rather than silently accepted here.

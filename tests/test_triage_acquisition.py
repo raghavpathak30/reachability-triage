@@ -11,7 +11,7 @@ from reachability.triage.index_adapter import build_repo_index
 
 @pytest.mark.network
 def test_acquire_source_wheel_package_builds_nonempty_index(tmp_path):
-    request = TriageRequest(package="six", version="1.16.0")
+    request = TriageRequest(package="six", version="1.16.0", target_module="placeholder")
 
     source_root = acquire_source(request, tmp_path)
 
@@ -26,7 +26,7 @@ def test_acquire_source_rejects_repo_url_without_network_call(tmp_path, monkeypa
 
     monkeypatch.setattr("reachability.triage.acquisition.subprocess.run", _boom)
 
-    request = TriageRequest(repo_url="https://example.com/some/repo.git")
+    request = TriageRequest(repo_url="https://example.com/some/repo.git", target_module="placeholder")
 
     with pytest.raises(AcquisitionError, match="not supported yet"):
         acquire_source(request, tmp_path)
@@ -44,7 +44,9 @@ def test_acquire_source_raises_on_no_wheel_available(tmp_path, monkeypatch):
 
     monkeypatch.setattr("reachability.triage.acquisition.subprocess.run", _fake_run)
 
-    request = TriageRequest(package="definitely-sdist-only", version="9.9.9")
+    request = TriageRequest(
+        package="definitely-sdist-only", version="9.9.9", target_module="placeholder"
+    )
 
     with pytest.raises(
         AcquisitionError, match="no wheel available for definitely-sdist-only==9.9.9"
@@ -60,7 +62,7 @@ def test_acquire_source_raises_on_wheel_extraction_failure(tmp_path, monkeypatch
 
     monkeypatch.setattr("reachability.triage.acquisition.subprocess.run", _fake_run)
 
-    request = TriageRequest(package="brokenpkg", version="1.0.0")
+    request = TriageRequest(package="brokenpkg", version="1.0.0", target_module="placeholder")
 
     with pytest.raises(AcquisitionError, match="wheel extraction failed") as exc_info:
         acquire_source(request, tmp_path)

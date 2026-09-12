@@ -1,15 +1,28 @@
 from enum import Enum
+import sys
 import uuid
+from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request, Response, status
+# `reachability.*` lives under src/, not on sys.path by default outside of
+# pytest (conftest.py does this same insertion for the test suite) -- this
+# mirrors that precedent so `uvicorn main:app --reload` (CLAUDE.md's
+# documented run command) keeps starting cleanly now that main.py imports
+# from reachability.triage below.
+sys.path.insert(0, str(Path(__file__).parent / "src"))
+
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, HttpUrl, model_validator
+from pydantic import BaseModel, Field, HttpUrl, model_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from reachability.triage.agent_models import TriageFinding
+from reachability.triage.job_runner import DEFAULT_TOOL_CALL_BUDGET, run_triage_job
 
 app = FastAPI(title="Reachability Triage Service")
 
-# In-memory store: {UUID: {"id": UUID, "status": TriageStatus, "target": dict}}
+# In-memory store: {UUID: {"id": UUID, "status": TriageStatus, "target": dict,
+#                          "finding": TriageFinding | None, "error": str | None}}
 TRIAGE_DB: dict[uuid.UUID, dict] = {}
 
 
@@ -85,6 +98,8 @@ class TriageRequest(BaseModel):
     package: str | None = None
     version: str | None = None
     repo_url: HttpUrl | None = None
+    target_module: str = Field(min_length=1)
+    target_symbol: str | None = None
 
     @model_validator(mode="after")
     def _validate_exactly_one_target(self) -> "TriageRequest":
@@ -109,6 +124,8 @@ class TriageRequest(BaseModel):
 class TriageOut(BaseModel):
     id: uuid.UUID
     status: TriageStatus
+    finding: TriageFinding | None = None
+    error: str | None = None
 
 
 # --- Routes ---
@@ -123,19 +140,32 @@ def healthz():
     status_code=status.HTTP_202_ACCEPTED,
     response_model=TriageOut,
 )
-def create_triage(payload: TriageRequest, response: Response):
+def create_triage(payload: TriageRequest, response: Response, background_tasks: BackgroundTasks):
     triage_id = uuid.uuid4()
 
     record = {
         "id": triage_id,
         "status": TriageStatus.QUEUED,
         "target": (
-            {"repo_url": str(payload.repo_url)}
+            {
+                "repo_url": str(payload.repo_url),
+                "target_module": payload.target_module,
+                "target_symbol": payload.target_symbol,
+            }
             if payload.repo_url is not None
-            else {"package": payload.package, "version": payload.version}
+            else {
+                "package": payload.package,
+                "version": payload.version,
+                "target_module": payload.target_module,
+                "target_symbol": payload.target_symbol,
+            }
         ),
+        "finding": None,
+        "error": None,
     }
     TRIAGE_DB[triage_id] = record
+
+    background_tasks.add_task(run_triage_job, TRIAGE_DB, triage_id, payload)
 
     response.headers["Location"] = f"/v1/triage/{triage_id}"
     return record

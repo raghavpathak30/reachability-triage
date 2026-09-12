@@ -23,7 +23,8 @@ def test_healthz_returns_200():
 
 def test_create_triage_package_version_valid():
     response = client.post(
-        "/v1/triage", json={"package": "requests", "version": "2.31.0"}
+        "/v1/triage",
+        json={"package": "requests", "version": "2.31.0", "target_module": "placeholder"},
     )
     assert response.status_code == 202
     body = response.json()
@@ -33,7 +34,8 @@ def test_create_triage_package_version_valid():
 
 def test_create_triage_package_version_location_header():
     response = client.post(
-        "/v1/triage", json={"package": "requests", "version": "2.31.0"}
+        "/v1/triage",
+        json={"package": "requests", "version": "2.31.0", "target_module": "placeholder"},
     )
     body = response.json()
     assert response.headers["location"] == f"/v1/triage/{body['id']}"
@@ -41,7 +43,8 @@ def test_create_triage_package_version_location_header():
 
 def test_create_triage_repo_url_valid():
     response = client.post(
-        "/v1/triage", json={"repo_url": "https://github.com/org/repo"}
+        "/v1/triage",
+        json={"repo_url": "https://github.com/org/repo", "target_module": "placeholder"},
     )
     assert response.status_code == 202
     body = response.json()
@@ -51,7 +54,8 @@ def test_create_triage_repo_url_valid():
 
 def test_create_triage_repo_url_location_header():
     response = client.post(
-        "/v1/triage", json={"repo_url": "https://github.com/org/repo"}
+        "/v1/triage",
+        json={"repo_url": "https://github.com/org/repo", "target_module": "placeholder"},
     )
     body = response.json()
     assert response.headers["location"] == f"/v1/triage/{body['id']}"
@@ -94,7 +98,8 @@ def test_create_triage_malformed_json_422():
 
 def test_get_triage_happy_path():
     create_response = client.post(
-        "/v1/triage", json={"package": "requests", "version": "2.31.0"}
+        "/v1/triage",
+        json={"package": "requests", "version": "2.31.0", "target_module": "placeholder"},
     )
     triage_id = create_response.json()["id"]
 
@@ -102,7 +107,13 @@ def test_get_triage_happy_path():
     assert response.status_code == 200
     body = response.json()
     assert body["id"] == triage_id
-    assert body["status"] == "queued"
+    # Not asserting a specific status here: BackgroundTasks (added in U5) may
+    # have already advanced the job past "queued" by the time this GET runs
+    # under TestClient (see DECISIONS.md's U5 addendum) -- this test only
+    # covers GET's id-matching/shape plumbing, not the state machine itself
+    # (covered by tests/test_triage_job_runner.py and
+    # tests/test_triage_job_lifecycle.py).
+    assert body["status"] in {"queued", "running", "completed", "failed"}
 
 
 def test_get_triage_unknown_id_404():
@@ -114,18 +125,20 @@ def test_get_triage_unknown_id_404():
 
 def test_create_triage_response_model_fields_package_shape():
     response = client.post(
-        "/v1/triage", json={"package": "requests", "version": "2.31.0"}
+        "/v1/triage",
+        json={"package": "requests", "version": "2.31.0", "target_module": "placeholder"},
     )
     body = response.json()
-    assert set(body.keys()) == {"id", "status"}
+    assert set(body.keys()) == {"id", "status", "finding", "error"}
 
 
 def test_create_triage_response_model_fields_repo_shape():
     response = client.post(
-        "/v1/triage", json={"repo_url": "https://github.com/org/repo"}
+        "/v1/triage",
+        json={"repo_url": "https://github.com/org/repo", "target_module": "placeholder"},
     )
     body = response.json()
-    assert set(body.keys()) == {"id", "status"}
+    assert set(body.keys()) == {"id", "status", "finding", "error"}
 
 
 def test_validation_error_envelope_shape():
@@ -138,10 +151,12 @@ def test_validation_error_envelope_shape():
 
 def test_get_triage_after_multiple_creates_isolated():
     first = client.post(
-        "/v1/triage", json={"package": "requests", "version": "2.31.0"}
+        "/v1/triage",
+        json={"package": "requests", "version": "2.31.0", "target_module": "placeholder"},
     ).json()
     second = client.post(
-        "/v1/triage", json={"repo_url": "https://github.com/org/repo"}
+        "/v1/triage",
+        json={"repo_url": "https://github.com/org/repo", "target_module": "placeholder"},
     ).json()
 
     first_get = client.get(f"/v1/triage/{first['id']}").json()
