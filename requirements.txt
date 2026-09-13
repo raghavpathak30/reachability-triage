@@ -16,3 +16,5 @@ httpx==0.28.1
 sqlalchemy==2.0.36
 psycopg[binary]==3.2.3
 alembic==1.14.0
+langgraph==1.2.11
+langchain-core==1.6.3
