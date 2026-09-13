@@ -9,6 +9,8 @@ from alembic.config import Config
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
+from reachability.db.session import reset_engine_for_tests
+
 
 def write_tree(root: Path, files: dict[str, str]) -> Path:
     for rel_path, content in files.items():
@@ -47,6 +49,7 @@ def _alembic_config(database_url: str) -> Config:
 def postgres_cluster(tmp_path_factory):
     database_url = os.environ.get("DATABASE_URL")
     if database_url:
+        reset_engine_for_tests()
         yield database_url
         return
 
@@ -76,10 +79,14 @@ def postgres_cluster(tmp_path_factory):
         capture_output=True,
     )
     database_url = f"postgresql+psycopg://postgres@127.0.0.1:{port}/postgres"
+    os.environ["DATABASE_URL"] = database_url
+    reset_engine_for_tests()
     try:
         command.upgrade(_alembic_config(database_url), "head")
         yield database_url
     finally:
+        os.environ.pop("DATABASE_URL", None)
+        reset_engine_for_tests()
         subprocess.run(
             ["pg_ctl", "-D", str(pgdata), "stop", "-m", "fast"],
             env=env,
@@ -90,6 +97,7 @@ def postgres_cluster(tmp_path_factory):
 
 @pytest.fixture
 def db_session(postgres_cluster):
+    reset_engine_for_tests()
     engine = create_engine(postgres_cluster)
     Session = sessionmaker(bind=engine)
     session = Session()

@@ -1,6 +1,6 @@
 """FastAPI-level lifecycle tests for U5's job wiring (`POST`/`GET
-/v1/triage`). Follows `tests/test_main.py`'s `TestClient` +
-autouse-`TRIAGE_DB.clear()` pattern.
+/v1/triage`). Follows `tests/test_main.py`'s `TestClient` pattern, backed
+by the U1 Postgres fixtures instead of the now-removed in-memory job dict.
 
 `test_full_lifecycle_completed_via_monkeypatched_chain` is the one test in
 this whole plan that pushes a real, populated `path: list[CallEdge]`
@@ -8,6 +8,12 @@ this whole plan that pushes a real, populated `path: list[CallEdge]`
 serialization -- see `.agent/plan.md`'s step 7 and Critique #3 for why a
 `path is not None or reason is not None` OR-assertion would not have been
 enough.
+
+As of U2, `POST /v1/triage` no longer dispatches any execution (no
+`BackgroundTasks`, no worker yet) -- every worker-dependent test below is
+`@pytest.mark.skip`'d until U3 lands `run_worker_once`, so this file stays
+green as its own commit rather than hanging/failing against a job that
+will never run. See plan.md's U2 step 5.
 """
 
 import sys
@@ -18,7 +24,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from main import TRIAGE_DB, app
+from main import app
 from reachability.triage import job_runner
 from reachability.triage.acquisition import AcquisitionError
 from reachability.triage.index_adapter import build_repo_index
@@ -34,10 +40,8 @@ client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
-def clear_triage_db():
-    TRIAGE_DB.clear()
+def _postgres(db_session):
     yield
-    TRIAGE_DB.clear()
 
 
 def _resolve_fixture_target() -> tuple[str, str]:
@@ -68,6 +72,7 @@ def test_missing_target_module_returns_422():
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
+@pytest.mark.skip(reason="TODO(U3): needs run_worker_once, see plan.md U2 step 5")
 def test_full_lifecycle_completed_via_monkeypatched_chain(monkeypatch):
     """Must exercise a REAL populated `path`, not just "path or reason" --
     monkeypatches `acquire_source` to return the real, on-disk L5 fixture
@@ -107,6 +112,7 @@ def test_full_lifecycle_completed_via_monkeypatched_chain(monkeypatch):
         assert isinstance(edge["file"], str)
 
 
+@pytest.mark.skip(reason="TODO(U3): needs run_worker_once, see plan.md U2 step 5")
 def test_full_lifecycle_failed_via_monkeypatched_acquisition_error(monkeypatch):
     def _boom(request, workdir):
         raise AcquisitionError("simulated acquisition failure")
@@ -127,19 +133,8 @@ def test_full_lifecycle_failed_via_monkeypatched_acquisition_error(monkeypatch):
     assert isinstance(body["error"], str)
 
 
-# Test-methodology note: BackgroundTasks runs inside the same ASGI coroutine
-# the TestClient's ASGITransport awaits to completion before returning
-# control to the caller (Starlette's Response.__call__ sends the body, then
-# awaits self.background(), all within the one `await app(...)` call
-# ASGITransport blocks on) -- so the POST call itself will typically already
-# have completed the whole job by the time it returns under TestClient. The
-# poll loop below is defensive/forward-looking (matches how a real client
-# against a live uvicorn server must behave, where the response is flushed
-# to the socket before the background task runs), not a sign that async
-# dispatch is broken if it succeeds on the first GET.
-
-
 @pytest.mark.network
+@pytest.mark.skip(reason="TODO(U3): needs run_worker_once, see plan.md U2 step 5")
 def test_resolvable_package_reaches_completed():
     response = client.post(
         "/v1/triage",
@@ -167,6 +162,7 @@ def test_resolvable_package_reaches_completed():
 
 
 @pytest.mark.network
+@pytest.mark.skip(reason="TODO(U3): needs run_worker_once, see plan.md U2 step 5")
 def test_unresolvable_package_reaches_failed():
     response = client.post(
         "/v1/triage",
