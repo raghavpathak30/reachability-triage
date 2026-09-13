@@ -187,6 +187,72 @@ def test_error_message_is_sanitized_and_bounded(monkeypatch):
     assert len(record["error"]) <= 2000 + len("... [truncated]")
 
 
+def test_langgraph_backend_reaches_langgraph_loop_end_to_end(tmp_path, monkeypatch):
+    monkeypatch.setenv("TRIAGE_LOOP_BACKEND", "langgraph")
+
+    finding = _make_finding()
+
+    monkeypatch.setattr(job_runner, "acquire_source", lambda request, workdir: tmp_path)
+    monkeypatch.setattr(
+        job_runner,
+        "build_repo_index",
+        lambda repo_root: RepoIndex(
+            report=DiscoveryReport(
+                modules=["fake"], import_tables={}, unparsed=[], star_import_count=0
+            ),
+            symbol_index={},
+            edges=[],
+            entrypoints=[],
+        ),
+    )
+    monkeypatch.setattr(
+        job_runner,
+        "run_triage_loop_langgraph",
+        lambda llm_client, repo_index, target_module, target_symbol, budget: finding,
+    )
+
+    triage_id = uuid.uuid4()
+    record = _make_record(triage_id)
+    run_triage_job(record, _make_request())
+
+    assert record["status"] == "completed"
+    assert record["finding"] is finding
+
+
+def test_default_backend_unchanged_calls_stub_loop(tmp_path, monkeypatch):
+    finding = _make_finding()
+    calls = []
+
+    monkeypatch.setattr(job_runner, "acquire_source", lambda request, workdir: tmp_path)
+    monkeypatch.setattr(
+        job_runner,
+        "build_repo_index",
+        lambda repo_root: RepoIndex(
+            report=DiscoveryReport(
+                modules=["fake"], import_tables={}, unparsed=[], star_import_count=0
+            ),
+            symbol_index={},
+            edges=[],
+            entrypoints=[],
+        ),
+    )
+
+    def _fake_run_triage_loop(llm_client, repo_index, target_module, target_symbol, budget, _on_raw_tool_result=None):
+        calls.append((target_module, target_symbol, budget))
+        return finding
+
+    monkeypatch.setattr(job_runner, "run_triage_loop", _fake_run_triage_loop)
+
+    triage_id = uuid.uuid4()
+    record = _make_record(triage_id)
+    run_triage_job(record, _make_request())
+
+    assert record["status"] == "completed"
+    assert record["finding"] is finding
+    assert record["error"] is None
+    assert len(calls) == 1
+
+
 def test_workdir_is_removed_after_job(monkeypatch):
     captured_workdir = {}
 

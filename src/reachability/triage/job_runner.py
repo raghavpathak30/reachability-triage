@@ -78,6 +78,7 @@ non-`None` value from any production code path.
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -85,6 +86,7 @@ from typing import TYPE_CHECKING
 from .acquisition import acquire_source
 from .agent_loop import run_triage_loop
 from .index_adapter import build_repo_index
+from .langgraph_loop import run_triage_loop_langgraph
 from .sandbox import sandbox_untrusted_text
 from .stub_llm import DeterministicPolicyStubLLMClient
 
@@ -148,14 +150,24 @@ def run_triage_job(
             llm_client = DeterministicPolicyStubLLMClient(
                 request.target_module, request.target_symbol
             )
-            finding = run_triage_loop(
-                llm_client,
-                repo_index,
-                request.target_module,
-                request.target_symbol,
-                budget,
-                _on_raw_tool_result=None,
-            )
+            triage_loop_backend = os.environ.get("TRIAGE_LOOP_BACKEND", "stub_loop")
+            if triage_loop_backend == "langgraph":
+                finding = run_triage_loop_langgraph(
+                    llm_client,
+                    repo_index,
+                    request.target_module,
+                    request.target_symbol,
+                    budget,
+                )
+            else:
+                finding = run_triage_loop(
+                    llm_client,
+                    repo_index,
+                    request.target_module,
+                    request.target_symbol,
+                    budget,
+                    _on_raw_tool_result=None,
+                )
     except Exception as exc:
         record["error"] = sanitize_error(exc)
         record["status"] = "failed"
