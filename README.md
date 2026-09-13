@@ -39,17 +39,25 @@ Docker · Docker Compose · GitHub Actions · AWS EC2
   (entrypoint detection, BFS, reachability verdicts, query layer), and L5 (fixture
   corpus + measurement) are built.
 - `src/reachability/triage/` — the triage agent (see `agent_docs/PHASE2_TRIAGE_AGENT.md`).
-  Source acquisition (`acquire_source`) and the index-pipeline adapter
-  (`build_repo_index`) are built; the stub-LLM agent loop (`run_triage_loop`) over
-  `search_symbol`/`find_callers`/`resolve_import`, with a hard tool-call budget and
+  Source acquisition (`acquire_source`), the index-pipeline adapter
+  (`build_repo_index`), the stub-LLM agent loop (`run_triage_loop`) over
+  `search_symbol`/`find_callers`/`resolve_import` with a hard tool-call budget and
   an injection-resistance boundary (`sandbox_untrusted_text`) live from its first
-  commit, is built. Real LLM integration, FastAPI job-lifecycle wiring, and the eval
-  harness are not.
+  commit, and the FastAPI job lifecycle (`job_runner.py`'s `run_triage_job`, wired to
+  `POST`/`GET /v1/triage/{id}` via an in-process `BackgroundTasks` runner — no queue,
+  no persistence beyond the request process's lifetime) are all built. Real LLM
+  integration is not.
+- `src/reachability/agent/` — the eval harness (see `agent_docs/PHASE2_TRIAGE_AGENT.md`
+  U6). `run_eval_suite()` runs the full agent loop (not a direct
+  `compute_reachability` call) over the reused L5 fixture corpus, gated by six
+  pre-registered gates (`agent_docs/U6_EVAL_PROTOCOL.md`). `prompt_registry.py` +
+  `prompts/v1/*.md` are file-based prompt-versioning scaffolding, not yet consumed
+  by the (still-stub) agent loop.
 - `DECISIONS.md` — dated design decisions and their reasoning
 
 ## L5 measurement
 
-`tests/fixtures/l5/` is a frozen, adversarial 20-fixture corpus with hand-derived
+`tests/fixtures/l5/` is a frozen, adversarial 22-fixture corpus with hand-derived
 ground-truth labels (see `agent_docs/L5_PROTOCOL.md` for the pre-registered gates).
 Run it with:
 
@@ -66,3 +74,16 @@ python scripts/measure_l5.py
 It builds the real index for each fixture, checks the resulting verdict against
 its label, and exits nonzero if a hard gate (G1/G2/G3/G5) fails. Results are
 written to `results/l5_<git-sha>.json`.
+
+## U6 eval harness
+
+`scripts/run_eval_suite.py` reuses the same `tests/fixtures/l5/` corpus but drives
+each fixture through the full agent loop (`run_triage_loop`, stub LLM) instead of
+a direct index call — see `agent_docs/U6_EVAL_PROTOCOL.md` for the six
+pre-registered gates (G1/G2/G3/G5/G6 hard, G4 reported-only). Run it with:
+
+```
+python scripts/run_eval_suite.py
+```
+
+Results are written to `results/eval_<git-sha>.json`.

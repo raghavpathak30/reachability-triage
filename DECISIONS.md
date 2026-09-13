@@ -3,6 +3,16 @@ It's a service that answers one question: a security advisory says package X ver
 
 The engineering underneath: an agent loop against the raw LLM API that investigates using tools you built — search_symbol, find_callers, resolve_import over an AST index of the repo — instead of being handed a precomputed call graph. Around it sits a FastAPI + Postgres backend with a background worker, an eval suite gating every prompt change in CI, and an injection-resistance layer, since advisory text and repo source are both attacker-controlled input flowing into an agent with tool access.
 
+**Status note (U6, shipped, partial):** the eval suite above is built as
+`src/reachability/agent/eval_harness.py`'s `run_eval_suite()`, file-based and
+gated (`agent_docs/U6_EVAL_PROTOCOL.md`'s G1-G6), but it does not gate "every
+prompt change in CI" as this paragraph's vision describes — there is no CI
+wiring yet, and the file-based prompts under `src/reachability/agent/prompts/v1/`
+are inert scaffolding no code path reads yet (the agent loop still runs a
+deterministic stub, `src/reachability/triage/stub_llm.py`, not the raw LLM API
+this paragraph names). Narrower than the vision, not a contradiction of it —
+see `agent_docs/PHASE2_TRIAGE_AGENT.md` §5's reconciliation table.
+
 # Architectural Decisions (20 Aug 2026)
 
 ## 1. Triage State Machine
@@ -55,6 +65,17 @@ Analysis finishes│               │
 
 - **Deferred Decision (Stuck in `RUNNING`):**
   - If a worker dies mid-analysis, a job could theoretically remain stuck in `RUNNING`. Handling dead-worker recovery and stale job timeouts is **deferred to Phase 4 (Worker Pool)**.
+
+  **Status note (U5, shipped):** the `QUEUED → FAILED` transition above never
+  actually fires in the shipped implementation — `src/reachability/triage/job_runner.py`
+  has no pre-execution rejection path (no queue-capacity check, no
+  target-validity pre-check); every job goes `QUEUED → RUNNING` unconditionally,
+  and even an obviously-unresolvable target (bad package name, bad
+  target_module) only reaches `FAILED` via `RUNNING → FAILED`, after
+  `acquire_source`/`build_repo_index`/`run_triage_loop` actually run and fail.
+  Not a regression from this document's original intent — U5 never claimed to
+  add pre-execution validation — just recorded here so the transition diagram
+  above doesn't silently drift from what the code actually does.
 
 ---
 

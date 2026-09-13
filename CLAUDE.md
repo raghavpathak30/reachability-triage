@@ -13,9 +13,9 @@ Edits here do nothing until `/clear`, `/compact`, or restart.
 - Success criteria for any change: the app starts clean, no debug prints
 
 ## NOT BUILT — do not describe these as existing
-PostgreSQL, SQLAlchemy, Docker, async job submission,
+PostgreSQL, SQLAlchemy, Docker, a distributed task broker/queue,
 retries/backoff, idempotency, per-user quotas, cost accounting,
-content-hash caching, DB-stored prompt versioning, the eval harness,
+content-hash caching, DB-stored prompt versioning, CI-gated prompt changes,
 live LLM API integration.
 These are in DECISIONS.md as intent. Check the code before claiming any
 of them work — in a README, docstring, commit message or comment.
@@ -26,8 +26,31 @@ are built: a stub-LLM tool-calling loop over `search_symbol`/`find_callers`/
 `resolve_import`, a hard tool-call budget, and a `sandbox_untrusted_text`
 injection-resistance boundary live from its first commit. The LLM in that loop
 is a deterministic stub (`stub_llm.py`), never a live API call — do not
-describe this as a working agent against a real model. FastAPI job-lifecycle
-wiring (U5) and the eval harness (U6) are not built.
+describe this as a working agent against a real model.
+
+Phase 2 U5 (`src/reachability/triage/job_runner.py`) is built: `POST
+/v1/triage` dispatches `run_triage_job` via FastAPI's `BackgroundTasks`,
+chaining `acquire_source` → `build_repo_index` → `run_triage_loop` and
+mutating `TRIAGE_DB[triage_id]` through `QUEUED → RUNNING →
+COMPLETED/FAILED`; `GET /v1/triage/{triage_id}` returns the widened record
+including `finding`/`error`. This is real, working end-to-end HTTP wiring —
+not a stub — but it is explicitly an **in-process** runner
+(`asyncio`/`BackgroundTasks`), never a distributed broker/queue, and
+`TRIAGE_DB` is still an in-memory dict with no persistence across a process
+restart.
+
+Phase 2 U6 (`src/reachability/agent/eval_harness.py`) is built: `run_eval_suite()`
+runs U3/U4's full agent loop (`run_triage_loop`, not a direct
+`compute_reachability` call) over all 22 fixtures in `tests/fixtures/l5/`
+(reused, no new corpus), gated by six pre-registered gates
+(`agent_docs/U6_EVAL_PROTOCOL.md`): G1/G2/G3/G5/G6 hard, G4 reported-only.
+`src/reachability/agent/prompt_registry.py` + `prompts/v1/*.md` are file-based
+prompt-versioning scaffolding (`PROMPT_VERSION = "v1"`, `load_prompt()`) — genuinely
+inert today, not read by `stub_llm.py` or `agent_loop.py` (a static test in
+`tests/test_eval_harness.py` guards this), since the agent loop is still a
+deterministic stub with no prompt-reading code path. Do not describe the eval
+harness as CI-gating prompt changes against a real model — it gates a stub loop's
+verdicts, file-based, not wired into any CI pipeline.
 
 AST index (`agent_docs/PHASE1_AST_INDEX.md`): L1 (module discovery + import
 map), L2 (symbol table — functions, classes, methods, nested functions,
@@ -38,7 +61,7 @@ section 3), and L4 (entrypoint detection — `if __name__ == "__main__"`,
 `[project.scripts]`, route/celery/CLI decorators, `test_*`/pytest-fixture
 functions — plus BFS-based reachability verdicts and the
 `search_symbol`/`find_callers`/`resolve_import` query layer), and L5
-(a 20-fixture adversarial measurement corpus + `scripts/measure_l5.py`,
+(a 22-fixture adversarial measurement corpus + `scripts/measure_l5.py`,
 see DECISIONS.md §4) are built, all in `src/reachability/index/` (L5's
 corpus lives in `tests/fixtures/l5/`). Not built: `.reachability/index.json`
 serialization.
