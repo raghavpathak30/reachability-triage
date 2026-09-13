@@ -56,6 +56,20 @@ Analysis finishes│               │
 - **Deferred Decision (Stuck in `RUNNING`):**
   - If a worker dies mid-analysis, a job could theoretically remain stuck in `RUNNING`. Handling dead-worker recovery and stale job timeouts is **deferred to Phase 4 (Worker Pool)**.
 
+  **Status note (Phase 3, shipped): this deferral is superseded, not
+  honored as originally written.** That text was written when this
+  project's only "worker" was FastAPI's in-process `BackgroundTasks` —
+  there was no independent worker concept for a dead-worker scenario to
+  apply to yet. Phase 3 introduces the first independent worker process
+  this project has ever had and, per that phase's own scope, brings
+  dead-worker recovery and stale-job timeouts into Phase 3's remit
+  instead — see §8 below for the reaper that implements it. This is a
+  scope correction driven by Phase 3's own instructions, not a discovery
+  that the original deferral was wrong, and is recorded as a status note
+  rather than a silent rewrite of the text above, per this project's own
+  convention of marking superseded decisions instead of rewriting
+  history.
+
 ---
 
 ## 2. Identifier Format: UUIDv4
@@ -633,3 +647,99 @@ newly-introduced, unmarked real-network dependency in previously-fast,
 network-independent tests, worth a deliberate look (e.g. monkeypatching
 `job_runner`'s collaborators from `test_main.py`, or marking those tests
 `@pytest.mark.network`) in a follow-up rather than silently accepted here.
+
+---
+
+## 8. Phase 3 — persistence, worker, reaper (13 Sep 2026)
+
+`main.py`'s in-memory `TRIAGE_DB` dict and `BackgroundTasks` dispatch
+(§7) are removed entirely — not kept alongside the new storage as a
+cache — and replaced with a Postgres-backed `triage_jobs` table
+(SQLAlchemy models + Alembic migrations, `src/reachability/db/`) and an
+independent polling worker (`src/reachability/triage/worker.py`) plus a
+stale-job reaper (`src/reachability/triage/reaper.py`). Six decisions,
+mirroring `job_runner.py`/`worker.py`'s own docstrings:
+
+1. **Postgres + SQLAlchemy + Alembic over alternatives.** A single
+   `triage_jobs` table, migrated from its first commit
+   (`alembic/versions/0001_create_triage_jobs.py`), replacing `TRIAGE_DB`
+   outright. Rejected: keeping `TRIAGE_DB` as an in-memory cache
+   alongside Postgres — a second source of truth is exactly the
+   corruption risk this phase exists to eliminate.
+2. **`status` as `String(20)` + `CHECK` constraint, not a native
+   Postgres `ENUM`.** `job_runner.py`'s own docstring already commits to
+   plain string literals over `main.TriageStatus` so no runtime import of
+   `main` is needed at all. A native `ENUM` requires an `ALTER TYPE ...
+   ADD VALUE` migration for every future status value; a `CHECK`
+   constraint is a plain column-constraint migration like any other —
+   same values enforced, cheaper to evolve.
+3. **Claim / execute / finalize as three explicit, independently
+   committing transactions**, not one. Claim (`SELECT ... FOR UPDATE
+   SKIP LOCKED` + guarded `UPDATE ... FROM`) commits immediately, so a
+   crash before that commit leaves the row untouched (`queued`, as if
+   nothing happened). Execute (`run_triage_job`) holds no transaction or
+   lock, so the potentially minutes-long acquire/index/agent-loop chain
+   never blocks another worker's claim. Finalize is guarded by a
+   `worker_id`/`attempt_count` `WHERE` clause: if a job was reaped and
+   reclaimed by another worker while this one was still (slowly, not
+   dead) executing, `attempt_count` has already moved on and the
+   `UPDATE` affects zero rows — a logged no-op, never an overwrite of a
+   newer result. Demonstrated safe under real concurrent load (8 threads
+   against 20 pre-inserted rows, 5 iterations,
+   `tests/test_worker_concurrency.py`) — the one gate in this phase that
+   could not be satisfied by a single-threaded unit test with mocked
+   locking. Sanity-checked the negative case too: deleting the entire
+   `FOR UPDATE SKIP LOCKED` clause (not just `SKIP LOCKED` — bare `FOR
+   UPDATE` alone already prevents double-claims via Postgres's blocking +
+   EvalPlanQual re-check, so it would not have exercised anything) made
+   the stress test fail with severe double-claims (one job claimed 8
+   times across threads in the observed run); reverted immediately,
+   never committed.
+4. **300s stale-job reaper timeout, env-var-overridable, a fixed
+   constant — not derived from a job-duration-history table.** Derived
+   from this repo's own slowest currently-observed real job path:
+   `tests/test_triage_job_lifecycle.py::test_resolvable_package_reaches_completed`
+   already polls up to 180s against a real PyPI download+index+agent-loop
+   chain; 300s is ~1.7x headroom above that. This supersedes §1's
+   "deferred to Phase 4" note for dead-worker recovery — see the status
+   note under §1 above.
+5. **CI: a GitHub Actions `services: postgres:` block, not the
+   self-managed `initdb`/`pg_ctl` ephemeral-cluster path.** The
+   local-dev-only `initdb`/`pg_ctl` orchestration in `tests/conftest.py`
+   is explicitly never used in CI; `.github/workflows/tests.yml` sets
+   `DATABASE_URL` from a `postgres:17` service container in both CI jobs,
+   so the `postgres_cluster` fixture's "already set" branch is what runs
+   there — one fixture, two backing environments, no CI-only
+   special-casing of the tests themselves. (This also required a fix
+   found while wiring CI locally: that branch must still run `alembic
+   upgrade head` against the fresh, unmigrated service container — it
+   only skips `initdb`/`pg_ctl` cluster lifecycle management, not the
+   migration itself, or every DB-dependent test would fail against an
+   empty database in CI.) The concurrency stress test runs as a separate,
+   equally-required CI job in parallel with the main suite, not a
+   manual-only check, per sign-off.
+6. **Three accepted limitations, stated plainly, not silently absorbed**
+   (full rationale in `agent_docs/PHASE3_PERSISTENCE.md` U4): (a) no
+   mid-execution heartbeat — `updated_at` only moves at claim and
+   finalize, so a single real job legitimately running longer than the
+   timeout gets reaped and reclaimed while still alive (bounded duplicate
+   work, not corruption, since decision 3's finalize guard prevents the
+   stale result from ever being applied); (b) this design does not
+   recover a genuinely *hung* (not crashed) worker when exactly one
+   worker process is running — recovery needs either a process
+   supervisor restarting a crash, or a second, independently-running
+   worker process whose own loop keeps calling the reaper regardless of
+   what the first is doing; (c) an orphaned
+   `tempfile.TemporaryDirectory` on a hard SIGKILL/OOM crash is not
+   cleaned up (`ignore_cleanup_errors=True` only suppresses errors during
+   a normally-executed `__exit__`, which a hard kill skips entirely) —
+   pre-existing, made mechanically more frequent by this phase's designed
+   crash-and-reclaim path.
+
+**Explicitly still deferred, not solved by this phase:** smart
+retries-with-backoff / a capped retry policy (the reaper resets a stale
+job to `queued` exactly once per staleness event, tracked via
+`reaped_count`, with no backoff or max-retry cap — a job that keeps
+timing out will loop indefinitely under this phase's design); a
+distributed task broker/queue (the worker polls one Postgres table
+directly); `repo_url` acquisition / SSRF hardening (§3, still Phase 5).

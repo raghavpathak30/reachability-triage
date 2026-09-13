@@ -43,8 +43,21 @@ Docker · Docker Compose · GitHub Actions · AWS EC2
   (`build_repo_index`) are built; the stub-LLM agent loop (`run_triage_loop`) over
   `search_symbol`/`find_callers`/`resolve_import`, with a hard tool-call budget and
   an injection-resistance boundary (`sandbox_untrusted_text`) live from its first
-  commit, is built. Real LLM integration, FastAPI job-lifecycle wiring, and the eval
-  harness are not.
+  commit, is built; `worker.py` (the polling worker) and `reaper.py` (the
+  stale-job reaper) are built. Real LLM integration and the eval harness
+  are not.
+- `src/reachability/db/` — Postgres persistence (see `agent_docs/PHASE3_PERSISTENCE.md`
+  and `DECISIONS.md` §8). **Status note (Phase 3, shipped):** the earlier
+  in-memory job dict and FastAPI `BackgroundTasks` dispatch are gone
+  entirely. `POST`/`GET /v1/triage` (`main.py`) now read/write a real,
+  Alembic-migrated `triage_jobs` table; `python -m reachability.triage.worker`
+  is an independent process that claims a queued job (`SELECT ... FOR
+  UPDATE SKIP LOCKED`, demonstrated safe under real concurrent load),
+  executes it, and finalizes it across three separately-committing
+  transactions; `reaper.py` reclaims a job whose worker crashed
+  mid-execution. Not built: a distributed broker/queue (the worker polls
+  one Postgres table directly), capped retries-with-backoff, and a
+  mid-execution worker heartbeat.
 - `DECISIONS.md` — dated design decisions and their reasoning
 
 ## L5 measurement

@@ -49,7 +49,16 @@ def _alembic_config(database_url: str) -> Config:
 def postgres_cluster(tmp_path_factory):
     database_url = os.environ.get("DATABASE_URL")
     if database_url:
+        # CI-services-block case: DATABASE_URL points at a freshly started,
+        # unmigrated `postgres:17` service container -- `alembic upgrade
+        # head` must still run here (it's a no-op if already migrated), or
+        # every DB-dependent test would fail with "relation triage_jobs
+        # does not exist". Only initdb/pg_ctl cluster lifecycle management
+        # is skipped in this branch, not the migration itself -- one
+        # fixture, two backing environments, no CI-only special-casing of
+        # the tests themselves.
         reset_engine_for_tests()
+        command.upgrade(_alembic_config(database_url), "head")
         yield database_url
         return
 
