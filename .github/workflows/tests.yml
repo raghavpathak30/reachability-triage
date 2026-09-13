@@ -43,3 +43,13 @@ jobs:
       - name: Set DATABASE_URL
         run: echo "DATABASE_URL=postgresql+psycopg://postgres@localhost:5432/postgres" >> "$GITHUB_ENV"
       - run: pytest tests/test_worker_concurrency.py -v
+
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt
+      - run: python scripts/run_eval_suite.py
