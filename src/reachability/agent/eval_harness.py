@@ -36,6 +36,7 @@ EVAL_FIXTURES_ROOTS: list[Path] = [
 RESULTS_DIR = REPO_ROOT / "results"
 EVAL_BUDGET = 50
 WALL_CLOCK_BUDGET_SECONDS = 10
+G2_MIN_CORRECT = 6
 
 _FUNCTION_KINDS = {NodeKind.FUNCTION, NodeKind.ASYNCFUNCTION, NodeKind.METHOD}
 
@@ -189,10 +190,10 @@ def evaluate_eval_gates(results: list[dict]) -> dict:
     g2_set = [r for r in results if r["allowed_verdicts"] == ["not_reachable"]]
     g2_correct = [r["id"] for r in g2_set if r["verdict"] == "not_reachable"]
     gates["G2"] = {
-        "pass": len(g2_correct) >= 4,
+        "pass": len(g2_correct) >= G2_MIN_CORRECT,
         "correct_count": len(g2_correct),
         "total": len(g2_set),
-        "threshold": 4,
+        "threshold": G2_MIN_CORRECT,
         "correct_fixtures": g2_correct,
     }
 

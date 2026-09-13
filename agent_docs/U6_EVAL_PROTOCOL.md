@@ -66,3 +66,10 @@ overall_pass = G1-eval AND G2-eval AND G3-eval AND G5-eval AND G6-eval.
   (G4-eval is reported only and never enters overall_pass, matching
   L5_PROTOCOL.md's explicit anti-guessing rationale for its own G4.)
 ```
+
+**Status note (Phase 4):** this document describes the historical 22-fixture run
+only and is now frozen/superseded for CI-gating purposes. As of Phase 4, the eval
+corpus grew to 30 fixtures (22 here plus 8 new in `tests/fixtures/l5_phase4/`) and
+`run_eval_suite()` is gated against `agent_docs/PHASE4_EVAL_PROTOCOL.md`'s updated
+G2/G4 numbers, not this document's. This document's own thresholds are not edited
+in place, per its own "no threshold may change" rule above.

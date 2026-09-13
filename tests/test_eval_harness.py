@@ -51,7 +51,7 @@ def test_evaluate_eval_gates_fails_on_false_not_reachable():
 
 def test_evaluate_eval_gates_passes_on_clean_synthetic_rows():
     results = [_base_row(id="01_direct_console_entrypoint")]
-    for fid in ("09_never_imported", "10_name_collision_diff_module", "11_dead_function_call_site", "12_local_shadow", "20_vendored_duplicate_module"):
+    for fid in ("09_never_imported", "10_name_collision_diff_module", "11_dead_function_call_site", "12_local_shadow", "20_vendored_duplicate_module", "21_attribute_chain_segment_escape", "24_named_callback_no_collision_negative_control"):
         results.append(
             _base_row(id=fid, verdict="not_reachable", allowed_verdicts=["not_reachable"], forbidden_verdicts=["reachable"])
         )
@@ -86,6 +86,16 @@ def test_run_eval_suite_shape_and_gates():
     report = run_eval_suite()
 
     assert len(report.fixtures) == 30
+
+    # Regression-pin: G2's pool/threshold and G4's decidable-pool size are pinned
+    # to the exact numbers agent_docs/PHASE4_EVAL_PROTOCOL.md pre-registers, not
+    # just the pass/fail outcome (DECISIONS.md §5.1's D2/D6 lesson: a
+    # verdict-only assertion can pass "by coincidence" through the wrong
+    # mechanism).
+    assert report.gates["G2"]["total"] == 7
+    assert report.gates["G2"]["threshold"] == 6
+    decidable_pool_size = len([row for row in report.fixtures if row["decidable"]])
+    assert decidable_pool_size == 17
 
     required_keys = {
         "id",
