@@ -13,6 +13,11 @@ deterministic stub, `src/reachability/triage/stub_llm.py`, not the raw LLM API
 this paragraph names). Narrower than the vision, not a contradiction of it —
 see `agent_docs/PHASE2_TRIAGE_AGENT.md` §5's reconciliation table.
 
+**Status note (Phase 4):** the "no CI wiring yet" clause above is now stale —
+`run_eval_suite()` is wired into CI as a new required `eval` job (§9 below). The
+rest of this paragraph (inert file-based prompts, deterministic stub, no
+live-LLM gating) remains accurate and unchanged.
+
 # Architectural Decisions (20 Aug 2026)
 
 ## 1. Triage State Machine
@@ -779,3 +784,49 @@ job to `queued` exactly once per staleness event, tracked via
 timing out will loop indefinitely under this phase's design); a
 distributed task broker/queue (the worker polls one Postgres table
 directly); `repo_url` acquisition / SSRF hardening (§3, still Phase 5).
+
+## 9. Phase 4 — eval harness completion + CI gate (14 Sep 2026)
+
+**Corpus growth, 22 → 30 fixtures, in a new sibling directory.** Eight new
+adversarial fixtures (`21`-`28`) were added under a new directory,
+`tests/fixtures/l5_phase4/`, not inside `tests/fixtures/l5/` itself — full
+per-fixture detail and rationale lives in `agent_docs/PHASE4_EVAL_HARNESS.md`,
+not duplicated here. **Why a new directory, not the same one:**
+`scripts/measure_l5.py` computes its own G2 pool dynamically from whatever is
+on disk under `tests/fixtures/l5/` (`FIXTURES_ROOT`, filtering
+`allowed_verdicts == ["not_reachable"]`), not from a hardcoded fixture-ID list.
+Landing the 8 new fixtures there would have silently reopened
+`agent_docs/L5_PROTOCOL.md`'s own frozen gate (pool size, G2 floor) without the
+separate, justified commit that document's freeze text requires. Putting them
+in a sibling directory instead means `scripts/measure_l5.py` and
+`agent_docs/L5_PROTOCOL.md` are mechanically unaffected by this phase — verified
+directly: `python scripts/measure_l5.py` still runs against exactly 22 fixtures
+with its G2 pool still 5, unchanged.
+
+**Updated gate numbers.** `src/reachability/agent/eval_harness.py`'s
+`discover_eval_fixtures()` now reads both `tests/fixtures/l5/` and
+`tests/fixtures/l5_phase4/`, returning their sorted union (30 fixtures). Fixture
+21 (`21_attribute_chain_segment_escape`) was run through the real engine before
+its label was finalized (per this project's own D1/D3-era precedent: verify,
+don't guess) and empirically resolved `not_reachable` — confirming §5.3's
+narrowing already closed the attribute-chain-segment gap it probes. That
+resolved it to `decidable: true`, joining both gate pools: G2's pool grew from
+5 to 7 (`09,10,11,12,20,21,24`), floor updated from 4/5 to **6/7** (same
+one-unit-of-slack intent as the original); G4's reported-only decidable pool
+grew from 13 to 17 (`01-12,20,21,24,25,26`). Full numbers and per-gate text are
+pre-registered in the new `agent_docs/PHASE4_EVAL_PROTOCOL.md`, not repeated
+here. `agent_docs/U6_EVAL_PROTOCOL.md` itself is not edited in place — it gains
+one appended status note; `PHASE4_EVAL_PROTOCOL.md` is what `run_eval_suite()`
+is gated against going forward.
+
+**CI wiring: a new required `eval` job.** `.github/workflows/tests.yml` gains a
+third job, `eval`, parallel to `test`/`concurrency`, with no
+`services: postgres:` block — `src/reachability/agent/eval_harness.py` never
+imports anything DB-related (unlike `worker.py`/`reaper.py`), so paying for a
+Postgres container it never uses would be pure waste. No
+`continue-on-error`/`||`-style suppression: the job fails on any non-zero exit
+from `scripts/run_eval_suite.py`, verified directly by deliberately corrupting
+one fixture's label and confirming a non-zero exit, then reverting. Whether
+this job actually blocks a merge depends on this repo's branch-protection
+required-status-checks list, a server-side GitHub setting this file does not
+control.

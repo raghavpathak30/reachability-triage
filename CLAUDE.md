@@ -43,14 +43,31 @@ runs U3/U4's full agent loop (`run_triage_loop`, not a direct
 `compute_reachability` call) over 30 fixtures across two directories — the
 original 22 in `tests/fixtures/l5/` (reused) plus 8 new fixtures added by Phase 4
 in `tests/fixtures/l5_phase4/` — gated by six pre-registered gates
-(`agent_docs/U6_EVAL_PROTOCOL.md`): G1/G2/G3/G5/G6 hard, G4 reported-only.
+(`agent_docs/PHASE4_EVAL_PROTOCOL.md`, which supersedes
+`agent_docs/U6_EVAL_PROTOCOL.md`'s historical 22-fixture numbers): G1/G2/G3/G5/G6
+hard (G2's floor is now 6 of 7, up from U6's original 4 of 5), G4 reported-only.
 `src/reachability/agent/prompt_registry.py` + `prompts/v1/*.md` are file-based
 prompt-versioning scaffolding (`PROMPT_VERSION = "v1"`, `load_prompt()`) — genuinely
 inert today, not read by `stub_llm.py` or `agent_loop.py` (a static test in
 `tests/test_eval_harness.py` guards this), since the agent loop is still a
 deterministic stub with no prompt-reading code path. Do not describe the eval
 harness as CI-gating prompt changes against a real model — it gates a stub loop's
-verdicts, file-based, not wired into any CI pipeline.
+verdicts against fixture labels, file-based, not a live model.
+
+Phase 4 (`agent_docs/PHASE4_EVAL_HARNESS.md`, `agent_docs/PHASE4_EVAL_PROTOCOL.md`)
+is built: the eval corpus grew from 22 to 30 fixtures (8 new adversarial fixtures,
+`21`-`28`, in a new sibling directory `tests/fixtures/l5_phase4/`, each probing a
+D1/D3 trade-off or a `DECISIONS.md` §5.3 AST-shape gap that no existing L5
+fixture exercised), and `run_eval_suite()` (`scripts/run_eval_suite.py`) is now
+wired into CI as a new, required `eval` job in
+`.github/workflows/tests.yml`, parallel to `test`/`concurrency`, with no
+`services: postgres:` block since the eval harness never touches
+`DATABASE_URL`. `tests/fixtures/l5/`, `scripts/measure_l5.py`, and
+`agent_docs/L5_PROTOCOL.md` are untouched by this phase — the sibling-directory
+design keeps `measure_l5.py`'s own dynamically-computed G2 pool mechanically
+unaffected. Whether the `eval` job actually blocks a merge depends on this
+repo's branch-protection required-status-checks list, a server-side GitHub
+setting this file does not control.
 
 Phase 3 (`src/reachability/db/` — `models.py`'s `TriageJob`/`Base`,
 `session.py`'s lazily-configured `DATABASE_URL`-backed engine/sessionmaker,
@@ -143,10 +160,16 @@ reachable anywhere in the repo (D1), and does the same for any symbol
 referenced by name outside a call position anywhere in the repo — e.g. a
 function passed by reference to a framework callback or
 `monkeypatch.setattr` (D3). Both checks are corpus-wide, not scoped to the
-query target — see DECISIONS.md §4 for why that's an accepted trade-off,
-and for a code-review-found gap (documented, not yet fixed) where an
-intermediate attribute-chain segment of an unrelated call can also trigger
-D3's escape unintentionally.
+query target — see DECISIONS.md §4 for why that's an accepted trade-off.
+A code-review-found gap once raised here — an intermediate attribute-chain
+segment of an unrelated call (e.g. the `probe` in `toolbox.probe.execute()`)
+leaking into D3's escape set — is closed: DECISIONS.md §5.3's narrowing of
+`_LoadOutsideCallCollector` already excludes any Name/Attribute that is not
+itself a value-bound expression at an assignment or call-argument position,
+which excludes exactly this shape; Phase 4's fixture 21
+(`agent_docs/PHASE4_EVAL_HARNESS.md`,
+`tests/fixtures/l5_phase4/21_attribute_chain_segment_escape/`) empirically
+confirms this AST shape now resolves `not_reachable`, not `unknown`.
 
 ## Handoff protocol
 - Agents communicate through files in `.agent/`. Read the previous phase's

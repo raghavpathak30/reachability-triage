@@ -94,8 +94,13 @@ written to `results/l5_<git-sha>.json`.
 corpus (22) plus 8 new fixtures in `tests/fixtures/l5_phase4/`
 (`agent_docs/PHASE4_EVAL_HARNESS.md`) — through the full agent loop
 (`run_triage_loop`, stub LLM) instead of a direct index call — see
-`agent_docs/U6_EVAL_PROTOCOL.md` for the six pre-registered gates
-(G1/G2/G3/G5/G6 hard, G4 reported-only). Run it with:
+`agent_docs/PHASE4_EVAL_PROTOCOL.md` for the six pre-registered gates gating the
+30-fixture corpus (G1/G2/G3/G5/G6 hard — G2's floor is 6 of 7 — G4
+reported-only; `agent_docs/U6_EVAL_PROTOCOL.md` describes the historical
+22-fixture run only).
+It is now a required CI check (the `eval` job in
+`.github/workflows/tests.yml`), not just a local/manual command. Run it
+locally with:
 
 ```
 python scripts/run_eval_suite.py
