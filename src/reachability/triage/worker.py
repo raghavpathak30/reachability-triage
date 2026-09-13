@@ -39,6 +39,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from ..db.repository import serialize_finding
 from ..db.session import get_sessionmaker
 from .job_runner import DEFAULT_TOOL_CALL_BUDGET, run_triage_job
+from .reaper import reap_stale_jobs
 
 if TYPE_CHECKING:
     from main import TriageRequest
@@ -46,6 +47,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
+
+# See agent_docs/PHASE3_PERSISTENCE.md U4: derived from this repo's own
+# slowest currently-observed real job path (the 180s network poll in
+# tests/test_triage_job_lifecycle.py::test_resolvable_package_reaches_completed),
+# ~1.7x headroom above that. Overridable via TRIAGE_STALE_JOB_TIMEOUT_SECONDS,
+# not hardcoded so ops can retune without a code change.
+DEFAULT_STALE_JOB_TIMEOUT_SECONDS = 300
 
 # Copied verbatim from agent_docs/PHASE3_PERSISTENCE.md U3 step 1.
 _CLAIM_SQL = text(
@@ -182,15 +190,9 @@ def run_worker_once(session_factory: sessionmaker, worker_id: str, budget: int) 
 
 
 def main() -> None:
-    # Deferred import: `reaper.py` does not exist until U4 lands as the
-    # next, adjacent commit -- see this module's docstring and
-    # `.agent/plan.md`'s U3 step 2. Deferring the import into this
-    # function body (rather than a top-level import) means this module
-    # still imports cleanly for U3's own tests in the meantime; only
-    # actually running this CLI entrypoint requires U4 to exist.
-    from .reaper import reap_stale_jobs
-
-    timeout_seconds = int(os.environ.get("TRIAGE_STALE_JOB_TIMEOUT_SECONDS", 300))
+    timeout_seconds = int(
+        os.environ.get("TRIAGE_STALE_JOB_TIMEOUT_SECONDS", DEFAULT_STALE_JOB_TIMEOUT_SECONDS)
+    )
     poll_interval = float(
         os.environ.get("TRIAGE_WORKER_POLL_INTERVAL_SECONDS", DEFAULT_POLL_INTERVAL_SECONDS)
     )

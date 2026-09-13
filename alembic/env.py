@@ -17,9 +17,15 @@ from reachability.db.models import Base
 config = context.config
 
 # Interpret the config file for Python logging.
-# This line sets up loggers basically.
+# This line sets up loggers basically. `disable_existing_loggers=False` is
+# required, not optional: fileConfig's default (True) silently disables
+# every logger already created before this call (e.g. this app's own
+# `logging.getLogger(__name__)` loggers, instantiated at import time
+# during pytest collection, well before this module's alembic.command.upgrade
+# call runs inside the postgres_cluster fixture) -- discovered via U4's
+# reap_stale_jobs warning-log test going silently unobserved.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # add your model's MetaData object here
 # for 'autogenerate' support
