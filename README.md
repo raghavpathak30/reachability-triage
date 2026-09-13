@@ -53,7 +53,8 @@ Docker · Docker Compose · GitHub Actions · AWS EC2
   `compute_reachability` call) over 30 fixtures across two directories — the
   reused 22-fixture `tests/fixtures/l5/` corpus plus 8 new fixtures in
   `tests/fixtures/l5_phase4/` (`agent_docs/PHASE4_EVAL_HARNESS.md`) — gated by six
-  pre-registered gates (`agent_docs/U6_EVAL_PROTOCOL.md`). `prompt_registry.py` +
+  pre-registered gates (`agent_docs/PHASE4_EVAL_PROTOCOL.md`, which supersedes
+  `agent_docs/U6_EVAL_PROTOCOL.md`'s historical 22-fixture numbers). `prompt_registry.py` +
   `prompts/v1/*.md` are file-based prompt-versioning scaffolding, not yet consumed
   by the (still-stub) agent loop.
 - `src/reachability/db/` — Postgres persistence (see `agent_docs/PHASE3_PERSISTENCE.md`
