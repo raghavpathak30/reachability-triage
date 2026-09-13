@@ -13,10 +13,9 @@ Edits here do nothing until `/clear`, `/compact`, or restart.
 - Success criteria for any change: the app starts clean, no debug prints
 
 ## NOT BUILT — do not describe these as existing
-PostgreSQL, SQLAlchemy, Docker, a distributed task broker/queue,
-retries/backoff, idempotency, per-user quotas, cost accounting,
-content-hash caching, DB-stored prompt versioning, CI-gated prompt changes,
-live LLM API integration.
+Docker, a distributed task broker/queue, capped retries-with-backoff,
+per-user quotas, cost accounting, content-hash caching, DB-stored prompt
+versioning, CI-gated prompt changes, live LLM API integration.
 These are in DECISIONS.md as intent. Check the code before claiming any
 of them work — in a README, docstring, commit message or comment.
 
@@ -51,6 +50,36 @@ inert today, not read by `stub_llm.py` or `agent_loop.py` (a static test in
 deterministic stub with no prompt-reading code path. Do not describe the eval
 harness as CI-gating prompt changes against a real model — it gates a stub loop's
 verdicts, file-based, not wired into any CI pipeline.
+
+Phase 3 (`src/reachability/db/` — `models.py`'s `TriageJob`/`Base`,
+`session.py`'s lazily-configured `DATABASE_URL`-backed engine/sessionmaker,
+`repository.py`'s `create_job`/`get_job`; `src/reachability/triage/worker.py`;
+`src/reachability/triage/reaper.py`) is built: `main.py`'s in-memory
+`TRIAGE_DB` dict and `BackgroundTasks` dispatch are gone entirely, replaced
+by a Postgres-backed `triage_jobs` table (Alembic-migrated from its first
+commit) and an independent polling worker (`python -m
+reachability.triage.worker`) owning three explicit, independently-committing
+transaction boundaries: claim (`SELECT ... FOR UPDATE SKIP LOCKED`,
+demonstrated safe under real concurrent load by a dedicated stress test —
+8 threads against 20 rows, 5 iterations), execute (`run_triage_job`, no
+lock held), and finalize (guarded by a `worker_id`/`attempt_count` check so
+a late, reaped-but-not-actually-dead worker's result can never clobber a
+reclaiming worker's). A stale-job reaper (`reap_stale_jobs`) resets a
+`running` job whose `updated_at` is older than
+`TRIAGE_STALE_JOB_TIMEOUT_SECONDS` (default 300s) back to `queued`,
+superseding DECISIONS.md §1's earlier "deferred to Phase 4" note for
+dead-worker recovery — see DECISIONS.md §8. **Three accepted limitations,
+stated plainly, not silently absorbed:** (1) no mid-execution heartbeat —
+`updated_at` only moves at claim and finalize, so a single real job
+legitimately running longer than the timeout gets reaped and reclaimed
+while still alive (bounded duplicate work, not corruption, since the
+finalize guard prevents a stale result from ever being applied); (2) this
+design does not recover a genuinely *hung* (not crashed) worker when
+exactly one worker process is running — recovery needs either a process
+supervisor restarting a crash, or a second, independently-running worker
+process; (3) an orphaned `tempfile.TemporaryDirectory` on a hard
+SIGKILL/OOM crash is not cleaned up, a pre-existing possibility made
+mechanically more frequent by this phase's designed crash-and-reclaim path.
 
 AST index (`agent_docs/PHASE1_AST_INDEX.md`): L1 (module discovery + import
 map), L2 (symbol table — functions, classes, methods, nested functions,

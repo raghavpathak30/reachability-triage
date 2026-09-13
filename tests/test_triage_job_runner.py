@@ -90,10 +90,9 @@ def test_success_path_sets_completed_with_finding(tmp_path, monkeypatch):
     )
 
     triage_id = uuid.uuid4()
-    triage_db = {triage_id: _make_record(triage_id)}
-    run_triage_job(triage_db, triage_id, _make_request())
+    record = _make_record(triage_id)
+    run_triage_job(record, _make_request())
 
-    record = triage_db[triage_id]
     assert record["status"] == "completed"
     assert record["finding"] is finding
     assert record["error"] is None
@@ -106,10 +105,9 @@ def test_acquisition_error_sets_failed_with_error(monkeypatch):
     monkeypatch.setattr(job_runner, "acquire_source", _boom)
 
     triage_id = uuid.uuid4()
-    triage_db = {triage_id: _make_record(triage_id)}
-    run_triage_job(triage_db, triage_id, _make_request())
+    record = _make_record(triage_id)
+    run_triage_job(record, _make_request())
 
-    record = triage_db[triage_id]
     assert record["status"] == "failed"
     assert "boom" in record["error"]
 
@@ -123,10 +121,9 @@ def test_index_build_error_sets_failed_with_error(tmp_path, monkeypatch):
     monkeypatch.setattr(job_runner, "build_repo_index", _boom)
 
     triage_id = uuid.uuid4()
-    triage_db = {triage_id: _make_record(triage_id)}
-    run_triage_job(triage_db, triage_id, _make_request())
+    record = _make_record(triage_id)
+    run_triage_job(record, _make_request())
 
-    record = triage_db[triage_id]
     assert record["status"] == "failed"
     assert "boom" in record["error"]
 
@@ -136,10 +133,9 @@ def test_empty_repo_index_sets_failed(tmp_path, monkeypatch):
     monkeypatch.setattr(job_runner, "build_repo_index", lambda repo_root: _make_empty_repo_index())
 
     triage_id = uuid.uuid4()
-    triage_db = {triage_id: _make_record(triage_id)}
-    run_triage_job(triage_db, triage_id, _make_request())
+    record = _make_record(triage_id)
+    run_triage_job(record, _make_request())
 
-    record = triage_db[triage_id]
     assert record["status"] == "failed"
     assert "EmptyRepoIndexError" in record["error"]
 
@@ -165,12 +161,11 @@ def test_unexpected_run_triage_loop_exception_never_propagates(tmp_path, monkeyp
     monkeypatch.setattr(job_runner, "run_triage_loop", _boom)
 
     triage_id = uuid.uuid4()
-    triage_db = {triage_id: _make_record(triage_id)}
+    record = _make_record(triage_id)
 
     # Must not raise -- called directly, no pytest.raises.
-    run_triage_job(triage_db, triage_id, _make_request())
+    run_triage_job(record, _make_request())
 
-    record = triage_db[triage_id]
     assert record["status"] == "failed"
     assert "contract violation" in record["error"]
 
@@ -184,10 +179,9 @@ def test_error_message_is_sanitized_and_bounded(monkeypatch):
     monkeypatch.setattr(job_runner, "acquire_source", _boom)
 
     triage_id = uuid.uuid4()
-    triage_db = {triage_id: _make_record(triage_id)}
-    run_triage_job(triage_db, triage_id, _make_request())
+    record = _make_record(triage_id)
+    run_triage_job(record, _make_request())
 
-    record = triage_db[triage_id]
     assert record["status"] == "failed"
     assert secret_path not in record["error"]
     assert len(record["error"]) <= 2000 + len("... [truncated]")
@@ -203,8 +197,8 @@ def test_workdir_is_removed_after_job(monkeypatch):
     monkeypatch.setattr(job_runner, "acquire_source", _fake_acquire)
 
     triage_id = uuid.uuid4()
-    triage_db = {triage_id: _make_record(triage_id)}
-    run_triage_job(triage_db, triage_id, _make_request())
+    record = _make_record(triage_id)
+    run_triage_job(record, _make_request())
 
     assert "path" in captured_workdir
     assert not captured_workdir["path"].exists()

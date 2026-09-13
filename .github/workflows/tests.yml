@@ -8,10 +8,38 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
       - run: pip install -r requirements.txt
-      - run: pytest
+      - name: Set DATABASE_URL
+        run: echo "DATABASE_URL=postgresql+psycopg://postgres@localhost:5432/postgres" >> "$GITHUB_ENV"
+      - run: pytest --ignore=tests/test_worker_concurrency.py
+
+  concurrency:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt
+      - name: Set DATABASE_URL
+        run: echo "DATABASE_URL=postgresql+psycopg://postgres@localhost:5432/postgres" >> "$GITHUB_ENV"
+      - run: pytest tests/test_worker_concurrency.py -v

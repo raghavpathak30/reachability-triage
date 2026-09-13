@@ -10,20 +10,17 @@ from pathlib import Path
 # from reachability.triage below.
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response, status
+from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, HttpUrl, model_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from reachability.db.repository import create_job, get_job
+from reachability.db.session import get_sessionmaker
 from reachability.triage.agent_models import TriageFinding
-from reachability.triage.job_runner import DEFAULT_TOOL_CALL_BUDGET, run_triage_job
 
 app = FastAPI(title="Reachability Triage Service")
-
-# In-memory store: {UUID: {"id": UUID, "status": TriageStatus, "target": dict,
-#                          "finding": TriageFinding | None, "error": str | None}}
-TRIAGE_DB: dict[uuid.UUID, dict] = {}
 
 
 # --- Exception Handlers (Uniform Error Shape) ---
@@ -140,32 +137,29 @@ def healthz():
     status_code=status.HTTP_202_ACCEPTED,
     response_model=TriageOut,
 )
-def create_triage(payload: TriageRequest, response: Response, background_tasks: BackgroundTasks):
-    triage_id = uuid.uuid4()
+def create_triage(payload: TriageRequest, response: Response):
+    target = (
+        {
+            "repo_url": str(payload.repo_url),
+            "target_module": payload.target_module,
+            "target_symbol": payload.target_symbol,
+        }
+        if payload.repo_url is not None
+        else {
+            "package": payload.package,
+            "version": payload.version,
+            "target_module": payload.target_module,
+            "target_symbol": payload.target_symbol,
+        }
+    )
 
-    record = {
-        "id": triage_id,
-        "status": TriageStatus.QUEUED,
-        "target": (
-            {
-                "repo_url": str(payload.repo_url),
-                "target_module": payload.target_module,
-                "target_symbol": payload.target_symbol,
-            }
-            if payload.repo_url is not None
-            else {
-                "package": payload.package,
-                "version": payload.version,
-                "target_module": payload.target_module,
-                "target_symbol": payload.target_symbol,
-            }
-        ),
-        "finding": None,
-        "error": None,
-    }
-    TRIAGE_DB[triage_id] = record
-
-    background_tasks.add_task(run_triage_job, TRIAGE_DB, triage_id, payload)
+    session = get_sessionmaker()()
+    try:
+        triage_id = create_job(session, target)
+        session.commit()
+        record = get_job(session, triage_id)
+    finally:
+        session.close()
 
     response.headers["Location"] = f"/v1/triage/{triage_id}"
     return record
@@ -174,11 +168,18 @@ def create_triage(payload: TriageRequest, response: Response, background_tasks: 
 @app.get("/v1/triage/{triage_id}", response_model=TriageOut)
 def get_triage(triage_id: str):
     record = None
+    parsed_id = None
     try:
         parsed_id = uuid.UUID(triage_id)
-        record = TRIAGE_DB.get(parsed_id)
     except ValueError:
         pass # It's not a valid UUID, so record stays None
+
+    if parsed_id is not None:
+        session = get_sessionmaker()()
+        try:
+            record = get_job(session, parsed_id)
+        finally:
+            session.close()
 
     if record is None:
         raise StarletteHTTPException(

@@ -3,16 +3,14 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from main import app, TRIAGE_DB
+from main import app
 
 client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
-def clear_triage_db():
-    TRIAGE_DB.clear()
+def _postgres(db_session):
     yield
-    TRIAGE_DB.clear()
 
 
 def test_healthz_returns_200():
@@ -107,13 +105,10 @@ def test_get_triage_happy_path():
     assert response.status_code == 200
     body = response.json()
     assert body["id"] == triage_id
-    # Not asserting a specific status here: BackgroundTasks (added in U5) may
-    # have already advanced the job past "queued" by the time this GET runs
-    # under TestClient (see DECISIONS.md's U5 addendum) -- this test only
-    # covers GET's id-matching/shape plumbing, not the state machine itself
-    # (covered by tests/test_triage_job_runner.py and
-    # tests/test_triage_job_lifecycle.py).
-    assert body["status"] in {"queued", "running", "completed", "failed"}
+    # As of U2, dispatch is exclusively the polling worker's job (U3) -- there
+    # is no BackgroundTasks dispatch anymore, so with no worker running this
+    # GET always finds the job still "queued".
+    assert body["status"] == "queued"
 
 
 def test_get_triage_unknown_id_404():
@@ -165,3 +160,17 @@ def test_get_triage_after_multiple_creates_isolated():
     assert first_get["id"] == first["id"]
     assert second_get["id"] == second["id"]
     assert first_get["id"] != second_get["id"]
+
+
+def test_create_triage_persists_as_queued_with_no_worker_running():
+    response = client.post(
+        "/v1/triage",
+        json={"package": "requests", "version": "2.31.0", "target_module": "placeholder"},
+    )
+    assert response.status_code == 202
+    triage_id = response.json()["id"]
+
+    get_response = client.get(f"/v1/triage/{triage_id}")
+    assert get_response.status_code == 200
+    body = get_response.json()
+    assert body["status"] == "queued"

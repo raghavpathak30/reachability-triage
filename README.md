@@ -43,16 +43,27 @@ Docker · Docker Compose · GitHub Actions · AWS EC2
   (`build_repo_index`), the stub-LLM agent loop (`run_triage_loop`) over
   `search_symbol`/`find_callers`/`resolve_import` with a hard tool-call budget and
   an injection-resistance boundary (`sandbox_untrusted_text`) live from its first
-  commit, and the FastAPI job lifecycle (`job_runner.py`'s `run_triage_job`, wired to
-  `POST`/`GET /v1/triage/{id}` via an in-process `BackgroundTasks` runner — no queue,
-  no persistence beyond the request process's lifetime) are all built. Real LLM
-  integration is not.
+  commit, are built. `worker.py` (the polling worker) and `reaper.py` (the
+  stale-job reaper) — see `agent_docs/PHASE3_PERSISTENCE.md` and
+  `DECISIONS.md` §8 — now own job execution, replacing the earlier
+  in-process `job_runner.py`/`BackgroundTasks` job lifecycle entirely (that
+  code is removed, not kept alongside). Real LLM integration is not built.
 - `src/reachability/agent/` — the eval harness (see `agent_docs/PHASE2_TRIAGE_AGENT.md`
   U6). `run_eval_suite()` runs the full agent loop (not a direct
   `compute_reachability` call) over the reused L5 fixture corpus, gated by six
   pre-registered gates (`agent_docs/U6_EVAL_PROTOCOL.md`). `prompt_registry.py` +
   `prompts/v1/*.md` are file-based prompt-versioning scaffolding, not yet consumed
   by the (still-stub) agent loop.
+- `src/reachability/db/` — Postgres persistence (see `agent_docs/PHASE3_PERSISTENCE.md`
+  and `DECISIONS.md` §8). `POST`/`GET /v1/triage` (`main.py`) now read/write a real,
+  Alembic-migrated `triage_jobs` table; `python -m reachability.triage.worker`
+  is an independent process that claims a queued job (`SELECT ... FOR
+  UPDATE SKIP LOCKED`, demonstrated safe under real concurrent load),
+  executes it, and finalizes it across three separately-committing
+  transactions; `reaper.py` reclaims a job whose worker crashed
+  mid-execution. Not built: a distributed broker/queue (the worker polls
+  one Postgres table directly), capped retries-with-backoff, and a
+  mid-execution worker heartbeat.
 - `DECISIONS.md` — dated design decisions and their reasoning
 
 ## L5 measurement
