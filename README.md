@@ -50,7 +50,9 @@ Docker · Docker Compose · GitHub Actions · AWS EC2
   code is removed, not kept alongside). Real LLM integration is not built.
 - `src/reachability/agent/` — the eval harness (see `agent_docs/PHASE2_TRIAGE_AGENT.md`
   U6). `run_eval_suite()` runs the full agent loop (not a direct
-  `compute_reachability` call) over the reused L5 fixture corpus, gated by six
+  `compute_reachability` call) over 30 fixtures across two directories — the
+  reused 22-fixture `tests/fixtures/l5/` corpus plus 8 new fixtures in
+  `tests/fixtures/l5_phase4/` (`agent_docs/PHASE4_EVAL_HARNESS.md`) — gated by six
   pre-registered gates (`agent_docs/U6_EVAL_PROTOCOL.md`). `prompt_registry.py` +
   `prompts/v1/*.md` are file-based prompt-versioning scaffolding, not yet consumed
   by the (still-stub) agent loop.
@@ -88,10 +90,12 @@ written to `results/l5_<git-sha>.json`.
 
 ## U6 eval harness
 
-`scripts/run_eval_suite.py` reuses the same `tests/fixtures/l5/` corpus but drives
-each fixture through the full agent loop (`run_triage_loop`, stub LLM) instead of
-a direct index call — see `agent_docs/U6_EVAL_PROTOCOL.md` for the six
-pre-registered gates (G1/G2/G3/G5/G6 hard, G4 reported-only). Run it with:
+`scripts/run_eval_suite.py` drives 30 fixtures — the reused `tests/fixtures/l5/`
+corpus (22) plus 8 new fixtures in `tests/fixtures/l5_phase4/`
+(`agent_docs/PHASE4_EVAL_HARNESS.md`) — through the full agent loop
+(`run_triage_loop`, stub LLM) instead of a direct index call — see
+`agent_docs/U6_EVAL_PROTOCOL.md` for the six pre-registered gates
+(G1/G2/G3/G5/G6 hard, G4 reported-only). Run it with:
 
 ```
 python scripts/run_eval_suite.py

@@ -1,0 +1,9 @@
+{
+  "scenario": "Two modules each define run(); mod_a.run is dead, mod_b.run is passed by reference to a framework registration call. Probes D3's cross-module, name-only escape trade-off ('regardless of target_module').",
+  "sink": {"file": "repo/pkg/mod_a.py", "line": 1},
+  "entrypoints": [{"file": "repo/pkg/entry.py", "line": 6}],
+  "allowed_verdicts": ["unknown"],
+  "forbidden_verdicts": ["not_reachable", "reachable"],
+  "decidable": false,
+  "human_note": "pkg.mod_a.run is never called or imported by anything. pkg.mod_b.run is a different function, called directly from the entrypoint and also passed by reference to app.on_event(...). D3's escape check is name-only (compute_reachability's Step 5 records 'run' as an escaped name with no module provenance), so it suppresses not_reachable for pkg.mod_a.run too, even though the actual reference is to a different module's same-named function."
+}

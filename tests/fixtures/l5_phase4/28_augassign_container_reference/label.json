@@ -1,0 +1,9 @@
+{
+  "scenario": "A dead function is appended to a list via an AugAssign (HANDLERS += [vulnerable]) -- probes the DECISIONS.md §5.3 narrowing's explicitly-covered AugAssign case, untested by any existing fixture.",
+  "sink": {"file": "repo/pkg/handlers4.py", "line": 1},
+  "entrypoints": [{"file": "repo/pkg/entry.py", "line": 5}],
+  "allowed_verdicts": ["unknown", "reachable"],
+  "forbidden_verdicts": ["not_reachable"],
+  "decidable": false,
+  "human_note": "vulnerable is never called anywhere, but HANDLERS += [vulnerable] value-binds it as a direct element of a list literal on the RHS of an AugAssign. _LoadOutsideCallCollector.visit_AugAssign calls _record_value_bound on the RHS, which recurses into the list literal's elements, so 'vulnerable' is recorded as escaped."
+}

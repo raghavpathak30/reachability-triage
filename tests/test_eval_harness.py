@@ -85,7 +85,7 @@ def test_evaluate_eval_gates_fails_on_loop_degradation():
 def test_run_eval_suite_shape_and_gates():
     report = run_eval_suite()
 
-    assert len(report.fixtures) == 22
+    assert len(report.fixtures) == 30
 
     required_keys = {
         "id",

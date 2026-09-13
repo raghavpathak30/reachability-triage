@@ -1,0 +1,9 @@
+{
+  "scenario": "Regression-safety check: a function called directly from the entrypoint (high-confidence edge) coexists with an unrelated, also-reachable opaque getattr-dispatch subsystem elsewhere in the same repo. D1's opaque-call check must never override an already-confident reachable verdict.",
+  "sink": {"file": "repo/pkg/target2.py", "line": 1},
+  "entrypoints": [{"file": "repo/pkg/entry.py", "line": 4}],
+  "allowed_verdicts": ["reachable"],
+  "forbidden_verdicts": ["not_reachable", "unknown"],
+  "decidable": true,
+  "human_note": "pkg.target2.vulnerable is called directly from the entrypoint (target2.vulnerable()), a high-confidence edge that compute_reachability's Step 1 BFS matches and returns on immediately -- before Step 4's repo-wide opaque-call check ever runs. The unrelated pkg.dispatcher getattr-dispatch subsystem, also reachable from the same entrypoint, exists purely to confirm its presence does not downgrade this already-confident reachable verdict to unknown."
+}

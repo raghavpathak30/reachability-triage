@@ -1,0 +1,9 @@
+{
+  "scenario": "Negative control: a dead function with a globally unique name, alongside an unrelated, differently-named function passed by reference to a framework registration call. Confirms the escape mechanism is name-scoped, not repo-scoped.",
+  "sink": {"file": "repo/pkg/orphan2.py", "line": 1},
+  "entrypoints": [{"file": "repo/pkg/entry.py", "line": 10}],
+  "allowed_verdicts": ["not_reachable"],
+  "forbidden_verdicts": ["unknown", "reachable"],
+  "decidable": true,
+  "human_note": "pkg.orphan2.orphan_target is never called or imported, and its name never appears anywhere else in the repository. other_handler is a distinct, differently-named function that is called directly and passed by reference to app.on_event(...); this only adds 'other_handler' to the escape set, not 'orphan_target'. Confirms D3's escape check does not over-fire on an unrelated repo simply because some other name is being passed around by reference."
+}

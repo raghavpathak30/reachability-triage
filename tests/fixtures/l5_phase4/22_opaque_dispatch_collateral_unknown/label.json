@@ -1,0 +1,9 @@
+{
+  "scenario": "A nameless getattr(sys.modules[__name__], name)() dispatch is reachable from the entrypoint; a wholly unrelated, never-called, never-referenced function elsewhere in the repo is probed to confirm D1's opaque-call check is repo-wide, not scoped to the queried symbol.",
+  "sink": {"file": "repo/pkg/orphan.py", "line": 1},
+  "entrypoints": [{"file": "repo/pkg/entry.py", "line": 12}],
+  "allowed_verdicts": ["unknown"],
+  "forbidden_verdicts": ["not_reachable", "reachable"],
+  "decidable": false,
+  "human_note": "pkg/orphan.py::orphan has no relationship whatsoever to pkg/entry.py's getattr(sys.modules[__name__], name)() dispatch subsystem: no name collision, no import, no reference. Per DECISIONS.md D1, compute_reachability's Step 4 degrades to unknown whenever a reachable opaque call (no literal target name) exists anywhere in the repo, regardless of the query target -- this fixture probes that this repo-wide breadth really does cover a completely collateral symbol, not just a same-named one."
+}

@@ -29,7 +29,10 @@ from reachability.triage.index_adapter import build_repo_index
 from reachability.triage.stub_llm import DeterministicPolicyStubLLMClient
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-EVAL_FIXTURES_ROOT = REPO_ROOT / "tests" / "fixtures" / "l5"
+EVAL_FIXTURES_ROOTS: list[Path] = [
+    REPO_ROOT / "tests" / "fixtures" / "l5",
+    REPO_ROOT / "tests" / "fixtures" / "l5_phase4",
+]
 RESULTS_DIR = REPO_ROOT / "results"
 EVAL_BUDGET = 50
 WALL_CLOCK_BUDGET_SECONDS = 10
@@ -48,8 +51,8 @@ def _alarm_handler(signum, frame):
     raise _TimeoutError(f"exceeded {WALL_CLOCK_BUDGET_SECONDS}s wall-clock budget")
 
 
-def discover_eval_fixtures(root: Path) -> list[Path]:
-    return sorted(p for p in root.iterdir() if p.is_dir())
+def discover_eval_fixtures(roots: list[Path]) -> list[Path]:
+    return sorted(p for root in roots for p in root.iterdir() if p.is_dir())
 
 
 def load_label(fixture_dir: Path) -> dict:
@@ -266,7 +269,7 @@ def print_eval_table(results: list[dict]) -> None:
 
 
 def run_eval_suite() -> EvalReport:
-    fixture_dirs = discover_eval_fixtures(EVAL_FIXTURES_ROOT)
+    fixture_dirs = discover_eval_fixtures(EVAL_FIXTURES_ROOTS)
     results = [measure_eval_fixture(d) for d in fixture_dirs]
     gates = evaluate_eval_gates(results)
     sha = git_sha()

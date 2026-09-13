@@ -1,0 +1,9 @@
+{
+  "scenario": "A dead function is stored as the sole element of a tuple literal (AVAILABLE = (vulnerable,)) assigned at module level -- probes the DECISIONS.md §5.3 narrowing's explicitly-covered 'direct element of a container literal' case with a tuple, an AST shape none of the existing L5 fixtures exercise.",
+  "sink": {"file": "repo/pkg/handlers3.py", "line": 1},
+  "entrypoints": [{"file": "repo/pkg/entry.py", "line": 5}],
+  "allowed_verdicts": ["unknown", "reachable"],
+  "forbidden_verdicts": ["not_reachable"],
+  "decidable": false,
+  "human_note": "vulnerable is never called anywhere, but AVAILABLE = (vulnerable,) value-binds it as a direct element of a tuple literal assigned at module level. _LoadOutsideCallCollector's _record_value_bound recurses into ast.Tuple elements at an Assign's RHS, so 'vulnerable' is recorded as escaped and compute_reachability cannot confidently return not_reachable."
+}

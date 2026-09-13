@@ -1,0 +1,9 @@
+{
+  "scenario": "An unrelated call's attribute-chain receiver (toolbox.probe.execute()) shares a name with a dead target function, probing whether an intermediate attribute-chain segment still leaks into the escape set after the DECISIONS.md §5.3 narrowing.",
+  "sink": {"file": "repo/pkg/target.py", "line": 1},
+  "entrypoints": [{"file": "repo/pkg/entry.py", "line": 12}],
+  "allowed_verdicts": ["not_reachable"],
+  "forbidden_verdicts": ["reachable", "reachable_only_from_tests", "unknown"],
+  "decidable": true,
+  "human_note": "pkg/target.py::probe is never called or imported anywhere. The only appearance of the string \"probe\" anywhere else in the repository is as an intermediate attribute-chain segment in toolbox.probe.execute() (entry.py) and as the assignment target self.probe = Toolbox.Probe() -- neither is a value-bound Name/Attribute at an assignment RHS or call argument position, so _LoadOutsideCallCollector's narrowed rule (DECISIONS.md §5.3) does not record \"probe\" as escaped. Empirically confirmed via measure_eval_fixture before this label was finalized."
+}

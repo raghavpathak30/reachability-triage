@@ -1,0 +1,9 @@
+{
+  "scenario": "Regression-safety check: a function called directly from the entrypoint (high-confidence edge) whose name is also passed by reference to a framework registration call elsewhere. D3's name-escape check must never override an already-confident reachable verdict.",
+  "sink": {"file": "repo/pkg/target3.py", "line": 1},
+  "entrypoints": [{"file": "repo/pkg/entry.py", "line": 6}],
+  "allowed_verdicts": ["reachable"],
+  "forbidden_verdicts": ["not_reachable", "unknown"],
+  "decidable": true,
+  "human_note": "pkg.target3.handler is called directly from the entrypoint (target3.handler()), a high-confidence edge Step 1's BFS matches and returns on immediately -- before Step 5's repo-wide name-escape check ever runs, even though handler's name is also in the escape set (it is separately passed by reference to app.on_event(...))."
+}

@@ -40,8 +40,9 @@ restart.
 
 Phase 2 U6 (`src/reachability/agent/eval_harness.py`) is built: `run_eval_suite()`
 runs U3/U4's full agent loop (`run_triage_loop`, not a direct
-`compute_reachability` call) over all 22 fixtures in `tests/fixtures/l5/`
-(reused, no new corpus), gated by six pre-registered gates
+`compute_reachability` call) over 30 fixtures across two directories — the
+original 22 in `tests/fixtures/l5/` (reused) plus 8 new fixtures added by Phase 4
+in `tests/fixtures/l5_phase4/` — gated by six pre-registered gates
 (`agent_docs/U6_EVAL_PROTOCOL.md`): G1/G2/G3/G5/G6 hard, G4 reported-only.
 `src/reachability/agent/prompt_registry.py` + `prompts/v1/*.md` are file-based
 prompt-versioning scaffolding (`PROMPT_VERSION = "v1"`, `load_prompt()`) — genuinely
