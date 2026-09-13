@@ -756,6 +756,21 @@ mirroring `job_runner.py`/`worker.py`'s own docstrings:
    a normally-executed `__exit__`, which a hard kill skips entirely) —
    pre-existing, made mechanically more frequent by this phase's designed
    crash-and-reclaim path.
+7. **Post-review status note (shipped): a fourth risk from the same
+   family — a malformed stored `target` or other failure outside
+   `run_triage_job`'s own guard crashing the whole worker process — was
+   flagged by review (`.agent/review.md`) and closed, not just
+   documented.** `run_worker_once` (`worker.py`) now wraps
+   `_target_to_triage_request`/`run_triage_job` in its own guard: any
+   exception there finalizes the row as `failed` (via `job_runner.py`'s
+   now-public `sanitize_error`) instead of leaving it `running` until the
+   reaper's timeout. `main()`'s loop itself also never dies from a
+   residual exception (e.g. inside `finalize_job` or `reap_stale_jobs`) —
+   it logs and keeps polling. One narrow gap remains by design, not
+   oversight: a failure raised by `finalize_job` itself is not retried as
+   a second finalize call (which could fail identically), so that row is
+   left for the reaper's timeout — the same recovery path as any other
+   crash-during-execute case.
 
 **Explicitly still deferred, not solved by this phase:** smart
 retries-with-backoff / a capped retry policy (the reaper resets a stale

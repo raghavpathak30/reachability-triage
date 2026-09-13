@@ -22,7 +22,7 @@ from reachability.triage.agent_models import TriageFinding
 from reachability.triage.index_adapter import IndexBuildError, RepoIndex, build_repo_index
 from reachability.triage.job_runner import (
     EmptyRepoIndexError,
-    _sanitize_error,
+    sanitize_error,
     run_triage_job,
 )
 from reachability.index.models import DiscoveryReport
@@ -206,7 +206,7 @@ def test_workdir_is_removed_after_job(monkeypatch):
 
 @pytest.mark.network
 def test_sanitize_error_against_real_captured_exceptions(tmp_path):
-    """Checks `_sanitize_error`'s coverage against REAL captured exceptions
+    """Checks `sanitize_error`'s coverage against REAL captured exceptions
     from U1/U2's actual failure paths, not synthetic payloads -- see
     `.agent/plan.md`'s Test plan section (Critique #4) for why this needs
     two `AcquisitionError` sub-cases rather than one.
@@ -214,7 +214,7 @@ def test_sanitize_error_against_real_captured_exceptions(tmp_path):
     # --- AcquisitionError sub-case (i): real network call, nonexistent
     # package. Negative-result check: real pip's "no wheel"/"no matching
     # distribution" stderr for this failure mode contains nothing sensitive
-    # to redact in the first place -- this confirms _sanitize_error doesn't
+    # to redact in the first place -- this confirms sanitize_error doesn't
     # mangle an already-safe message, not that it redacted anything.
     request = _make_request(
         package="this-package-definitely-does-not-exist-reachability-triage",
@@ -222,7 +222,7 @@ def test_sanitize_error_against_real_captured_exceptions(tmp_path):
     )
     with pytest.raises(AcquisitionError) as exc_info:
         acquire_source(request, tmp_path / "sub1")
-    sanitized = _sanitize_error(exc_info.value)
+    sanitized = sanitize_error(exc_info.value)
     assert "AcquisitionError" in sanitized
 
     # --- AcquisitionError sub-case (ii): a real subprocess.TimeoutExpired
@@ -252,7 +252,7 @@ def test_sanitize_error_against_real_captured_exceptions(tmp_path):
 
     real_download_dir = str(workdir2 / "download")
     assert real_download_dir in str(exc_info2.value)
-    sanitized2 = _sanitize_error(exc_info2.value)
+    sanitized2 = sanitize_error(exc_info2.value)
     assert real_download_dir not in sanitized2
 
     # --- IndexBuildError half: a real invocation of build_repo_index
@@ -260,5 +260,5 @@ def test_sanitize_error_against_real_captured_exceptions(tmp_path):
     nonexistent = tmp_path / "does" / "not" / "exist"
     with pytest.raises(IndexBuildError) as exc_info3:
         build_repo_index(nonexistent)
-    sanitized3 = _sanitize_error(exc_info3.value)
+    sanitized3 = sanitize_error(exc_info3.value)
     assert str(nonexistent) not in sanitized3

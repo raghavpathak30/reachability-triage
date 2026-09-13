@@ -142,3 +142,28 @@ def test_run_worker_once_end_to_end(db_session, monkeypatch):
 def test_run_worker_once_empty_queue_returns_false(db_session):
     session_factory = _session_factory_for(db_session)
     assert run_worker_once(session_factory, "test-worker", budget=30) is False
+
+
+def test_run_worker_once_malformed_target_finalizes_as_failed_not_crash(db_session):
+    """A stored `target` that no longer matches `TriageRequest`'s schema
+    (here: missing the required `target_module`) must finalize the row as
+    `failed`, not raise out of `run_worker_once` and crash the caller --
+    see `worker.py`'s `run_worker_once` docstring for why this guard
+    exists (a reviewer-flagged gap: `_target_to_triage_request` sits
+    outside `run_triage_job`'s own "never raises" guarantee).
+    """
+    malformed_target = {"package": "requests", "version": "2.31.0"}  # missing target_module
+    job_id = _insert_queued_job(db_session, malformed_target)
+
+    session_factory = _session_factory_for(db_session)
+    claimed_something = run_worker_once(session_factory, "test-worker", budget=30)
+
+    assert claimed_something is True
+
+    row = db_session.get(TriageJob, job_id)
+    db_session.refresh(row)
+    assert row.status == "failed"
+    assert row.error is not None
+    assert row.finding is None
+    assert row.worker_id == "test-worker"
+    assert row.attempt_count == 1

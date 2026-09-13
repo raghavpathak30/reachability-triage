@@ -105,12 +105,16 @@ class EmptyRepoIndexError(RuntimeError):
     """
 
 
-def _sanitize_error(exc: Exception) -> str:
+def sanitize_error(exc: Exception) -> str:
     """Build the stored `error` string for a failed job.
 
     `f"{type(exc).__name__}: {exc}"`, passed through `sandbox_untrusted_text`
     (see this module's docstring, decision 6), then truncated to
     `_MAX_ERROR_LENGTH` characters.
+
+    Public (not a leading-underscore name) so `worker.py` can reuse it for failures
+    that occur outside `run_triage_job`'s own try/except (e.g. a malformed
+    stored `target`) rather than duplicating this sanitization logic.
     """
     message = f"{type(exc).__name__}: {exc}"
     sanitized = sandbox_untrusted_text(message)
@@ -153,7 +157,7 @@ def run_triage_job(
                 _on_raw_tool_result=None,
             )
     except Exception as exc:
-        record["error"] = _sanitize_error(exc)
+        record["error"] = sanitize_error(exc)
         record["status"] = "failed"
     else:
         record["finding"] = finding

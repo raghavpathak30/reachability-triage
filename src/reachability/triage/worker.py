@@ -38,7 +38,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ..db.repository import serialize_finding
 from ..db.session import get_sessionmaker
-from .job_runner import DEFAULT_TOOL_CALL_BUDGET, run_triage_job
+from .job_runner import DEFAULT_TOOL_CALL_BUDGET, run_triage_job, sanitize_error
 from .reaper import reap_stale_jobs
 
 if TYPE_CHECKING:
@@ -173,6 +173,20 @@ def finalize_job(
 def run_worker_once(session_factory: sessionmaker, worker_id: str, budget: int) -> bool:
     """Drive exactly one unit of work: claim, execute, finalize. Returns
     `False` on an empty queue (nothing claimed), `True` otherwise.
+
+    `run_triage_job` never raises (see job_runner.py), but
+    `_target_to_triage_request` (a bare `TriageRequest(**target)`) sits
+    outside that guarantee -- a stored `target` that no longer matches
+    `TriageRequest`'s current schema (e.g. after a field rename ships while
+    old `queued` rows remain) would otherwise propagate out of this
+    function and crash the whole worker process instead of failing just
+    this one job. Guarded here: any exception raised while building the
+    request or running the job finalizes this row as `failed` (with
+    `sanitize_error`'s output as `error`) instead of leaving it `running`
+    until the reaper's timeout. A failure raised by `finalize_job` itself
+    is not re-caught here -- a second finalize call after the first one
+    raised could fail for the same reason -- and is left for `main()`'s own
+    outer guard and the reaper's timeout to recover.
     """
     session = session_factory()
     try:
@@ -181,8 +195,19 @@ def run_worker_once(session_factory: sessionmaker, worker_id: str, budget: int) 
             return False
 
         record = _record_from_claimed(claimed)
-        request = _target_to_triage_request(claimed["target"])
-        run_triage_job(record, request, budget)
+        try:
+            request = _target_to_triage_request(claimed["target"])
+            run_triage_job(record, request, budget)
+        except Exception as exc:
+            record["status"] = "failed"
+            record["error"] = sanitize_error(exc)
+            logger.warning(
+                "job %s failed outside run_triage_job's own guard (%s: %s) "
+                "-- finalizing as failed instead of leaving it running",
+                claimed["id"],
+                type(exc).__name__,
+                exc,
+            )
         finalize_job(session, claimed["id"], worker_id, claimed["attempt_count"], record)
         return True
     finally:
@@ -200,12 +225,27 @@ def main() -> None:
     session_factory = get_sessionmaker()
 
     while True:
-        reaper_session = session_factory()
         try:
-            reap_stale_jobs(reaper_session, timeout_seconds)
-        finally:
-            reaper_session.close()
-        if not run_worker_once(session_factory, worker_id, DEFAULT_TOOL_CALL_BUDGET):
+            reaper_session = session_factory()
+            try:
+                reap_stale_jobs(reaper_session, timeout_seconds)
+            finally:
+                reaper_session.close()
+            claimed_something = run_worker_once(
+                session_factory, worker_id, DEFAULT_TOOL_CALL_BUDGET
+            )
+        except Exception:
+            # Last-resort guard: run_worker_once already converts a
+            # job-level failure into a `failed` row (see its own
+            # docstring); this catches anything that isn't a job-level
+            # failure -- e.g. a transient DB error inside finalize_job or
+            # reap_stale_jobs -- so one bad iteration logs and the worker
+            # keeps polling instead of the whole process dying. Any row
+            # left `running` by this path is still recovered by the
+            # reaper's timeout on a later iteration.
+            logger.exception("worker loop iteration failed unexpectedly; continuing")
+            claimed_something = False
+        if not claimed_something:
             time.sleep(poll_interval)
 
 

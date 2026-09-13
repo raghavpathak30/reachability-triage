@@ -80,6 +80,17 @@ supervisor restarting a crash, or a second, independently-running worker
 process; (3) an orphaned `tempfile.TemporaryDirectory` on a hard
 SIGKILL/OOM crash is not cleaned up, a pre-existing possibility made
 mechanically more frequent by this phase's designed crash-and-reclaim path.
+A fourth risk — a malformed stored `target` or other failure outside
+`run_triage_job`'s own guard crashing the whole worker process (review
+finding, `.agent/review.md`) — is guarded, not merely documented:
+`run_worker_once` finalizes such a job as `failed` instead of leaving it
+`running`, and `main()`'s loop itself never dies from a residual exception
+(e.g. inside `finalize_job` or `reap_stale_jobs`) — it logs and keeps
+polling. The one narrow remaining gap: a failure raised by `finalize_job`
+itself (rather than by building the request or running the job) is not
+retried as a second finalize call, since that could fail for the same
+reason — that row is left `running` for the reaper's timeout to recover,
+same as any other crash-during-execute case.
 
 AST index (`agent_docs/PHASE1_AST_INDEX.md`): L1 (module discovery + import
 map), L2 (symbol table — functions, classes, methods, nested functions,
