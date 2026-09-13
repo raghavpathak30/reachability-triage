@@ -10,11 +10,16 @@ from .models import TriageJob
 _FINDING_ADAPTER = TypeAdapter(TriageFinding)
 
 
-def _serialize_finding(finding: TriageFinding) -> dict:
+def serialize_finding(finding: TriageFinding) -> dict:
+    """Shared by `get_job`/`create_job` here and `worker.py`'s
+    `finalize_job` -- any write path that stores a non-null `finding`
+    JSONB value goes through this, not a duplicated inline call to
+    `_FINDING_ADAPTER`.
+    """
     return _FINDING_ADAPTER.dump_python(finding, mode="json")
 
 
-def _deserialize_finding(raw: dict) -> TriageFinding:
+def deserialize_finding(raw: dict) -> TriageFinding:
     return _FINDING_ADAPTER.validate_python(raw)
 
 
@@ -39,6 +44,6 @@ def get_job(session: Session, job_id: uuid.UUID) -> dict | None:
     return {
         "id": job.id,
         "status": job.status,
-        "finding": _deserialize_finding(job.finding) if job.finding is not None else None,
+        "finding": deserialize_finding(job.finding) if job.finding is not None else None,
         "error": job.error,
     }

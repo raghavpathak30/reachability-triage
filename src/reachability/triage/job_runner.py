@@ -79,7 +79,6 @@ non-`None` value from any production code path.
 from __future__ import annotations
 
 import tempfile
-import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -121,16 +120,14 @@ def _sanitize_error(exc: Exception) -> str:
 
 
 def run_triage_job(
-    triage_db: dict[uuid.UUID, dict],
-    triage_id: uuid.UUID,
+    record: dict,
     request: "TriageRequest",
     budget: int = DEFAULT_TOOL_CALL_BUDGET,
 ) -> None:
-    """Run one triage job end-to-end and mutate `triage_db[triage_id]` in
-    place through `RUNNING -> COMPLETED/FAILED`. Never raises -- see this
-    module's docstring for the full exception-handling contract.
+    """Run one triage job end-to-end and mutate `record` in place through
+    `RUNNING -> COMPLETED/FAILED`. Never raises -- see this module's
+    docstring for the full exception-handling contract.
     """
-    record = triage_db[triage_id]
     record["status"] = "running"
 
     try:
