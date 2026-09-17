@@ -1,8 +1,8 @@
-"""Value types shared by the U3/U4 triage agent loop.
+"""Value types shared by the LangGraph triage loop (`langgraph_loop.py`).
 
 These are plain, frozen dataclasses -- no behavior, no I/O -- following the
 `RepoIndex` precedent in `src/reachability/triage/index_adapter.py`. They
-exist so the loop (`agent_loop.py`) and the stub LLM clients
+exist so the loop (`langgraph_loop.py`) and the stub LLM clients
 (`stub_llm.py`) can pass structured data between each other without either
 side depending on the other's internals.
 
@@ -27,7 +27,7 @@ class Message:
 
     `role` is one of `"system"`, `"user"`, `"assistant"`, `"tool"` (spec
     lines 148-150). Tool-call *results* must only ever be appended with
-    `role="tool"` -- see `agent_loop.py`'s `_append_tool_result`, the one
+    `role="tool"` -- see `langgraph_loop.py`'s `sanitize_node`, the one
     call site that constructs a `Message` from a tool result.
     """
 

@@ -110,7 +110,7 @@ def test_full_lifecycle_completed_via_monkeypatched_chain(monkeypatch, db_sessio
     `02_transitive_three_hop`, known to produce a `REACHABLE` verdict with
     a 3-edge path (`label.json`'s `allowed_verdicts: ["reachable"]`).
     `build_repo_index` is left un-mocked, so it runs for real against that
-    fixture directory; `run_triage_loop` also runs for real via the real
+    fixture directory; `run_triage_loop_langgraph` also runs for real via the real
     `DeterministicPolicyStubLLMClient`.
     """
     target_module, target_symbol = _resolve_fixture_target()

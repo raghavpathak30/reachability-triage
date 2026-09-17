@@ -3,8 +3,8 @@
 Covers `evaluate_eval_gates` against synthetic rows (fast, no real corpus
 run needed), `run_eval_suite()` against the real reused `tests/fixtures/l5/`
 corpus, `prompt_registry.py`'s `load_prompt`, and a static guard that the
-prompt-versioning scaffolding stays uncomsumed by `triage/stub_llm.py` and
-`triage/agent_loop.py`.
+prompt-versioning scaffolding stays uncomsumed by `triage/stub_llm.py`,
+`triage/langgraph_loop.py`, and `triage/tool_dispatch.py`.
 """
 
 from pathlib import Path
@@ -135,10 +135,15 @@ def test_prompt_registry_loads_v1_system_prompt():
         raise AssertionError("expected FileNotFoundError for a missing prompt name")
 
 
-def test_stub_llm_and_agent_loop_do_not_import_prompt_registry():
+def test_stub_llm_and_langgraph_loop_do_not_import_prompt_registry():
     stub_llm_source = (REPO_ROOT / "src" / "reachability" / "triage" / "stub_llm.py").read_text()
-    agent_loop_source = (REPO_ROOT / "src" / "reachability" / "triage" / "agent_loop.py").read_text()
+    langgraph_loop_source = (
+        REPO_ROOT / "src" / "reachability" / "triage" / "langgraph_loop.py"
+    ).read_text()
+    tool_dispatch_source = (
+        REPO_ROOT / "src" / "reachability" / "triage" / "tool_dispatch.py"
+    ).read_text()
 
-    for source in (stub_llm_source, agent_loop_source):
+    for source in (stub_llm_source, langgraph_loop_source, tool_dispatch_source):
         assert "prompt_registry" not in source
         assert "prompts/v1" not in source

@@ -40,10 +40,13 @@ Docker · Docker Compose · GitHub Actions · AWS EC2
   corpus + measurement) are built.
 - `src/reachability/triage/` — the triage agent (see `agent_docs/PHASE2_TRIAGE_AGENT.md`).
   Source acquisition (`acquire_source`), the index-pipeline adapter
-  (`build_repo_index`), the stub-LLM agent loop (`run_triage_loop`) over
-  `search_symbol`/`find_callers`/`resolve_import` with a hard tool-call budget and
-  an injection-resistance boundary (`sandbox_untrusted_text`) live from its first
-  commit, are built. `worker.py` (the polling worker) and `reaper.py` (the
+  (`build_repo_index`), the stub-LLM triage loop
+  (`langgraph_loop.py`'s `run_triage_loop_langgraph`/`build_langgraph_triage_graph`,
+  a LangGraph `StateGraph` as of Phase LangGraph's Unit 6 cutover — see
+  `DECISIONS.md` §10) over `search_symbol`/`find_callers`/`resolve_import`
+  with a hard tool-call budget and an injection-resistance boundary
+  (`sandbox_untrusted_text`) live from its first commit, are built.
+  `worker.py` (the polling worker) and `reaper.py` (the
   stale-job reaper) — see `agent_docs/PHASE3_PERSISTENCE.md` and
   `DECISIONS.md` §8 — now own job execution, replacing the earlier
   in-process `job_runner.py`/`BackgroundTasks` job lifecycle entirely (that
@@ -93,8 +96,8 @@ written to `results/l5_<git-sha>.json`.
 
 `scripts/run_eval_suite.py` drives 30 fixtures — the reused `tests/fixtures/l5/`
 corpus (22) plus 8 new fixtures in `tests/fixtures/l5_phase4/`
-(`agent_docs/PHASE4_EVAL_HARNESS.md`) — through the full agent loop
-(`run_triage_loop`, stub LLM) instead of a direct index call — see
+(`agent_docs/PHASE4_EVAL_HARNESS.md`) — through the full triage agent loop
+(`run_triage_loop_langgraph`, stub LLM) instead of a direct index call — see
 `agent_docs/PHASE4_EVAL_PROTOCOL.md` for the six pre-registered gates gating the
 30-fixture corpus (G1/G2/G3/G5/G6 hard — G2's floor is 6 of 7 — G4
 reported-only; `agent_docs/U6_EVAL_PROTOCOL.md` describes the historical

@@ -1,23 +1,23 @@
-"""Deterministic stub LLM clients for the U3/U4 triage agent loop.
+"""Deterministic stub LLM clients for the LangGraph triage loop.
 
-`run_triage_loop` (`agent_loop.py`) takes an `llm_client` argument and
-never calls a live LLM API -- every gate in this project (gate (i),
-gate (ii), and U4's adversarial gate) runs against one of the small,
-deterministic policy objects defined here (or, for U4's adversarial
+`run_triage_loop_langgraph` (`langgraph_loop.py`) takes an `llm_client`
+argument and never calls a live LLM API -- every gate in this project
+(gate (i), gate (ii), and U4's adversarial gate) runs against one of the
+small, deterministic policy objects defined here (or, for U4's adversarial
 tests, a deliberately naive one defined locally in
-`tests/test_triage_agent_loop_adversarial.py`, never imported by this
+`tests/test_triage_langgraph_loop_adversarial.py`, never imported by this
 module or any other `src/` code). Non-determinism from a live API cannot
 gate CI -- see `agent_docs/PHASE2_TRIAGE_AGENT.md` §3, U3 gate (ii).
 
 `DeterministicPolicyStubLLMClient` is the well-behaved client used for
 gate (i) and gate (ii). It never inspects `repo_index` directly and holds
 no reference to `edges`/`symbol_index` -- like a real LLM, it only reads
-the `context: list[Message]` it is handed by `run_triage_loop`, plus
-whatever state it decided to remember about its own prior requests. It
+the `context: list[Message]` it is handed by `run_triage_loop_langgraph`,
+plus whatever state it decided to remember about its own prior requests. It
 learns the confirmed target node id, and each newly discovered caller id,
 by parsing the *stringified* tool-result text the loop appended to
 context (the default `repr()` of the `list[SymbolNode]`/`list[CallEdge]`
-tool return values, which is what `agent_loop.py` passes to
+tool return values, which is what `langgraph_loop.py` passes to
 `sandbox_untrusted_text` before appending it as a `role="tool"`
 `Message`). This is why it is deterministic per fixture without any
 hand-written per-fixture script: given the same repo index, the same
@@ -46,8 +46,8 @@ call is meaningful.
 `AlwaysExceedsBudgetStubLLMClient`, `NamesMissingSymbolStubLLMClient`, and
 `MalformedArgumentStubLLMClient`, used to drive gate (i)'s three
 degradation cases, are deliberately *not* defined here: they exist only
-to exercise `run_triage_loop`'s degradation paths and belong in
-`tests/test_triage_agent_loop.py`, not in shipped code.
+to exercise `run_triage_loop_langgraph`'s degradation paths and belong in
+`tests/test_triage_langgraph_loop_termination.py`, not in shipped code.
 """
 
 from __future__ import annotations
@@ -74,11 +74,11 @@ class ToolCallAction:
 class FinalAnswerAction:
     """A request to stop gathering evidence and answer.
 
-    `target_module`/`target_symbol` are the pair `run_triage_loop` will
-    pass to `compute_reachability` -- the loop trusts these fields exactly
+    `target_module`/`target_symbol` are the pair `run_triage_loop_langgraph`
+    will pass to `compute_reachability` -- the loop trusts these fields exactly
     as given, never substituting its own configured target, which is what
     makes injected-text "target switching" (see
-    `tests/test_triage_agent_loop_adversarial.py`) a meaningful attack to
+    `tests/test_triage_langgraph_loop_adversarial.py`) a meaningful attack to
     defend against rather than a structurally impossible one. `rationale`
     is the client's own free-text explanation; per `agent_models.py`'s
     `TriageFinding` docstring, it is never read back to derive a verdict.
@@ -93,7 +93,7 @@ AgentAction = ToolCallAction | FinalAnswerAction
 
 
 class StubLLMClient(Protocol):
-    """Minimal interface `run_triage_loop` requires of any LLM client."""
+    """Minimal interface `run_triage_loop_langgraph` requires of any LLM client."""
 
     def next_action(self, context: list[Message]) -> AgentAction: ...
 

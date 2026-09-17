@@ -19,7 +19,7 @@ one.
 
 This payload is delivered as a synthetic string fed directly into
 `sandbox_untrusted_text` and into a deliberately naive, test-only stub
-LLM client (`tests/test_triage_agent_loop_adversarial.py`), not
+LLM client (`tests/test_triage_langgraph_loop_adversarial.py`), not
 discovered via a scanned repository -- `SymbolNode`/`CallEdge` (the only
 data the real L1-L4 tools return) carry no free-text field a malicious
 repo author could populate with this text, so a real-repo-scanning

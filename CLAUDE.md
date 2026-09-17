@@ -19,17 +19,25 @@ versioning, CI-gated prompt changes, live LLM API integration.
 These are in DECISIONS.md as intent. Check the code before claiming any
 of them work — in a README, docstring, commit message or comment.
 
-Phase 2 U3/U4 (`src/reachability/triage/agent_loop.py`,
+Phase 2 U3/U4 (originally `src/reachability/triage/agent_loop.py`,
 `src/reachability/triage/sandbox.py`, `src/reachability/triage/stub_llm.py`)
-are built: a stub-LLM tool-calling loop over `search_symbol`/`find_callers`/
+built a stub-LLM tool-calling loop over `search_symbol`/`find_callers`/
 `resolve_import`, a hard tool-call budget, and a `sandbox_untrusted_text`
-injection-resistance boundary live from its first commit. The LLM in that loop
+injection-resistance boundary live from its first commit. **Superseded by
+Phase LangGraph's Unit 6 cutover** (see the Phase LangGraph paragraph
+below): the hand-rolled loop module itself is deleted, and its
+tool-schema/dispatch/target-matching logic now lives in
+`src/reachability/triage/tool_dispatch.py`, imported by
+`src/reachability/triage/langgraph_loop.py`. The guarantees these two
+units established are still true today, just implemented differently: the
+hard tool-call budget and the `sandbox_untrusted_text` injection-resistance
+boundary both still hold. The LLM in that loop
 is a deterministic stub (`stub_llm.py`), never a live API call — do not
 describe this as a working agent against a real model.
 
 Phase 2 U5 (`src/reachability/triage/job_runner.py`) is built: `POST
 /v1/triage` dispatches `run_triage_job` via FastAPI's `BackgroundTasks`,
-chaining `acquire_source` → `build_repo_index` → `run_triage_loop` and
+chaining `acquire_source` → `build_repo_index` → `run_triage_loop_langgraph` and
 mutating `TRIAGE_DB[triage_id]` through `QUEUED → RUNNING →
 COMPLETED/FAILED`; `GET /v1/triage/{triage_id}` returns the widened record
 including `finding`/`error`. This is real, working end-to-end HTTP wiring —
@@ -39,7 +47,7 @@ not a stub — but it is explicitly an **in-process** runner
 restart.
 
 Phase 2 U6 (`src/reachability/agent/eval_harness.py`) is built: `run_eval_suite()`
-runs U3/U4's full agent loop (`run_triage_loop`, not a direct
+runs the full triage agent loop (`run_triage_loop_langgraph`, not a direct
 `compute_reachability` call) over 30 fixtures across two directories — the
 original 22 in `tests/fixtures/l5/` (reused) plus 8 new fixtures added by Phase 4
 in `tests/fixtures/l5_phase4/` — gated by six pre-registered gates
@@ -48,7 +56,7 @@ in `tests/fixtures/l5_phase4/` — gated by six pre-registered gates
 hard (G2's floor is now 6 of 7, up from U6's original 4 of 5), G4 reported-only.
 `src/reachability/agent/prompt_registry.py` + `prompts/v1/*.md` are file-based
 prompt-versioning scaffolding (`PROMPT_VERSION = "v1"`, `load_prompt()`) — genuinely
-inert today, not read by `stub_llm.py` or `agent_loop.py` (a static test in
+inert today, not read by `stub_llm.py` or `langgraph_loop.py` (a static test in
 `tests/test_eval_harness.py` guards this), since the agent loop is still a
 deterministic stub with no prompt-reading code path. Do not describe the eval
 harness as CI-gating prompt changes against a real model — it gates a stub loop's
@@ -68,6 +76,25 @@ design keeps `measure_l5.py`'s own dynamically-computed G2 pool mechanically
 unaffected. Whether the `eval` job actually blocks a merge depends on this
 repo's branch-protection required-status-checks list, a server-side GitHub
 setting this file does not control.
+
+Phase LangGraph (`src/reachability/triage/langgraph_loop.py`) is built: as
+of this phase's Unit 6 cutover, the triage loop runs on a LangGraph
+`StateGraph`, not the hand-rolled Python loop Phase 2 U3/U4 originally
+shipped. This is an explicit, goal-driven architecture change, not a bug
+fix or a gap closure — `.agent/investigation.md`'s original analysis
+recommended **deferring** a LangGraph migration, and that recommendation
+was knowingly overridden; see `agent_docs/PHASE_LANGGRAPH.md` §0 for the
+full rationale for why. `src/reachability/triage/tool_dispatch.py` now
+holds the shared tool-schema/dispatch/target-matching surface (`TOOL_SCHEMAS`,
+`AgentLoopError`, `_is_well_formed_tool_call`, `_dispatch_tool`,
+`_confirmed_id_matches_target`) both the old and new loops used; the old
+loop module itself is gone, not deprecated. There is no backend-selection
+flag left — `job_runner.py`, `eval_harness.py`, and `src/reachability/agent/__init__.py`
+all call `run_triage_loop_langgraph` unconditionally. Unit 5's parallel-run
+parity harness proved the two loops agreed byte-for-byte on verdict/path/
+reason across all 30 eval fixtures before the old loop was deleted, and
+this cutover's own post-deletion `scripts/run_eval_suite.py` re-run
+confirmed the same 30/30 result against the sole remaining implementation.
 
 Phase 3 (`src/reachability/db/` — `models.py`'s `TriageJob`/`Base`,
 `session.py`'s lazily-configured `DATABASE_URL`-backed engine/sessionmaker,

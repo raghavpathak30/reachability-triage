@@ -1,6 +1,6 @@
-"""U5: wires U2 (`acquire_source`) -> U1 (`build_repo_index`) -> U3/U4
-(`run_triage_loop`) into one synchronous, per-job function that `main.py`
-dispatches via `BackgroundTasks`.
+"""U5: wires U2 (`acquire_source`) -> U1 (`build_repo_index`) ->
+`langgraph_loop.py::run_triage_loop_langgraph` into one synchronous,
+per-job function that `main.py` dispatches via `BackgroundTasks`.
 
 `run_triage_job` never raises: every exception anywhere in the
 acquire/index/run chain -- including this module's own `EmptyRepoIndexError`
@@ -70,21 +70,19 @@ no runtime import of `main` is needed at all. Only `if TYPE_CHECKING: from
 main import TriageRequest` is used, for typing only, mirroring
 `acquisition.py`'s existing precedent.
 
-`run_triage_job` always calls `run_triage_loop(..., _on_raw_tool_result=None)`
--- that parameter is test-only instrumentation (see `agent_loop.py`'s
-docstring and `DECISIONS.md`'s U3/U4 addendum) and must never be wired to a
-non-`None` value from any production code path.
+`run_triage_job` always calls `run_triage_loop_langgraph` unconditionally --
+there is no `_on_raw_tool_result`-style test-only hook on that function's
+signature (see `langgraph_loop.py`'s docstring and `DECISIONS.md`'s
+Phase LangGraph addendum).
 """
 
 from __future__ import annotations
 
-import os
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .acquisition import acquire_source
-from .agent_loop import run_triage_loop
 from .index_adapter import build_repo_index
 from .langgraph_loop import run_triage_loop_langgraph
 from .sandbox import sandbox_untrusted_text
@@ -150,24 +148,13 @@ def run_triage_job(
             llm_client = DeterministicPolicyStubLLMClient(
                 request.target_module, request.target_symbol
             )
-            triage_loop_backend = os.environ.get("TRIAGE_LOOP_BACKEND", "stub_loop")
-            if triage_loop_backend == "langgraph":
-                finding = run_triage_loop_langgraph(
-                    llm_client,
-                    repo_index,
-                    request.target_module,
-                    request.target_symbol,
-                    budget,
-                )
-            else:
-                finding = run_triage_loop(
-                    llm_client,
-                    repo_index,
-                    request.target_module,
-                    request.target_symbol,
-                    budget,
-                    _on_raw_tool_result=None,
-                )
+            finding = run_triage_loop_langgraph(
+                llm_client,
+                repo_index,
+                request.target_module,
+                request.target_symbol,
+                budget,
+            )
     except Exception as exc:
         record["error"] = sanitize_error(exc)
         record["status"] = "failed"

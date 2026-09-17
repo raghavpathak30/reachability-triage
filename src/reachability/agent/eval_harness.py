@@ -1,7 +1,7 @@
 """U6 eval harness.
 
-Structurally mirrors `scripts/measure_l5.py`, but runs U3's full agent loop
-(`triage/agent_loop.py::run_triage_loop`) instead of a direct
+Structurally mirrors `scripts/measure_l5.py`, but runs the full triage
+agent loop (`triage/langgraph_loop.py::run_triage_loop_langgraph`) instead of a direct
 `compute_reachability` call, over the same frozen `tests/fixtures/l5/`
 corpus (reused as-is, per `agent_docs/U6_EVAL_PROTOCOL.md`). See that
 protocol document for the pre-registered gate definitions (G1-eval through
@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from reachability.index.symbol_models import NodeKind
-from reachability.triage.agent_loop import run_triage_loop
+from reachability.triage.langgraph_loop import run_triage_loop_langgraph
 from reachability.triage.index_adapter import build_repo_index
 from reachability.triage.stub_llm import DeterministicPolicyStubLLMClient
 
@@ -148,13 +148,12 @@ def measure_eval_fixture(fixture_dir: Path) -> dict:
         row["target_symbol"] = target_symbol
 
         client = DeterministicPolicyStubLLMClient(target_module, target_symbol)
-        finding = run_triage_loop(
+        finding = run_triage_loop_langgraph(
             client,
             repo_index,
             target_module,
             target_symbol,
             budget=EVAL_BUDGET,
-            _on_raw_tool_result=None,
         )
 
         row["verdict"] = finding.result.verdict.value

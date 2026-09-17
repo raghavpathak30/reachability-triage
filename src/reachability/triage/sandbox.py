@@ -3,7 +3,7 @@
 Every string that a tool call (`search_symbol`/`find_callers`/
 `resolve_import`, or their stringified results) hands back to the triage
 agent loop passes through `sandbox_untrusted_text` before it is appended to
-the loop's `list[Message]` context (`agent_loop.py`'s `_append_tool_result`
+the loop's `list[Message]` context (`langgraph_loop.py`'s `sanitize_node`
 is the one call site). This module exists, and this function is named and
 called from U3's very first commit, specifically so the safety boundary is
 never something later "remembered" and retrofitted onto an already-gated
@@ -16,9 +16,9 @@ U3's commit landed this function as an explicit identity passthrough; U4
 changed between those two states -- its signature, its docstring's
 contract, and every caller's call site stayed fixed, so U3's gate (i)
 tests re-run byte-for-byte unmodified against this real implementation
-(`tests/test_triage_agent_loop.py`), per the plan's stated success
-criterion. `agent_loop.py` itself has zero diff between the commit that
-landed the stub and the commit that landed this real body.
+(`tests/test_triage_langgraph_loop_termination.py`, the Unit 6 cutover's
+port of the original hand-rolled-loop termination test file), per the
+plan's stated success criterion.
 
 `sandbox_untrusted_text` performs three independent, non-raising passes
 over `raw` and returns a redacted copy. These are **heuristic, regex/

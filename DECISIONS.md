@@ -830,3 +830,62 @@ one fixture's label and confirming a non-zero exit, then reverting. Whether
 this job actually blocks a merge depends on this repo's branch-protection
 required-status-checks list, a server-side GitHub setting this file does not
 control.
+
+## 10. Phase LangGraph — cutover to the LangGraph StateGraph triage loop (17 Sep 2026)
+
+**(a) What changed.** The `TRIAGE_LOOP_BACKEND` environment flag Unit 2
+introduced is removed entirely, not flipped to default to `"langgraph"` —
+a flag with exactly one live branch (the other pointing at a function this
+same unit deletes) is not a flag, it is dead code with an `if` wrapped
+around it. `job_runner.py` now calls `run_triage_loop_langgraph`
+unconditionally. `src/reachability/triage/agent_loop.py` (the original
+hand-rolled loop) is deleted outright — not kept as a deprecated shim —
+and the five names it shared with `langgraph_loop.py` since Unit 2
+(`TOOL_SCHEMAS`, `AgentLoopError`, `_is_well_formed_tool_call`,
+`_dispatch_tool`, `_confirmed_id_matches_target`) move first, verbatim,
+into a new module, `src/reachability/triage/tool_dispatch.py`.
+`src/reachability/agent/eval_harness.py` and
+`src/reachability/agent/__init__.py` are each repointed explicitly to
+`run_triage_loop_langgraph`/`langgraph_loop.py`, since neither goes
+through `job_runner.py` and so would not have picked up the flag removal
+"by construction." Three old-loop-specific test files
+(`tests/test_triage_agent_loop.py`,
+`tests/test_triage_agent_loop_adversarial.py`,
+`tests/test_triage_agent_loop_l5.py`) are deleted and their coverage
+ported, not dropped, into three new LangGraph-targeted files
+(`tests/test_triage_langgraph_loop_termination.py`,
+`tests/test_triage_langgraph_loop_adversarial.py`,
+`tests/test_triage_langgraph_loop_l5.py`). Unit 5's own parity harness
+(`src/reachability/agent/langgraph_parity_check.py`,
+`scripts/run_langgraph_parallel_check.py`) is deleted as now-orphaned: it
+exists to diff two implementations, and after this unit there is only one.
+
+**(b) Why.** Goal-driven, not gap-driven — this is not a bug fix or a gap
+closure against any known failure in the hand-rolled loop. See
+`.agent/investigation.md` for the original analysis, which recommended
+**deferring** a LangGraph migration, and `agent_docs/PHASE_LANGGRAPH.md`
+§0 for the explicit rationale for why that recommendation was knowingly
+overridden.
+
+**(c) Proof.** Unit 5's parallel-run parity harness ran both
+implementations against the same 30-fixture corpus and found a 30/30
+byte-for-byte match on verdict/path/reason
+(`results/langgraph_parallel_51dc6aa0bdb834a42c180018aaea765e08febc12.json`).
+This unit's own post-cutover re-run of `scripts/run_eval_suite.py`,
+against the sole remaining implementation after `agent_loop.py`'s
+deletion, reproduced the same result: `overall_pass: true`, G1/G2/G3/G5/G6
+all passing
+(`results/eval_301f92c549efe407de0f9097ebf373c5342f77e7.json`).
+
+**(d) Preserved guarantees.** Three guarantees established before this
+unit are unchanged in substance, only in implementation: (1) the hard
+tool-call budget is still a plain per-run counter, checked before every
+model call, now via `LangGraphTriageState["calls_made"]`/`["budget"]`
+routed through a conditional edge (proved by Unit 2's structural tests);
+(2) `sandbox_untrusted_text` is still the one and only place untrusted
+tool-result text crosses into the agent's context, now called from
+`langgraph_loop.py`'s dedicated `sanitize_node` (proved by Unit 3's
+bypass-proof test, `tests/test_triage_langgraph_sandbox.py`); (3) the
+`StubLLMClient` Protocol boundary — no real LLM call anywhere — is
+unchanged, now reached via Unit 4's `_stub_llm_adapter` (proved by
+`tests/test_triage_langgraph_loop.py::test_stub_llm_adapter_matches_inline_agent_node_behavior`).
