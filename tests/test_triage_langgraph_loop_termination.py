@@ -1,10 +1,15 @@
 """Gate (i) — termination/degradation — plus the tool-role-only harness
-invariant, for `run_triage_loop`.
+invariant, for `run_triage_loop_langgraph`.
 
-This file is written once in the U3 commit and re-run unmodified after
-U4's real `sandbox_untrusted_text` body lands (`sandbox.py` step 5) — the
-plan's stated success criterion for "gate (i) re-run against the real
-implementation."
+Ported from the deleted hand-rolled-loop termination test file (Phase LangGraph
+Unit 6 cutover): same four client classes and same seven degradation
+assertions, driving `run_triage_loop_langgraph` instead of the deleted
+`run_triage_loop`. `AgentLoopError` is now imported from `.tool_dispatch`.
+The tool-role-only invariant is ported using
+`build_langgraph_triage_graph(...).invoke(initial_state)` directly and
+asserting on `result["messages"]` -- no spy needed, since (like the old
+loop) only `sanitize_node` ever appends to `messages`, so every message
+after the first user message is, structurally, a tool result.
 """
 
 from pathlib import Path
@@ -12,11 +17,15 @@ from pathlib import Path
 import pytest
 
 from reachability.index.reachability_models import Verdict
-from reachability.triage import agent_loop
-from reachability.triage.agent_loop import AgentLoopError, run_triage_loop
 from reachability.triage.agent_models import Message
 from reachability.triage.index_adapter import build_repo_index
+from reachability.triage.langgraph_loop import (
+    LangGraphTriageState,
+    build_langgraph_triage_graph,
+    run_triage_loop_langgraph,
+)
 from reachability.triage.stub_llm import DeterministicPolicyStubLLMClient, FinalAnswerAction, ToolCallAction
+from reachability.triage.tool_dispatch import AgentLoopError
 
 FIXTURE_REPO = Path(__file__).parent / "fixtures" / "l5" / "01_direct_console_entrypoint" / "repo"
 
@@ -70,7 +79,7 @@ def test_budget_exceeded_degrades_to_unknown():
     client = AlwaysExceedsBudgetStubLLMClient()
     repo_index = build_repo_index(FIXTURE_REPO)
 
-    finding = run_triage_loop(client, repo_index, "app.sink", "vulnerable", budget=2)
+    finding = run_triage_loop_langgraph(client, repo_index, "app.sink", "vulnerable", budget=2)
 
     assert finding.result.verdict == Verdict.UNKNOWN
     assert "budget_exceeded" in finding.result.reason
@@ -81,7 +90,7 @@ def test_budget_zero_degrades_immediately():
     client = AlwaysExceedsBudgetStubLLMClient()
     repo_index = build_repo_index(FIXTURE_REPO)
 
-    finding = run_triage_loop(client, repo_index, "app.sink", "vulnerable", budget=0)
+    finding = run_triage_loop_langgraph(client, repo_index, "app.sink", "vulnerable", budget=0)
 
     assert finding.result.verdict == Verdict.UNKNOWN
     assert "budget_exceeded" in finding.result.reason
@@ -92,7 +101,9 @@ def test_missing_symbol_degrades_to_unknown():
     client = NamesMissingSymbolStubLLMClient("app.sink", "definitely_not_a_real_symbol_xyz")
     repo_index = build_repo_index(FIXTURE_REPO)
 
-    finding = run_triage_loop(client, repo_index, "app.sink", "definitely_not_a_real_symbol_xyz", budget=10)
+    finding = run_triage_loop_langgraph(
+        client, repo_index, "app.sink", "definitely_not_a_real_symbol_xyz", budget=10
+    )
 
     assert finding.result.verdict == Verdict.UNKNOWN
     assert "target_symbol_not_found_in_index" in finding.result.reason
@@ -102,7 +113,7 @@ def test_malformed_tool_argument_degrades_to_unknown_missing_key():
     client = MalformedArgumentStubLLMClient("find_callers", {"nod_id": "typo"})
     repo_index = build_repo_index(FIXTURE_REPO)
 
-    finding = run_triage_loop(client, repo_index, "app.sink", "vulnerable", budget=10)
+    finding = run_triage_loop_langgraph(client, repo_index, "app.sink", "vulnerable", budget=10)
 
     assert finding.result.verdict == Verdict.UNKNOWN
     assert "malformed_tool_call_argument" in finding.result.reason
@@ -113,7 +124,7 @@ def test_malformed_tool_argument_degrades_to_unknown_wrong_type():
     client = MalformedArgumentStubLLMClient("resolve_import", {"module": 123, "name": "x"})
     repo_index = build_repo_index(FIXTURE_REPO)
 
-    finding = run_triage_loop(client, repo_index, "app.sink", "vulnerable", budget=10)
+    finding = run_triage_loop_langgraph(client, repo_index, "app.sink", "vulnerable", budget=10)
 
     assert finding.result.verdict == Verdict.UNKNOWN
     assert "malformed_tool_call_argument" in finding.result.reason
@@ -126,7 +137,7 @@ def test_malformed_tool_argument_degrades_to_unknown_non_dict_arguments():
     client = MalformedArgumentStubLLMClient("find_callers", None)
     repo_index = build_repo_index(FIXTURE_REPO)
 
-    finding = run_triage_loop(client, repo_index, "app.sink", "vulnerable", budget=10)
+    finding = run_triage_loop_langgraph(client, repo_index, "app.sink", "vulnerable", budget=10)
 
     assert finding.result.verdict == Verdict.UNKNOWN
     assert "malformed_tool_call_argument" in finding.result.reason
@@ -144,29 +155,41 @@ class ReturnsUnrecognizedActionStubLLMClient:
         return object()
 
 
-def test_unrecognized_action_raises_agent_loop_error():
+def test_unrecognized_action_raises_agentlooperror():
     client = ReturnsUnrecognizedActionStubLLMClient()
     repo_index = build_repo_index(FIXTURE_REPO)
 
     with pytest.raises(AgentLoopError):
-        run_triage_loop(client, repo_index, "app.sink", "vulnerable", budget=10)
+        run_triage_loop_langgraph(client, repo_index, "app.sink", "vulnerable", budget=10)
 
 
-def test_tool_results_are_tool_role_only(monkeypatch):
-    recorded: list[Message] = []
-    original = agent_loop._append_tool_result
-
-    def _spy(context, tool_name, sanitized):
-        original(context, tool_name, sanitized)
-        recorded.append(context[-1])
-
-    monkeypatch.setattr(agent_loop, "_append_tool_result", _spy)
-
+def test_tool_results_are_tool_role_only():
     repo_index = build_repo_index(FIXTURE_REPO)
     client = DeterministicPolicyStubLLMClient("app.sink", "vulnerable")
-    finding = run_triage_loop(client, repo_index, "app.sink", "vulnerable", budget=30)
 
-    assert finding.result.verdict == Verdict.REACHABLE
-    assert recorded, "expected at least one tool result to have been appended during this run"
-    assert all(msg.role == "tool" for msg in recorded)
-    assert all(msg.role not in {"system", "developer"} for msg in recorded)
+    graph = build_langgraph_triage_graph(client, repo_index)
+    initial_state: LangGraphTriageState = {
+        "messages": [
+            Message(role="user", content="target_module='app.sink' target_symbol='vulnerable'")
+        ],
+        "tool_calls": [],
+        "confirmed_symbol_ids": set(),
+        "calls_made": 0,
+        "budget": 30,
+        "target_module": "app.sink",
+        "target_symbol": "vulnerable",
+        "pending_action_kind": None,
+        "pending_tool_name": None,
+        "pending_tool_arguments": None,
+        "pending_final_target_module": None,
+        "pending_final_target_symbol": None,
+        "pending_final_rationale": None,
+        "raw_tool_result": None,
+        "finding": None,
+    }
+    result = graph.invoke(initial_state)
+
+    assert result["finding"].result.verdict == Verdict.REACHABLE
+    assert result["messages"][0].role == "user"
+    assert len(result["messages"]) > 1, "expected at least one tool result to have been appended during this run"
+    assert all(m.role == "tool" for m in result["messages"][1:])

@@ -8,8 +8,8 @@ This package hosts two independent things:
     today, since none exists yet (`triage/stub_llm.py` is a deterministic
     policy stub with no prompt-reading code path); and
 
-(b) the U6 eval harness (`eval_harness.py`), which runs U3's full agent
-    loop (`triage/agent_loop.py::run_triage_loop`) over the frozen
+(b) the U6 eval harness (`eval_harness.py`), which runs the full triage
+    agent loop (`triage/langgraph_loop.py::run_triage_loop_langgraph`) over the frozen
     `tests/fixtures/l5/` corpus, gated by pre-registered thresholds in
     `agent_docs/U6_EVAL_PROTOCOL.md`.
 """

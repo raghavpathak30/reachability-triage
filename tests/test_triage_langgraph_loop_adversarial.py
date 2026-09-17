@@ -1,12 +1,18 @@
 """U4 gate — three adversarial injection classes.
 
-Defines one test-only, deliberately naive `NaiveInjectableStubLLMClient`
-(local to this file, never imported by `src/`), susceptible to injected
-text if it reaches the client unsanitized. Its `next_action` reads only
-from the `context: list[Message]` it is given -- i.e. it only ever sees
-what `_append_tool_result` (`agent_loop.py`) actually appended, sanitized
-when the real `sandbox_untrusted_text` is wired in, raw when a test wires
-in an identity replacement for control purposes.
+Ported from the deleted hand-rolled-loop adversarial test file (Phase
+LangGraph Unit 6 cutover): `NaiveInjectableStubLLMClient` is copied
+verbatim (framework-agnostic, only depends on
+`Message`/`ToolCallAction`/`FinalAnswerAction`).
+`_run_with_mocked_find_callers` now monkeypatches
+`reachability.triage.tool_dispatch.find_callers` (not the deleted
+hand-rolled loop module's own `find_callers` import) and calls
+`run_triage_loop_langgraph` instead of the deleted `run_triage_loop`. The
+identity-sandbox control monkeypatch target is
+`langgraph_loop.sandbox_untrusted_text` (the name as looked up in
+`langgraph_loop.py`'s own namespace, per this project's own documented
+import-patching convention) -- `sanitize_node` calls it via that
+module-level name, unchanged by steps 1-3 of this unit's plan.
 
 Since `search_symbol`/`find_callers`/`resolve_import` (the only three
 real tool functions, `query.py:8,17,21`) return structured
@@ -14,7 +20,7 @@ real tool functions, `query.py:8,17,21`) return structured
 author could populate (see `.agent/plan.md`'s Risks section and
 `tests/fixtures/triage_adversarial/01_verdict_manipulation/RATIONALE.md`),
 each test here monkeypatches `find_callers` as imported into
-`agent_loop.py` to return a plain string (the fixture's `injected_text`,
+`tool_dispatch.py` to return a plain string (the fixture's `injected_text`,
 or planted secrets) for exactly one call, simulating a text-bearing
 advisory/docstring/comment channel the spec describes without requiring
 new capability in the frozen L1-L4 index layer.
@@ -33,30 +39,22 @@ actually exhibits the bad behavior -- proving each fixture is
 non-vacuous, not merely "structurally guaranteed to pass," per
 `.agent/critique.md`'s blocking item #4.
 
-`test_gate_i_still_green_after_real_sandbox` re-invokes gate (i)'s three
-degradation tests from `tests/test_triage_agent_loop.py` directly, as an
-explicit, written-down acknowledgment that gate (i) is being re-run
-against the real (non-stub) `sandbox_untrusted_text` -- satisfying "U3 is
-not done until U4's boundary function is real and U3's gate (i) has been
-re-run against it." Per critique item #5: only cases (a) and (b) actually
-dispatch a real tool call (and so exercise the real sandbox) before
-degrading; case (c) is rejected pre-dispatch by design in both the stub
-and real states, so its re-run demonstrates only "no regression," not
-sandbox interaction -- this is expected, not a gap.
+`test_gate_i_still_green_after_real_sandbox` re-invokes gate (i)'s
+degradation tests from `tests/test_triage_langgraph_loop_termination.py`
+directly, as an explicit, written-down acknowledgment that gate (i) is
+being re-run against the real (non-stub) `sandbox_untrusted_text`.
 """
 
 import json
 import re
 from pathlib import Path
 
-import pytest
-
-import test_triage_agent_loop as gate_i
+import test_triage_langgraph_loop_termination as gate_i
 from reachability.index.reachability import compute_reachability
 from reachability.index.reachability_models import Verdict
-from reachability.triage import agent_loop
-from reachability.triage.agent_loop import run_triage_loop
+from reachability.triage import langgraph_loop, tool_dispatch
 from reachability.triage.index_adapter import build_repo_index
+from reachability.triage.langgraph_loop import run_triage_loop_langgraph
 from reachability.triage.sandbox import temporary_secret_pattern
 from reachability.triage.stub_llm import FinalAnswerAction, ToolCallAction
 
@@ -136,10 +134,10 @@ def _run_with_mocked_find_callers(monkeypatch, injected_payload, target_module, 
     def _fake_find_callers(edges, node_id):
         return injected_payload
 
-    monkeypatch.setattr(agent_loop, "find_callers", _fake_find_callers)
+    monkeypatch.setattr(tool_dispatch, "find_callers", _fake_find_callers)
 
     client = NaiveInjectableStubLLMClient(target_module, target_symbol)
-    finding = run_triage_loop(client, repo_index, target_module, target_symbol, budget=BUDGET)
+    finding = run_triage_loop_langgraph(client, repo_index, target_module, target_symbol, budget=BUDGET)
     return finding, repo_index
 
 
@@ -183,7 +181,7 @@ def test_verdict_manipulation_fixture(monkeypatch):
     # Identity-sandbox control: the directive survives, proving the
     # fixture is non-vacuous -- the naive client really would be steered
     # absent real sanitization.
-    monkeypatch.setattr(agent_loop, "sandbox_untrusted_text", lambda raw: raw)
+    monkeypatch.setattr(langgraph_loop, "sandbox_untrusted_text", lambda raw: raw)
     control_finding, _ = _run_with_mocked_find_callers(
         monkeypatch, injected_payload, original_module, original_symbol
     )
@@ -208,7 +206,7 @@ def test_unauthorized_tool_invocation_fixture(monkeypatch):
 
     # Identity-sandbox control: the instruction survives, and the naive
     # client actually makes the off-menu call -- proving non-vacuity.
-    monkeypatch.setattr(agent_loop, "sandbox_untrusted_text", lambda raw: raw)
+    monkeypatch.setattr(langgraph_loop, "sandbox_untrusted_text", lambda raw: raw)
     control_finding, _ = _run_with_mocked_find_callers(
         monkeypatch, label["injected_text"], target_module, target_symbol
     )
@@ -237,7 +235,7 @@ def test_unauthorized_context_echo_fixture(monkeypatch):
 
         # Identity-sandbox control: the secrets survive into the
         # rationale, proving the fixture is non-vacuous.
-        monkeypatch.setattr(agent_loop, "sandbox_untrusted_text", lambda raw: raw)
+        monkeypatch.setattr(langgraph_loop, "sandbox_untrusted_text", lambda raw: raw)
         control_finding, _ = _run_with_mocked_find_callers(
             monkeypatch, injected_payload, target_module, target_symbol
         )
@@ -250,5 +248,4 @@ def test_gate_i_still_green_after_real_sandbox():
     gate_i.test_missing_symbol_degrades_to_unknown()
     gate_i.test_malformed_tool_argument_degrades_to_unknown_missing_key()
     gate_i.test_malformed_tool_argument_degrades_to_unknown_wrong_type()
-    with pytest.MonkeyPatch.context() as mp:
-        gate_i.test_tool_results_are_tool_role_only(mp)
+    gate_i.test_tool_results_are_tool_role_only()

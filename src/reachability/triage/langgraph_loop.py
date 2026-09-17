@@ -1,15 +1,16 @@
-"""Phase LangGraph, Unit 2 — a parallel `StateGraph` implementation of the
-U3/U4 triage agent loop, reachable only via `TRIAGE_LOOP_BACKEND=langgraph`
-(`job_runner.py`), never by default before Unit 6's cutover
-(`agent_docs/PHASE_LANGGRAPH.md` §2).
+"""Phase LangGraph, Unit 6 — as of this unit, this module is the sole
+triage-loop implementation: the old hand-rolled loop module is deleted,
+not deprecated, and the backend-selection environment flag that used to
+gate this path is gone too -- there is nothing left to select between
+(`agent_docs/PHASE_LANGGRAPH.md` §3).
 
-This module reproduces `agent_loop.py::run_triage_loop`'s exact control
-flow -- four termination shapes, budget check before the model call, the
-sandbox call between tool dispatch and re-entry into the agent node -- as
-a raw `StateGraph` (not `create_agent`/`create_react_agent`, per the phase
-doc's design constraints). It imports, never duplicates,
+This module reproduces the deleted hand-rolled `run_triage_loop`'s
+exact control flow -- four termination shapes, budget check before the
+model call, the sandbox call between tool dispatch and re-entry into the
+agent node -- as a raw `StateGraph` (not `create_agent`/`create_react_agent`,
+per the phase doc's design constraints). It imports, never duplicates,
 `TOOL_SCHEMAS`/`_is_well_formed_tool_call`/`_dispatch_tool`/
-`_confirmed_id_matches_target`/`AgentLoopError` from `.agent_loop` and
+`_confirmed_id_matches_target`/`AgentLoopError` from `.tool_dispatch` and
 `sandbox_untrusted_text` from `.sandbox`.
 
 The budget is a hand-rolled counter carried in graph state, checked via a
@@ -51,22 +52,23 @@ from langgraph.graph.state import CompiledStateGraph
 from reachability.index import Verdict, compute_reachability
 from reachability.index.reachability_models import ReachabilityResult
 
-from .agent_loop import (
+from .agent_models import Message, ToolCallRecord, TriageFinding
+from .index_adapter import RepoIndex
+from .sandbox import sandbox_untrusted_text
+from .stub_llm import FinalAnswerAction, StubLLMClient, ToolCallAction
+from .tool_dispatch import (
     AgentLoopError,
     _confirmed_id_matches_target,
     _dispatch_tool,
     _is_well_formed_tool_call,
 )
-from .agent_models import Message, ToolCallRecord, TriageFinding
-from .index_adapter import RepoIndex
-from .sandbox import sandbox_untrusted_text
-from .stub_llm import FinalAnswerAction, StubLLMClient, ToolCallAction
 
 
 class LangGraphTriageState(TypedDict):
     """Graph state schema. Plain-overwrite (`LastValue`) semantics for
     every field -- each node returns the full updated value, mirroring
-    `agent_loop.py`'s local variables exactly, so no reducer is needed."""
+    the deleted hand-rolled loop module's local variables exactly, so no
+    reducer is needed."""
 
     messages: list[Message]
     tool_calls: list[ToolCallRecord]
@@ -89,8 +91,9 @@ def _stub_llm_adapter(llm_client: StubLLMClient, messages: list[Message]) -> dic
     """Unit 4's `StubLLMClient` adapter into the graph's model slot.
 
     Performs no message-format translation -- `messages` is already
-    `list[Message]`, the same type `agent_loop.py` uses, because Unit 2
-    made `Message` the state's message type end-to-end. This function only
+    `list[Message]`, the same type the deleted hand-rolled loop module
+    used, because Unit 2 made `Message` the state's message type
+    end-to-end. This function only
     calls `llm_client.next_action(messages)` and translates the returned
     `AgentAction` into the `pending_*` dict shape `agent_node`'s routing
     functions consume.
@@ -286,8 +289,8 @@ def run_triage_loop_langgraph(
     target_symbol: str | None,
     budget: int,
 ) -> TriageFinding:
-    """Public entry point mirroring `agent_loop.py::run_triage_loop`'s
-    signature (minus the test-only `_on_raw_tool_result`, which stays
+    """Public entry point mirroring the deleted hand-rolled loop module's
+    `run_triage_loop` signature (minus the test-only `_on_raw_tool_result`, which stays
     specific to the old loop -- Unit 2 does not need to reproduce that
     hook)."""
 

@@ -1,6 +1,6 @@
 """File-based prompt versioning scaffolding.
 
-No caller in `triage/stub_llm.py` or `triage/agent_loop.py` exists today --
+No caller in `triage/stub_llm.py` or `triage/langgraph_loop.py` exists today --
 `DeterministicPolicyStubLLMClient` (`triage/stub_llm.py`) is a deterministic
 Python policy object with no prompt-reading code path, and this module is not
 something U6's own eval harness needs to call to do its job. This is

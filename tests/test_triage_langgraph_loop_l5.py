@@ -1,4 +1,18 @@
-"""Gate (ii) — L5-reproduction sanity check for `run_triage_loop`.
+"""Gate (ii) — L5-reproduction sanity check for `run_triage_loop_langgraph`.
+
+Ported from the deleted hand-rolled-loop L5-reproduction test file (Phase
+LangGraph Unit 6 cutover): same `SELECTED_FIXTURES` list and exclusion
+rationale, same `_resolve_target` helper. Since `run_triage_loop_langgraph`
+has no `_on_raw_tool_result` hook, this captures the raw `list[CallEdge]`
+each `find_callers` dispatch actually returned by monkeypatching
+`langgraph_loop._dispatch_tool` (the name as looked up in
+`langgraph_loop.py`, same convention as the adversarial file) with a
+wrapper that calls through to the real `tool_dispatch._dispatch_tool` and
+records the result when `tool_name == "find_callers"` before returning it
+unchanged -- structurally the same technique
+`tests/test_triage_langgraph_sandbox.py:52-57` already uses for a
+different purpose, confirming this monkeypatch point is real and
+exercised.
 
 For a representative subset of `tests/fixtures/l5/*/label.json` covering
 all four `Verdict` values, this asserts that running the full agent loop
@@ -6,22 +20,12 @@ all four `Verdict` values, this asserts that running the full agent loop
 `build_repo_index`-built `RepoIndex` reproduces the verdict/reason a
 direct `compute_reachability` call produces, and that every `CallEdge` in
 the loop's emitted `path` was actually returned by a real `find_callers`
-call dispatched during that same run (via the `_on_raw_tool_result` test
-hook — see `agent_loop.py`'s docstring for why this must observe the
-loop's actual dispatch, not a test-side recomputation).
+call dispatched during that same run.
 
-`label.json`'s `sink` field is `{file, line}`, not `module`/`symbol` —
+`label.json`'s `sink` field is `{file, line}`, not `module`/`symbol` --
 `scripts/measure_l5.py`'s `_module_dotted_name`/`resolve_target` helpers
 convert that into the `(target_module, target_symbol)` pair this test
 needs; reused directly here rather than re-derived.
-
-**`_on_raw_tool_result` is test-only instrumentation, not a general
-extension point.** This file is the reason it exists: it lets this test
-observe the real, structured `list[CallEdge]` that `run_triage_loop`'s
-own `find_callers` dispatches actually returned during the run, rather
-than a test-side recomputation that would prove nothing about the loop's
-real behavior. Do not wire it into U5's FastAPI job lifecycle or any
-other production caller.
 """
 
 import sys
@@ -31,8 +35,9 @@ import pytest
 
 from reachability.index.reachability import compute_reachability
 from reachability.index.reachability_models import Verdict
-from reachability.triage.agent_loop import run_triage_loop
+from reachability.triage import langgraph_loop, tool_dispatch
 from reachability.triage.index_adapter import build_repo_index
+from reachability.triage.langgraph_loop import run_triage_loop_langgraph
 from reachability.triage.stub_llm import DeterministicPolicyStubLLMClient
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -85,7 +90,7 @@ def _resolve_target(fixture_dir: Path, symbol_index: dict) -> tuple[str, str]:
 
 
 @pytest.mark.parametrize("fixture_name", SELECTED_FIXTURES)
-def test_loop_reproduces_direct_compute_reachability(fixture_name):
+def test_loop_reproduces_direct_compute_reachability(fixture_name, monkeypatch):
     fixture_dir = FIXTURES_ROOT / fixture_name
     repo_root = fixture_dir / "repo"
 
@@ -97,19 +102,23 @@ def test_loop_reproduces_direct_compute_reachability(fixture_name):
     )
 
     raw_find_callers_edges: list = []
+    real_dispatch_tool = tool_dispatch._dispatch_tool
 
-    def _capture(tool_name, arguments, raw_result):
+    def _capturing_dispatch_tool(tool_name, arguments, repo_index):
+        raw_result = real_dispatch_tool(tool_name, arguments, repo_index)
         if tool_name == "find_callers":
             raw_find_callers_edges.extend(raw_result)
+        return raw_result
+
+    monkeypatch.setattr(langgraph_loop, "_dispatch_tool", _capturing_dispatch_tool)
 
     client = DeterministicPolicyStubLLMClient(target_module, target_symbol)
-    finding = run_triage_loop(
+    finding = run_triage_loop_langgraph(
         client,
         repo_index,
         target_module,
         target_symbol,
         budget=BUDGET,
-        _on_raw_tool_result=_capture,
     )
 
     assert finding.result.verdict == reference.verdict
