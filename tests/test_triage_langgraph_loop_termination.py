@@ -191,5 +191,5 @@ def test_tool_results_are_tool_role_only():
 
     assert result["finding"].result.verdict == Verdict.REACHABLE
     assert result["messages"][0].role == "user"
-    assert result["messages"], "expected at least one tool result to have been appended during this run"
+    assert len(result["messages"]) > 1, "expected at least one tool result to have been appended during this run"
     assert all(m.role == "tool" for m in result["messages"][1:])

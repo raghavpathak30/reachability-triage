@@ -15,11 +15,7 @@ from pathlib import Path
 from reachability.index.reachability_models import ReachabilityResult, Verdict
 from reachability.triage.agent_models import Message, TriageFinding
 from reachability.triage.index_adapter import build_repo_index
-from reachability.triage.langgraph_loop import (
-    _stub_llm_adapter,
-    build_langgraph_triage_graph,
-    run_triage_loop_langgraph,
-)
+from reachability.triage.langgraph_loop import _stub_llm_adapter, run_triage_loop_langgraph
 from reachability.triage.stub_llm import DeterministicPolicyStubLLMClient, FinalAnswerAction, ToolCallAction
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -91,22 +87,5 @@ def test_stub_llm_adapter_matches_inline_agent_node_behavior():
         "pending_final_target_symbol": "s",
         "pending_final_rationale": "done",
     }
-
-
-class _SingleToolCallStubLLMClient:
-    """Test-local scripted client: issues exactly one named `ToolCallAction`
-    with fixed `arguments`, then always answers -- used to drive one
-    tool-result payload through the real, shipped graph."""
-
-    def __init__(self, tool_name: str, arguments: dict[str, object]) -> None:
-        self._tool_name = tool_name
-        self._arguments = arguments
-        self._asked = False
-
-    def next_action(self, messages: list[Message]):
-        if not self._asked:
-            self._asked = True
-            return ToolCallAction(tool_name=self._tool_name, arguments=self._arguments)
-        return FinalAnswerAction(target_module="m", target_symbol="s", rationale="done")
 
 
