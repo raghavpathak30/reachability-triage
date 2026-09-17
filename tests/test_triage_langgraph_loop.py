@@ -13,10 +13,10 @@ import sys
 from pathlib import Path
 
 from reachability.index.reachability_models import ReachabilityResult, Verdict
-from reachability.triage.agent_models import TriageFinding
+from reachability.triage.agent_models import Message, TriageFinding
 from reachability.triage.index_adapter import build_repo_index
-from reachability.triage.langgraph_loop import run_triage_loop_langgraph
-from reachability.triage.stub_llm import DeterministicPolicyStubLLMClient
+from reachability.triage.langgraph_loop import _stub_llm_adapter, run_triage_loop_langgraph
+from reachability.triage.stub_llm import DeterministicPolicyStubLLMClient, FinalAnswerAction, ToolCallAction
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
@@ -51,3 +51,38 @@ def test_langgraph_loop_runs_fixture_end_to_end():
     assert isinstance(finding.result, ReachabilityResult)
     assert isinstance(finding.result.verdict, Verdict)
     assert isinstance(finding.tool_calls, list)
+
+
+class _ScriptedStubLLMClient:
+    """Test-local scripted client: a `ToolCallAction` then a
+    `FinalAnswerAction`, the same shape `stub_llm.py`'s docstring says
+    belongs in test files, not `src/`."""
+
+    def __init__(self) -> None:
+        self._asked = False
+
+    def next_action(self, messages: list[Message]):
+        if not self._asked:
+            self._asked = True
+            return ToolCallAction(tool_name="find_callers", arguments={"node_id": "m:s"})
+        return FinalAnswerAction(target_module="m", target_symbol="s", rationale="done")
+
+
+def test_stub_llm_adapter_matches_inline_agent_node_behavior():
+    client = _ScriptedStubLLMClient()
+    messages = [Message(role="user", content="target_module='m' target_symbol='s'")]
+
+    tool_call_result = _stub_llm_adapter(client, messages)
+    assert tool_call_result == {
+        "pending_action_kind": "tool_call",
+        "pending_tool_name": "find_callers",
+        "pending_tool_arguments": {"node_id": "m:s"},
+    }
+
+    final_answer_result = _stub_llm_adapter(client, messages)
+    assert final_answer_result == {
+        "pending_action_kind": "final_answer",
+        "pending_final_target_module": "m",
+        "pending_final_target_symbol": "s",
+        "pending_final_rationale": "done",
+    }
