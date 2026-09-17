@@ -30,11 +30,15 @@ stateful Python object with private mutable fields, and this graph runs
 with no `checkpointer=`, so nothing requires it to be serializable through
 a channel (see `.agent/plan.md`'s Rejected alternatives).
 
-Unit 4's clean `StubLLMClient` adapter is deliberately not built here --
-the `"agent"` node calls `llm_client.next_action()` directly and
-hand-translates types at the call site, per the phase doc's explicit
-"until Unit 4 lands, this unit may stub the node's model call minimally"
-allowance and the plan's own Rejected alternatives section.
+Unit 4's `StubLLMClient` adapter is `_stub_llm_adapter`, a module-level
+function the `"agent"` node calls with `(llm_client, state["messages"])`.
+It performs no message-format translation -- Unit 2 already made
+`Message` the state's message type end-to-end, so there is no
+LangChain-message shape to convert to or from. It only calls
+`llm_client.next_action(messages)` and translates the returned
+`AgentAction` (`ToolCallAction`/`FinalAnswerAction`) into the `pending_*`
+dict the graph routes on, exactly as `agent_node` did inline before this
+unit.
 """
 
 from __future__ import annotations
@@ -81,6 +85,39 @@ class LangGraphTriageState(TypedDict):
     finding: TriageFinding | None
 
 
+def _stub_llm_adapter(llm_client: StubLLMClient, messages: list[Message]) -> dict:
+    """Unit 4's `StubLLMClient` adapter into the graph's model slot.
+
+    Performs no message-format translation -- `messages` is already
+    `list[Message]`, the same type `agent_loop.py` uses, because Unit 2
+    made `Message` the state's message type end-to-end. This function only
+    calls `llm_client.next_action(messages)` and translates the returned
+    `AgentAction` into the `pending_*` dict shape `agent_node`'s routing
+    functions consume.
+    """
+    action = llm_client.next_action(messages)
+
+    if isinstance(action, ToolCallAction):
+        return {
+            "pending_action_kind": "tool_call",
+            "pending_tool_name": action.tool_name,
+            "pending_tool_arguments": action.arguments,
+        }
+
+    if isinstance(action, FinalAnswerAction):
+        return {
+            "pending_action_kind": "final_answer",
+            "pending_final_target_module": action.target_module,
+            "pending_final_target_symbol": action.target_symbol,
+            "pending_final_rationale": action.rationale,
+        }
+
+    raise AgentLoopError(
+        f"llm_client.next_action returned neither a ToolCallAction nor a "
+        f"FinalAnswerAction: {type(action)!r}"
+    )
+
+
 def build_langgraph_triage_graph(
     llm_client: StubLLMClient, repo_index: RepoIndex
 ) -> CompiledStateGraph:
@@ -91,27 +128,7 @@ def build_langgraph_triage_graph(
     graph state."""
 
     def agent_node(state: LangGraphTriageState) -> dict:
-        action = llm_client.next_action(state["messages"])
-
-        if isinstance(action, ToolCallAction):
-            return {
-                "pending_action_kind": "tool_call",
-                "pending_tool_name": action.tool_name,
-                "pending_tool_arguments": action.arguments,
-            }
-
-        if isinstance(action, FinalAnswerAction):
-            return {
-                "pending_action_kind": "final_answer",
-                "pending_final_target_module": action.target_module,
-                "pending_final_target_symbol": action.target_symbol,
-                "pending_final_rationale": action.rationale,
-            }
-
-        raise AgentLoopError(
-            f"llm_client.next_action returned neither a ToolCallAction nor a "
-            f"FinalAnswerAction: {type(action)!r}"
-        )
+        return _stub_llm_adapter(llm_client, state["messages"])
 
     def tools_node(state: LangGraphTriageState) -> dict:
         tool_name = state["pending_tool_name"]
