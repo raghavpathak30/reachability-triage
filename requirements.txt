@@ -18,3 +18,4 @@ psycopg[binary]==3.2.3
 alembic==1.14.0
 langgraph==1.2.11
 langchain-core==1.6.3
+groq==1.7.0

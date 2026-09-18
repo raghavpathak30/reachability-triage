@@ -6,3 +6,9 @@ __pycache__/
 .agent/
 .claude/agent-memory/
 book/
+
+# Phase 5 U4: content-hash-named local eval/measurement artifacts,
+# regenerable by re-running the script that produced them. Cited by
+# filename in prose (DECISIONS.md, CLAUDE.md) but never committed -- see
+# DECISIONS.md's Phase 5 U4 section for the full rationale.
+results/

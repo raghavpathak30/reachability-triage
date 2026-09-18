@@ -90,6 +90,10 @@ def test_success_path_sets_completed_with_finding(tmp_path, monkeypatch):
         return finding
 
     monkeypatch.setattr(job_runner, "run_triage_loop_langgraph", _fake_run_triage_loop_langgraph)
+    # GroqLLMClient() is still constructed (unused, since the loop call
+    # above is mocked) -- a real construction would require GROQ_API_KEY,
+    # which this unit test must not depend on.
+    monkeypatch.setattr(job_runner, "GroqLLMClient", lambda *a, **kw: object())
 
     triage_id = uuid.uuid4()
     record = _make_record(triage_id)
@@ -163,6 +167,7 @@ def test_unexpected_run_triage_loop_langgraph_exception_never_propagates(tmp_pat
         raise RuntimeError("contract violation")
 
     monkeypatch.setattr(job_runner, "run_triage_loop_langgraph", _boom)
+    monkeypatch.setattr(job_runner, "GroqLLMClient", lambda *a, **kw: object())
 
     triage_id = uuid.uuid4()
     record = _make_record(triage_id)

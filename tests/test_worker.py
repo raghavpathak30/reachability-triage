@@ -13,15 +13,19 @@ import sys
 import uuid
 from pathlib import Path
 
+import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 from reachability.db.models import TriageJob
 from reachability.triage import job_runner
 from reachability.triage.index_adapter import build_repo_index
+from reachability.triage.llm_errors import GroqConfigError
+from reachability.triage.stub_llm import DeterministicPolicyStubLLMClient
 from reachability.triage.worker import (
     claim_next_queued_job,
     finalize_job,
+    main as worker_main,
     run_worker_once,
 )
 
@@ -124,6 +128,13 @@ def test_run_worker_once_end_to_end(db_session, monkeypatch):
     job_id = _insert_queued_job(db_session, target)
 
     monkeypatch.setattr(job_runner, "acquire_source", lambda request, workdir: FIXTURE_REPO)
+    # Deterministic stub, not the real GroqLLMClient -- see
+    # test_triage_job_lifecycle.py's equivalent monkeypatch for why.
+    monkeypatch.setattr(
+        job_runner,
+        "GroqLLMClient",
+        lambda *a, **kw: DeterministicPolicyStubLLMClient(target_module, target_symbol),
+    )
 
     session_factory = _session_factory_for(db_session)
     claimed_something = run_worker_once(session_factory, "test-worker", budget=30)
@@ -167,3 +178,19 @@ def test_run_worker_once_malformed_target_finalizes_as_failed_not_crash(db_sessi
     assert row.finding is None
     assert row.worker_id == "test-worker"
     assert row.attempt_count == 1
+
+
+def test_main_fails_fast_on_missing_groq_api_key(monkeypatch):
+    """Phase 5 U5: `main()` must call `get_groq_api_key()` before doing
+    anything else (before even opening a DB session) -- a missing key
+    must fail the whole worker process at startup, once, instead of
+    letting every job pay for acquire_source/build_repo_index before
+    failing on a simple misconfiguration."""
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    from reachability.triage import llm_config
+
+    llm_config.reset_api_key_cache_for_tests()
+
+    with pytest.raises(GroqConfigError):
+        worker_main()

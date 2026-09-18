@@ -889,3 +889,41 @@ bypass-proof test, `tests/test_triage_langgraph_sandbox.py`); (3) the
 `StubLLMClient` Protocol boundary — no real LLM call anywhere — is
 unchanged, now reached via Unit 4's `_stub_llm_adapter` (proved by
 `tests/test_triage_langgraph_loop.py::test_stub_llm_adapter_matches_inline_agent_node_behavior`).
+
+## 11. Phase 5 U4 — `results/` gitignore (18 Sep 2026)
+
+`results/` is now gitignored (`.gitignore`). Its JSON files
+(`eval_<sha>.json`, `eval_real_<sha>.json`, `eval_disagreement_<sha>.json`,
+`l5_<sha>.json`, `langgraph_parallel_<sha>.json`, `real_llm/<sha>/*.json`)
+are content-hash-named local artifacts, regenerable at any time by
+re-running the script that produced them (`scripts/run_eval_suite.py`,
+`scripts/measure_l5.py`, `scripts/run_real_llm_fixtures.py`,
+`scripts/diff_eval_lanes.py`). They are cited by filename in prose
+elsewhere in this document and in `CLAUDE.md` (e.g. §10(c) above cites
+`results/eval_301f92c...json`) without being committed — a citation
+records what a specific run produced at the time it was written, not a
+promise that the file itself is checked into the repository.
+
+**Why now, not earlier:** this repo had already been inconsistently
+committing a handful of `results/*.json` files (three historical
+`l5_*.json` runs from the original L5 stages, plus one `eval_*.json` that
+landed as a side effect of the Phase LangGraph U6 merge commit) while
+`scripts/run_eval_suite.py`/`measure_l5.py`'s own routine runs were left
+untracked — see Phase LangGraph U5's own progress notes, which already
+describe "not committing `results/eval_*.json`/`results/l5_*.json` run
+artifacts as part of routine unit work" as this repo's existing
+convention. This section makes that already-existing convention
+mechanical (gitignored, not just habitually not `git add`ed) rather than
+leaving it to a committer's discipline each time. The four previously-tracked
+files were untracked via a one-time `git rm --cached results/` in the
+same commit as the `.gitignore` addition — left on disk, not deleted, and
+still citable by filename for anyone with this exact working tree, just
+no longer part of the repository's history going forward.
+
+**Rationale:** avoiding repo bloat from eval/L5/real-LLM measurement
+blobs that are regenerable, and — specific to this phase — avoiding ever
+accidentally committing a real-lane `eval_real_*.json`/`real_llm/*.json`
+result that could embed verbose real-model rationale text alongside
+repo-derived tool-result content, which is exactly the kind of
+untrusted/sensitive text this project's own `sandbox_untrusted_text`
+threat model already treats carefully elsewhere.

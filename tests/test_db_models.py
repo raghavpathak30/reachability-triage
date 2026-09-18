@@ -63,6 +63,11 @@ def test_downgrade_then_upgrade_round_trip(postgres_cluster):
             "worker_id",
             "attempt_count",
             "reaped_count",
+            # Phase 5 U3 (migrations 0002/0003).
+            "token_count",
+            "total_cost",
+            "model_string",
+            "prompt_version",
         }
     finally:
         with engine.connect() as conn:
