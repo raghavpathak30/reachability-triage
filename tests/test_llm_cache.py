@@ -12,6 +12,8 @@ explicitly disables the cache to stay DB-independent.
 import json
 from pathlib import Path
 
+import reachability.triage.groq_llm as groq_llm_module
+from reachability.db import repository
 from reachability.db.repository import serialize_finding
 from reachability.triage.groq_llm import GroqLLMClient
 from reachability.triage.index_adapter import build_repo_index
@@ -103,3 +105,48 @@ def test_cache_disabled_flag_defeats_the_cache(db_session, monkeypatch):
     run_triage_loop_langgraph(client2, repo_index, TARGET_MODULE, TARGET_SYMBOL, BUDGET)
 
     assert transport.calls == 2, "cache disabled -- second run must hit the transport again"
+
+
+def test_system_prompt_edit_invalidates_the_cache(db_session, monkeypatch):
+    """Review finding: `compute_cache_key` must fold in a fingerprint of
+    the literal system-prompt/tool-schema text, not just the static
+    `PROMPT_VERSION` constant -- otherwise an in-code prompt edit (exactly
+    what happened mid-phase to `_SYSTEM_PROMPT`, per
+    `agent_docs/PHASE5_INJECTION_REAL_MODEL.md`) would silently keep
+    serving a pre-edit cached response forever."""
+    monkeypatch.delenv("TRIAGE_LLM_CACHE_DISABLED", raising=False)
+    transport = FakeGroqTransport(_final_answer_responder)
+    repo_index = build_repo_index(FIXTURE_REPO)
+
+    client1 = GroqLLMClient(
+        api_key="fake-key-not-real", http_client=httpx.Client(transport=transport)
+    )
+    run_triage_loop_langgraph(client1, repo_index, TARGET_MODULE, TARGET_SYMBOL, BUDGET)
+    assert transport.calls == 1
+
+    monkeypatch.setattr(groq_llm_module, "_SYSTEM_PROMPT", "a materially different system prompt")
+
+    client2 = GroqLLMClient(
+        api_key="fake-key-not-real", http_client=httpx.Client(transport=transport)
+    )
+    run_triage_loop_langgraph(client2, repo_index, TARGET_MODULE, TARGET_SYMBOL, BUDGET)
+
+    assert transport.calls == 2, "a changed system prompt must be a cache miss, not a stale hit"
+
+
+def test_concurrent_identical_cache_write_does_not_raise(db_session):
+    """Review finding: two callers racing to the same cache_key (e.g. two
+    jobs, or a reaper-reclaimed job's original and reclaiming workers both
+    still mid-flight -- DECISIONS.md Sec.8 decision 6(a), routine and
+    harmless by this project's own design) must not fail the losing
+    caller's job with an uncaught IntegrityError."""
+    repository.store_cached_response(
+        db_session, "race-key", "v1", "fake-model", {"kind": "final_answer"}
+    )
+    # The second, colliding insert must be swallowed as a lost race, not
+    # raised -- the caller already has its own real response in hand
+    # regardless of whether this particular row gets persisted.
+    repository.store_cached_response(
+        db_session, "race-key", "v1", "fake-model", {"kind": "final_answer"}
+    )
+    assert repository.get_cached_response(db_session, "race-key") is not None

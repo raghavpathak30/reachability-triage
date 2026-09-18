@@ -145,6 +145,16 @@ def _json_type_for(expected_type: type | tuple) -> str | list[str]:
     return "string"
 
 
+def _prompt_fingerprint() -> str:
+    """Hash of the literal system-prompt text plus the serialized tool
+    schemas actually sent to the model -- folded into the cache key
+    (`llm_cache.compute_cache_key`) alongside `PROMPT_VERSION` so an
+    in-code prompt/tool-schema edit (which this project's convention does
+    not require bumping `PROMPT_VERSION` for) can never silently keep
+    serving a stale cached response. See `llm_cache.py`'s module docstring."""
+    return _SYSTEM_PROMPT + json.dumps(_build_tool_defs(), sort_keys=True)
+
+
 def _build_tool_defs() -> list[dict]:
     tool_defs = []
     for name, schema in TOOL_SCHEMAS.items():
@@ -215,7 +225,9 @@ class GroqLLMClient:
             from ..db import repository
             from ..db.session import get_sessionmaker
 
-            cache_key = compute_cache_key(PROMPT_VERSION, self.model, context)
+            cache_key = compute_cache_key(
+                PROMPT_VERSION, self.model, _prompt_fingerprint(), context
+            )
             session = get_sessionmaker()()
             try:
                 cached = repository.get_cached_response(session, cache_key)

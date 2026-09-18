@@ -1,6 +1,7 @@
 import uuid
 
 from pydantic import TypeAdapter
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from reachability.triage.agent_models import TriageFinding
@@ -67,7 +68,18 @@ def store_cached_response(
     response_json: dict,
 ) -> None:
     """Insert a cached response row. Called only on a cache miss, after a
-    real call succeeds -- see `groq_llm.py::GroqLLMClient.next_action`."""
+    real call succeeds -- see `groq_llm.py::GroqLLMClient.next_action`.
+
+    Two callers can legitimately race to the same `cache_key` -- e.g. two
+    jobs targeting the same repo/prompt, or a reaper-reclaimed job whose
+    original and reclaiming workers are both still mid-flight
+    (`DECISIONS.md` Sec.8 decision 6(a): "bounded duplicate work, not
+    corruption"). The loser's insert hits the unique index on `cache_key`;
+    that's a benign lost race, not a failure -- the loser already has its
+    own, equally-valid real response in hand and is about to return it
+    regardless of whether its own row gets persisted, so this rolls back
+    and returns rather than propagating `IntegrityError` and failing that
+    job."""
     row = LLMResponseCache(
         id=uuid.uuid4(),
         cache_key=cache_key,
@@ -76,4 +88,7 @@ def store_cached_response(
         response_json=response_json,
     )
     session.add(row)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
