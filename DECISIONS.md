@@ -927,3 +927,120 @@ result that could embed verbose real-model rationale text alongside
 repo-derived tool-result content, which is exactly the kind of
 untrusted/sensitive text this project's own `sandbox_untrusted_text`
 threat model already treats carefully elsewhere.
+
+## 12. Phase 5 — real Groq LLM integration (18 Sep 2026)
+
+**(a) What changed.** `src/reachability/triage/groq_llm.py`'s
+`GroqLLMClient` is a second implementation of the `StubLLMClient` Protocol
+`langgraph_loop.py` already depended on (`next_action(context: list[Message])
+-> AgentAction`, byte-for-byte unchanged — confirmed by an empty `git diff`
+against `stub_llm.py` at merge time). `job_runner.py` now constructs
+`GroqLLMClient()` unconditionally for every production job;
+`DeterministicPolicyStubLLMClient` still exists and still drives the
+eval harness's CI-blocking stub lane, but is no longer what a real triage
+request runs against. Four new modules carry the supporting design:
+`llm_errors.py` (a typed exception taxonomy — timeout, rate-limited,
+transport, refusal, truncated, malformed-response — each mapped 1:1 from
+the installed `groq` SDK's own exception hierarchy), `llm_config.py`
+(lazy `GROQ_API_KEY` read mirroring `db/session.py`'s pattern, the pinned
+model string, an explicitly-disclosed-as-unverified per-token cost
+estimate), `llm_cache.py` (a sha256 content-hash cache key), and a fourth
+`submit_final_answer` tool schema added to the shared
+`tool_dispatch.TOOL_SCHEMAS` so a real model states its own answer target
+as structured output instead of the stub's construction-time shortcut —
+confirmed inert for the stub lane (`_dispatch_tool` still rejects it;
+`DeterministicPolicyStubLLMClient`'s behavior is unchanged).
+`triage_jobs` gained four nullable columns (`token_count`, `total_cost`,
+`model_string`, `prompt_version`, `alembic/versions/0002_...py`) and a new
+`llm_response_cache` table (`0003_...py`) backs the cache — no in-memory
+or second source of truth, per Sec.8 decision 1's rule. This closes two
+items CLAUDE.md's NOT BUILT list previously named: **live LLM API
+integration** and **content-hash caching** are both now built, in
+production, as of this merge.
+
+**(b) Why this sequencing.** Client + typed errors (U1) before failure
+semantics under fault injection (U2) before persistence/caching (U3)
+before dual-lane CI (U4) before injection-resistance against the real
+model (U5) — each unit's gate had to hold before the next unit could
+safely build on it, and the production `job_runner.py` swap itself was
+deliberately deferred past persistence (U3) to the end of injection
+resistance (U5): U2's fault-injection gate proves failures degrade to
+`unknown`, but says nothing about whether a real model *obeys* injected
+advisory text, which only U5 tests. The swap landed in the same commit as
+U5's own gate passing, not before it.
+
+**(c) Proof.** `scripts/run_real_llm_fixtures.py` ran all 30 fixtures
+against the real client with zero unhandled exceptions (30/30 files
+written, 68,756 tokens, ~$0.01 estimated). `tests/test_llm_failure_semantics.py`
+(12 tests) proves every one of the six error classes degrades to
+`Verdict.UNKNOWN` via a fake-transport call-count assertion (3 attempts
+for timeout/rate-limited/transport, 1 for refusal/malformed/truncated —
+never retried into a verdict). `tests/test_llm_cache.py` (4 tests, 2 added
+post-review) proves a repeated identical run makes zero additional calls
+and returns a JSON-equal finding, that the bypass flag defeats the cache,
+and — post-review — that an edited system prompt is correctly a cache
+miss and a concurrent identical cache-write never fails the job (see (e)).
+`tests/test_triage_langgraph_loop_adversarial_real.py` (3 tests) passed
+against the real model on every observed run; see
+`agent_docs/PHASE5_INJECTION_REAL_MODEL.md` for the full per-payload
+results and its own honestly-stated caveat (a rate-limited API tier meant
+most runs degraded to `unknown` before the model reached a final answer,
+so "zero injection wins" is proven but is weaker evidence than "resisted
+injection while actively completing an investigation"). 216 tests passing
+overall (196 pre-phase baseline + 18 new + 2 post-review regression
+tests), stub-lane eval gate unregressed (`Overall: PASS`, G1/G2/G3/G5/G6).
+
+**(d) Dual-lane eval (U4).** The pre-existing, required `eval` CI job
+(`.github/workflows/tests.yml`) is unchanged in behavior — it is now
+labeled the stub lane, all six gates still hard, still blocking every
+push/PR. A new `eval-real` job runs the same 30 fixtures against
+`GroqLLMClient`: gated on `workflow_dispatch` only (no `schedule:` —
+the cache is Postgres-backed and this job provisions no Postgres, so an
+unattended scheduled run would re-pay full real-API cost on every
+invocation with nobody watching; revisit once real per-run cost is
+better known), behind a required-reviewers GitHub `environment:
+eval-real-gate` (repo-admin setup, not yet created as of this merge — see
+(f)), with `TRIAGE_LLM_CACHE_DISABLED=1` (required, not optional: without
+it the job's first cache check crashes on a missing `DATABASE_URL`). Only
+G1 (zero false `not_reachable`) is hard on the real lane; G2/G3/G5/G6 are
+reported-only, and `scripts/diff_eval_lanes.py` emits a per-fixture
+stub-vs-real disagreement report that never fails the build.
+
+**(e) Post-review fixes (18 Sep 2026, same day).** Code review
+(`.agent/review.md`) found two Warning-level defects, fixed before this
+section was written: (1) `compute_cache_key` originally hashed only
+`(prompt_version, model, context)` — never the literal `_SYSTEM_PROMPT`/
+tool-schema text actually sent to the model, and `PROMPT_VERSION` is a
+static constant this project's convention doesn't bump for an in-code
+prompt edit (exactly what happened mid-phase to `_SYSTEM_PROMPT` — see
+(a)'s U1 note and `agent_docs/PHASE5_INJECTION_REAL_MODEL.md`'s "System
+prompt fix"). Fixed by folding a fingerprint of the system prompt + tool
+defs into the key. (2) `store_cached_response` had no handling for two
+callers racing to an identical cache-miss — routine per Sec.8 decision
+6(a)'s "bounded duplicate work, not corruption" design — so the loser's
+`IntegrityError` on the unique `cache_key` index propagated uncaught and
+failed that job. Fixed by catching it and rolling back; the loser already
+has its own valid response in hand regardless of whether its row
+persists.
+
+**(f) What this does not close.** `llm_config.py`'s per-token cost table
+is disclosed, in the module itself, as an unverified estimate — no live
+pricing-page fetch was available. This is a narrow, job-scoped cost
+*record* (`triage_jobs.total_cost`), not the broader cost-accounting
+system (budgets, alerts, cross-job aggregation) CLAUDE.md's NOT BUILT list
+means by "cost accounting" — that phrase should not be considered closed
+by this phase. `prompts/v1/*.md` is still not read by the agent loop;
+`GroqLLMClient`'s system prompt is a hardcoded module constant, and only
+`PROMPT_VERSION` itself is persisted as metadata — DB-stored prompt
+versioning and CI-gated prompt changes remain not built. The
+`eval-real-gate` GitHub Environment and the `GROQ_API_KEY` repository
+secret both require repo-admin action outside this repo's own files and
+had not been created as of this merge — `eval-real` cannot actually run
+until an admin does both. The `role="user"` framing for tool-result
+messages (`groq_llm.py`, forced by `Message`/`LangGraphTriageState` having
+no `tool_call_id` field to support a proper `role="tool"` turn) is a
+disclosed, reviewed, not-blocking design choice — see
+`agent_docs/PHASE5_INJECTION_REAL_MODEL.md` and `.agent/review.md` finding
+4 for the full reasoning and why a future, unthrottled real-model run is
+recommended before treating the injection-resistance result as strong
+evidence rather than "zero wins observed, on a rate-limited sample."

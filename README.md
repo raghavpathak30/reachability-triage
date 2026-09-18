@@ -40,7 +40,7 @@ Docker · Docker Compose · GitHub Actions · AWS EC2
   corpus + measurement) are built.
 - `src/reachability/triage/` — the triage agent (see `agent_docs/PHASE2_TRIAGE_AGENT.md`).
   Source acquisition (`acquire_source`), the index-pipeline adapter
-  (`build_repo_index`), the stub-LLM triage loop
+  (`build_repo_index`), the triage loop
   (`langgraph_loop.py`'s `run_triage_loop_langgraph`/`build_langgraph_triage_graph`,
   a LangGraph `StateGraph` as of Phase LangGraph's Unit 6 cutover — see
   `DECISIONS.md` §10) over `search_symbol`/`find_callers`/`resolve_import`
@@ -50,7 +50,17 @@ Docker · Docker Compose · GitHub Actions · AWS EC2
   stale-job reaper) — see `agent_docs/PHASE3_PERSISTENCE.md` and
   `DECISIONS.md` §8 — now own job execution, replacing the earlier
   in-process `job_runner.py`/`BackgroundTasks` job lifecycle entirely (that
-  code is removed, not kept alongside). Real LLM integration is not built.
+  code is removed, not kept alongside). Production jobs now run against a
+  real model: `groq_llm.py`'s `GroqLLMClient` (Groq, model pinned in
+  `llm_config.py`) is a second implementation of the same `StubLLMClient`
+  Protocol the loop already used, with a typed error taxonomy that
+  degrades every failure class to `Verdict.UNKNOWN` and a Postgres-backed,
+  content-hash response cache — see `DECISIONS.md` §12 and
+  `agent_docs/PHASE5_INJECTION_REAL_MODEL.md` for the real-model
+  injection-resistance results this swap was gated on.
+  `DeterministicPolicyStubLLMClient` (`stub_llm.py`) still exists and still
+  drives the CI-blocking eval gate's stub lane; it is simply no longer
+  what production jobs construct.
 - `src/reachability/agent/` — the eval harness (see `agent_docs/PHASE2_TRIAGE_AGENT.md`
   U6). `run_eval_suite()` runs the full agent loop (not a direct
   `compute_reachability` call) over 30 fixtures across two directories — the
@@ -58,8 +68,11 @@ Docker · Docker Compose · GitHub Actions · AWS EC2
   `tests/fixtures/l5_phase4/` (`agent_docs/PHASE4_EVAL_HARNESS.md`) — gated by six
   pre-registered gates (`agent_docs/PHASE4_EVAL_PROTOCOL.md`, which supersedes
   `agent_docs/U6_EVAL_PROTOCOL.md`'s historical 22-fixture numbers). `prompt_registry.py` +
-  `prompts/v1/*.md` are file-based prompt-versioning scaffolding, not yet consumed
-  by the (still-stub) agent loop.
+  `prompts/v1/*.md` are file-based prompt-versioning scaffolding, still not
+  consumed by the agent loop — `GroqLLMClient`'s system prompt
+  (`groq_llm.py`'s `_SYSTEM_PROMPT`) is a hardcoded module constant, not
+  read from `prompts/v1/*.md`; only `PROMPT_VERSION` itself is recorded,
+  as a per-job metadata string (`DECISIONS.md` §12).
 - `src/reachability/db/` — Postgres persistence (see `agent_docs/PHASE3_PERSISTENCE.md`
   and `DECISIONS.md` §8). `POST`/`GET /v1/triage` (`main.py`) now read/write a real,
   Alembic-migrated `triage_jobs` table; `python -m reachability.triage.worker`
@@ -97,11 +110,10 @@ written to `results/l5_<git-sha>.json`.
 `scripts/run_eval_suite.py` drives 30 fixtures — the reused `tests/fixtures/l5/`
 corpus (22) plus 8 new fixtures in `tests/fixtures/l5_phase4/`
 (`agent_docs/PHASE4_EVAL_HARNESS.md`) — through the full triage agent loop
-(`run_triage_loop_langgraph`, stub LLM) instead of a direct index call — see
-`agent_docs/PHASE4_EVAL_PROTOCOL.md` for the six pre-registered gates gating the
-30-fixture corpus (G1/G2/G3/G5/G6 hard — G2's floor is 6 of 7 — G4
-reported-only; `agent_docs/U6_EVAL_PROTOCOL.md` describes the historical
-22-fixture run only).
+instead of a direct index call — see `agent_docs/PHASE4_EVAL_PROTOCOL.md`
+for the six pre-registered gates gating the 30-fixture corpus (G1/G2/G3/G5/G6
+hard — G2's floor is 6 of 7 — G4 reported-only; `agent_docs/U6_EVAL_PROTOCOL.md`
+describes the historical 22-fixture run only).
 It is now a required CI check (the `eval` job in
 `.github/workflows/tests.yml`), not just a local/manual command. Run it
 locally with:
@@ -110,4 +122,19 @@ locally with:
 python scripts/run_eval_suite.py
 ```
 
-Results are written to `results/eval_<git-sha>.json`.
+Results are written to `results/eval_<git-sha>.json` (gitignored — see
+`DECISIONS.md` §12).
+
+**Dual-lane eval (Phase 5 §12).** The command above runs the default,
+CI-blocking **stub lane** — deterministic, free, `DeterministicPolicyStubLLMClient`,
+all six gates hard. A separate `--lane=real` **real lane** runs the same
+30 fixtures against the real `GroqLLMClient`; only G1 (zero false
+`not_reachable`) is hard on that lane, the rest are reported-only, and it
+only ever runs via the `eval-real` GitHub Actions job (`workflow_dispatch`-only,
+never on a normal push/PR — see `.github/workflows/tests.yml`), never
+locally-required or CI-blocking:
+
+```
+python scripts/run_eval_suite.py --lane=real
+python scripts/diff_eval_lanes.py   # per-fixture stub-vs-real disagreement report
+```

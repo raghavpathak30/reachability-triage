@@ -13,11 +13,20 @@ Edits here do nothing until `/clear`, `/compact`, or restart.
 - Success criteria for any change: the app starts clean, no debug prints
 
 ## NOT BUILT — do not describe these as existing
-Docker, a distributed task broker/queue, capped retries-with-backoff,
-per-user quotas, cost accounting, content-hash caching, DB-stored prompt
-versioning, CI-gated prompt changes, live LLM API integration.
+Docker, a distributed task broker/queue, capped retries-with-backoff **at
+the job-lifecycle level** (a failed/errored triage job is not automatically
+re-run — Phase 5 U2's retry-with-backoff is scoped to a single
+`GroqLLMClient` API call, not the job as a whole, see the Phase 5
+paragraph below), per-user quotas, cost accounting **as a system**
+(budgets, alerts, cross-job aggregation — Phase 5 persists a per-job
+token/cost/model/prompt-version record, which is a narrower thing, see
+below), DB-stored prompt versioning, CI-gated prompt changes.
 These are in DECISIONS.md as intent. Check the code before claiming any
 of them work — in a README, docstring, commit message or comment.
+
+Live LLM API integration and content-hash caching, previously listed
+here, are now built — see the Phase 5 paragraph below and
+`DECISIONS.md` §12.
 
 Phase 2 U3/U4 (originally `src/reachability/triage/agent_loop.py`,
 `src/reachability/triage/sandbox.py`, `src/reachability/triage/stub_llm.py`)
@@ -136,6 +145,45 @@ itself (rather than by building the request or running the job) is not
 retried as a second finalize call, since that could fail for the same
 reason — that row is left `running` for the reaper's timeout to recover,
 same as any other crash-during-execute case.
+
+Phase 5 (`src/reachability/triage/groq_llm.py`, `llm_errors.py`,
+`llm_config.py`, `llm_cache.py`) is built: `job_runner.py` now
+constructs a real `GroqLLMClient` (Groq, model pinned in `llm_config.py`)
+unconditionally for every production job — this is a **second
+implementation of the unchanged `StubLLMClient` Protocol**
+(`stub_llm.py:95-98`, byte-for-byte untouched), not a widened interface.
+`DeterministicPolicyStubLLMClient` still exists and still drives the
+CI-blocking eval gate's stub lane; production jobs simply no longer
+construct it. A typed error taxonomy (`llm_errors.py`: timeout,
+rate-limited, transport, refusal, truncated, malformed-response) degrades
+every failure class to `Verdict.UNKNOWN` with a preserved reason string,
+never a wrong confident verdict — timeout/rate-limited/transport retry up
+to 3 times with backoff at the single-API-call level only (not the job
+level, see NOT BUILT above); refusal/malformed/truncated never retry.
+`triage_jobs` gained `token_count`/`total_cost`/`model_string`/
+`prompt_version` columns and a new, Postgres-backed
+`llm_response_cache` table (content-hash-keyed on prompt version + model +
+the literal system-prompt/tool-schema text + conversation context — this
+last part was a post-review fix, see DECISIONS.md §12(e); the original
+key omitted the literal prompt text and could have gone stale across a
+future in-code prompt edit without bumping `PROMPT_VERSION`), bypassable
+via `TRIAGE_LLM_CACHE_DISABLED`. The production client swap
+(`job_runner.py`) was deliberately deferred until a real-model
+injection-resistance gate passed (`agent_docs/PHASE5_INJECTION_REAL_MODEL.md`):
+zero observed injection wins across every real-model adversarial run
+performed — a real, honestly-caveated result (an 8000-TPM rate-limited
+API tier meant most runs degraded to `unknown` before reaching a final
+answer, so this proves "the model never gave the attacker's wrong
+answer," not "the model resisted injection while actively completing an
+investigation" — see the doc for the full caveat). A new, non-blocking
+`eval-real` CI job (`.github/workflows/tests.yml`) runs the same
+30-fixture eval corpus against the real client — `workflow_dispatch`-only,
+never on push/PR, behind a required-reviewers GitHub Environment not yet
+created as of this merge (repo-admin action needed, along with adding the
+`GROQ_API_KEY` secret) — with only G1 (zero false `not_reachable`) hard;
+the existing, unchanged `eval` job remains the sole CI-blocking gate. See
+DECISIONS.md §12 for the full unit-by-unit rationale and what this phase
+does and does not close.
 
 AST index (`agent_docs/PHASE1_AST_INDEX.md`): L1 (module discovery + import
 map), L2 (symbol table — functions, classes, methods, nested functions,
