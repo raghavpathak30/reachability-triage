@@ -114,7 +114,10 @@ def db_session(postgres_cluster):
         yield session
     finally:
         session.rollback()
-        session.execute(text("TRUNCATE triage_jobs"))
+        # Phase 5 U3 adds llm_response_cache -- truncated alongside
+        # triage_jobs so a cache row planted by one test can never leak
+        # into a later, unrelated one.
+        session.execute(text("TRUNCATE triage_jobs, llm_response_cache"))
         session.commit()
         session.close()
         engine.dispose()

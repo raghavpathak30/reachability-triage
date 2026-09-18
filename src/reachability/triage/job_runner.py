@@ -20,11 +20,18 @@ addendum):
    `request.target_symbol`), now required/optional fields on that model.
    A real caller (e.g. triaging a CVE advisory) always names a specific
    vulnerable symbol; this module never derives a target automatically.
-2. **Production "LLM" client** -- `DeterministicPolicyStubLLMClient`
-   (`stub_llm.py`), instantiated fresh per job. **This is not a real LLM.**
-   It is a deterministic placeholder policy (confirm target, backward-BFS
-   callers, answer) used until a later unit adds live LLM integration --
-   live LLM API integration is still NOT BUILT per project `CLAUDE.md`.
+2. **Production "LLM" client** -- **Phase 5 U5 status note (supersedes the
+   text below as originally written for Phase 2 U5): this is now the real
+   `GroqLLMClient` (`groq_llm.py`), instantiated fresh per job, not the
+   deterministic stub.** The swap happened only after
+   `agent_docs/PHASE5_INJECTION_REAL_MODEL.md` showed zero injection wins
+   across every real-model adversarial run performed in that unit -- see
+   that document for the full gate and its honest caveats.
+   `DeterministicPolicyStubLLMClient` (`stub_llm.py`) remains in the
+   codebase and is still used by the eval harness's stub lane
+   (`eval_harness.py`, default `lane="stub"`) and by every gate test
+   through Phase LangGraph -- it is simply no longer what
+   `run_triage_job` constructs.
 3. **Tool-call budget** -- `DEFAULT_TOOL_CALL_BUDGET = 30`, fixed for every
    job in this unit; not exposed on `TriageRequest`.
 4. **Workdir lifecycle** -- `run_triage_job` opens exactly one
@@ -82,11 +89,12 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..agent.prompt_registry import PROMPT_VERSION
 from .acquisition import acquire_source
+from .groq_llm import GroqLLMClient
 from .index_adapter import build_repo_index
 from .langgraph_loop import run_triage_loop_langgraph
 from .sandbox import sandbox_untrusted_text
-from .stub_llm import DeterministicPolicyStubLLMClient
 
 if TYPE_CHECKING:
     from main import TriageRequest
@@ -133,6 +141,7 @@ def run_triage_job(
     docstring for the full exception-handling contract.
     """
     record["status"] = "running"
+    llm_client = None
 
     try:
         with tempfile.TemporaryDirectory(
@@ -145,9 +154,12 @@ def run_triage_job(
                     f"build_repo_index succeeded but found zero modules "
                     f"under {source_path.name}"
                 )
-            llm_client = DeterministicPolicyStubLLMClient(
-                request.target_module, request.target_symbol
-            )
+            # Phase 5 U5: swapped from DeterministicPolicyStubLLMClient to
+            # the real GroqLLMClient, gated on
+            # agent_docs/PHASE5_INJECTION_REAL_MODEL.md showing zero
+            # injection wins across every real-model adversarial run
+            # performed in that unit.
+            llm_client = GroqLLMClient()
             finding = run_triage_loop_langgraph(
                 llm_client,
                 repo_index,
@@ -161,3 +173,12 @@ def run_triage_job(
     else:
         record["finding"] = finding
         record["status"] = "completed"
+    finally:
+        # Phase 5 U3: client-agnostic persistence plumbing -- works for both
+        # GroqLLMClient (real totals) and DeterministicPolicyStubLLMClient
+        # (both attributes absent, so this records None/None), so the
+        # eventual U5 client swap needs no change here.
+        record["token_count"] = getattr(llm_client, "total_tokens_used", None)
+        record["total_cost"] = getattr(llm_client, "total_cost_accrued", None)
+        record["model_string"] = getattr(llm_client, "model", None)
+        record["prompt_version"] = PROMPT_VERSION

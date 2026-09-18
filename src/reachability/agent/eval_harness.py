@@ -28,6 +28,13 @@ from reachability.triage.langgraph_loop import run_triage_loop_langgraph
 from reachability.triage.index_adapter import build_repo_index
 from reachability.triage.stub_llm import DeterministicPolicyStubLLMClient
 
+# Phase 5 U4: lane parametrization. "stub" (default) is the existing
+# deterministic, no-network path, required on every push/PR. "real"
+# instantiates GroqLLMClient instead -- a real network call, never run by
+# the required `eval` job, only by the workflow_dispatch-only `eval-real`
+# job (see .github/workflows/tests.yml).
+_VALID_LANES = ("stub", "real")
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 EVAL_FIXTURES_ROOTS: list[Path] = [
     REPO_ROOT / "tests" / "fixtures" / "l5",
@@ -107,9 +114,12 @@ class EvalReport:
     gates: dict
     git_sha: str
     timestamp_utc: str
+    lane: str = "stub"
 
 
-def measure_eval_fixture(fixture_dir: Path) -> dict:
+def measure_eval_fixture(fixture_dir: Path, lane: str = "stub") -> dict:
+    if lane not in _VALID_LANES:
+        raise ValueError(f"unknown lane: {lane!r} (must be one of {_VALID_LANES})")
     label = load_label(fixture_dir)
     repo_root = fixture_dir / "repo"
 
@@ -147,7 +157,12 @@ def measure_eval_fixture(fixture_dir: Path) -> dict:
         row["target_module"] = target_module
         row["target_symbol"] = target_symbol
 
-        client = DeterministicPolicyStubLLMClient(target_module, target_symbol)
+        if lane == "real":
+            from reachability.triage.groq_llm import GroqLLMClient
+
+            client = GroqLLMClient()
+        else:
+            client = DeterministicPolicyStubLLMClient(target_module, target_symbol)
         finding = run_triage_loop_langgraph(
             client,
             repo_index,
@@ -174,7 +189,17 @@ def measure_eval_fixture(fixture_dir: Path) -> dict:
     return row
 
 
-def evaluate_eval_gates(results: list[dict]) -> dict:
+def evaluate_eval_gates(results: list[dict], lane: str = "stub") -> dict:
+    """G1 (zero false `not_reachable`) is hard regardless of lane -- a
+    confident wrong answer is the worst-case failure this project defines,
+    real model or not. G2/G3/G5/G6 are hard only for the stub lane (a
+    real model's accuracy/non-crash/non-degradation is not deterministic,
+    so it cannot gate a required CI job) -- for `lane == "real"` they are
+    still computed and reported, just never contribute to `overall_pass`.
+    """
+    if lane not in _VALID_LANES:
+        raise ValueError(f"unknown lane: {lane!r} (must be one of {_VALID_LANES})")
+    is_stub_lane = lane == "stub"
     gates: dict = {}
 
     g1_offenders = [
@@ -189,7 +214,7 @@ def evaluate_eval_gates(results: list[dict]) -> dict:
     g2_set = [r for r in results if r["allowed_verdicts"] == ["not_reachable"]]
     g2_correct = [r["id"] for r in g2_set if r["verdict"] == "not_reachable"]
     gates["G2"] = {
-        "pass": len(g2_correct) >= G2_MIN_CORRECT,
+        "pass": True if not is_stub_lane else len(g2_correct) >= G2_MIN_CORRECT,
         "correct_count": len(g2_correct),
         "total": len(g2_set),
         "threshold": G2_MIN_CORRECT,
@@ -199,7 +224,7 @@ def evaluate_eval_gates(results: list[dict]) -> dict:
     g3_set = [r for r in results if r["allowed_verdicts"] == ["reachable_only_from_tests"]]
     g3_failing = [r["id"] for r in g3_set if r["verdict"] != "reachable_only_from_tests"]
     gates["G3"] = {
-        "pass": len(g3_failing) == 0,
+        "pass": True if not is_stub_lane else len(g3_failing) == 0,
         "total": len(g3_set),
         "failing_fixtures": g3_failing,
     }
@@ -214,13 +239,13 @@ def evaluate_eval_gates(results: list[dict]) -> dict:
 
     g5_crashed = [r["id"] for r in results if r["error"] is not None]
     gates["G5"] = {
-        "pass": len(g5_crashed) == 0,
+        "pass": True if not is_stub_lane else len(g5_crashed) == 0,
         "crashed_fixtures": g5_crashed,
     }
 
     g6_offenders = [r["id"] for r in results if r["loop_degradation_reason"] is not None]
     gates["G6"] = {
-        "pass": len(g6_offenders) == 0,
+        "pass": True if not is_stub_lane else len(g6_offenders) == 0,
         "loop_degradation_count": len(g6_offenders),
         "offending_fixtures": g6_offenders,
     }
@@ -237,10 +262,12 @@ def evaluate_eval_gates(results: list[dict]) -> dict:
 
 def write_eval_results_json(report: EvalReport) -> Path:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = RESULTS_DIR / f"eval_{report.git_sha}.json"
+    prefix = "eval" if report.lane == "stub" else f"eval_{report.lane}"
+    out_path = RESULTS_DIR / f"{prefix}_{report.git_sha}.json"
     payload = {
         "git_sha": report.git_sha,
         "timestamp_utc": report.timestamp_utc,
+        "lane": report.lane,
         "fixtures": report.fixtures,
         "gates": report.gates,
     }
@@ -268,16 +295,19 @@ def print_eval_table(results: list[dict]) -> None:
             print(f'    ERROR: {r["error"]}')
 
 
-def run_eval_suite() -> EvalReport:
+def run_eval_suite(lane: str = "stub") -> EvalReport:
+    if lane not in _VALID_LANES:
+        raise ValueError(f"unknown lane: {lane!r} (must be one of {_VALID_LANES})")
     fixture_dirs = discover_eval_fixtures(EVAL_FIXTURES_ROOTS)
-    results = [measure_eval_fixture(d) for d in fixture_dirs]
-    gates = evaluate_eval_gates(results)
+    results = [measure_eval_fixture(d, lane=lane) for d in fixture_dirs]
+    gates = evaluate_eval_gates(results, lane=lane)
     sha = git_sha()
     report = EvalReport(
         fixtures=results,
         gates=gates,
         git_sha=sha,
         timestamp_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        lane=lane,
     )
     write_eval_results_json(report)
     return report

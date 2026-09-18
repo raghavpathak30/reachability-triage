@@ -14,6 +14,20 @@ TOOL_SCHEMAS: dict[str, tuple[tuple[str, type], ...]] = {
     "search_symbol": (("pattern", str),),
     "find_callers": (("node_id", str),),
     "resolve_import": (("module", str), ("name", str)),
+    # Phase 5 U1: a real model signals "done" by calling this tool rather
+    # than through a distinct stub-only code path (see `groq_llm.py`'s
+    # module docstring). Never reaches `_dispatch_tool` -- `GroqLLMClient`
+    # intercepts a `submit_final_answer` tool call and translates it into
+    # a `FinalAnswerAction` before `next_action` ever returns, so the
+    # graph never sees this name as a `ToolCallAction`. Listed here only
+    # so `_is_well_formed_tool_call` can be reused to validate its
+    # arguments, matching this table's existing (key, type) shape --
+    # `target_symbol` is nullable, hence the `(str, type(None))` tuple.
+    "submit_final_answer": (
+        ("target_module", str),
+        ("target_symbol", (str, type(None))),
+        ("rationale", str),
+    ),
 }
 
 

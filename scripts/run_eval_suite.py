@@ -6,6 +6,7 @@ division of labor as `scripts/measure_l5.py`'s `main()`/`__main__` block:
 `run_eval_suite()` never decides an exit code itself, this script does.
 """
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -16,8 +17,18 @@ from reachability.agent.eval_harness import print_eval_table, run_eval_suite  # 
 
 
 def main() -> int:
-    report = run_eval_suite()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--lane",
+        choices=("stub", "real"),
+        default="stub",
+        help="stub (default, no network, required CI gate) or real (live Groq API)",
+    )
+    args = parser.parse_args()
 
+    report = run_eval_suite(lane=args.lane)
+
+    print(f"lane: {report.lane}")
     print_eval_table(report.fixtures)
     print()
 

@@ -75,13 +75,18 @@ _CLAIM_SQL = text(
     """
 )
 
-# Copied verbatim from agent_docs/PHASE3_PERSISTENCE.md U3 step 3. The
-# worker_id/attempt_count guard in the WHERE clause is the concrete
-# anti-corruption mechanism -- see this module's docstring, point 3.
+# Copied verbatim from agent_docs/PHASE3_PERSISTENCE.md U3 step 3, extended
+# in Phase 5 U3 with the four LLM-metadata columns (token_count, total_cost,
+# model_string, prompt_version) -- same guard, same transaction, no new
+# transaction boundary. The worker_id/attempt_count guard in the WHERE
+# clause is the concrete anti-corruption mechanism -- see this module's
+# docstring, point 3.
 _FINALIZE_SQL = text(
     """
     UPDATE triage_jobs
     SET status = :final_status, finding = :finding_json, error = :error,
+        token_count = :token_count, total_cost = :total_cost,
+        model_string = :model_string, prompt_version = :prompt_version,
         updated_at = now()
     WHERE id = :id AND worker_id = :worker_id AND attempt_count = :claimed_attempt_count
     RETURNING id
@@ -150,6 +155,10 @@ def finalize_job(
             "final_status": record["status"],
             "finding_json": finding_json,
             "error": record.get("error"),
+            "token_count": record.get("token_count"),
+            "total_cost": record.get("total_cost"),
+            "model_string": record.get("model_string"),
+            "prompt_version": record.get("prompt_version"),
             "id": job_id,
             "worker_id": worker_id,
             "claimed_attempt_count": claimed_attempt_count,
@@ -215,6 +224,16 @@ def run_worker_once(session_factory: sessionmaker, worker_id: str, budget: int) 
 
 
 def main() -> None:
+    # Phase 5 U5: fail fast, once, at process start -- a missing
+    # GROQ_API_KEY must not let every job pay for a real acquire_source/
+    # build_repo_index chain (job_runner.py runs those before ever
+    # constructing an LLM client) before failing on a simple
+    # misconfiguration. GroqConfigError is intentionally not caught here;
+    # a misconfigured worker process should not start at all.
+    from .llm_config import get_groq_api_key
+
+    get_groq_api_key()
+
     timeout_seconds = int(
         os.environ.get("TRIAGE_STALE_JOB_TIMEOUT_SECONDS", DEFAULT_STALE_JOB_TIMEOUT_SECONDS)
     )

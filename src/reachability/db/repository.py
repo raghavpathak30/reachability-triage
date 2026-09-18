@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from reachability.triage.agent_models import TriageFinding
 
-from .models import TriageJob
+from .models import LLMResponseCache, TriageJob
 
 _FINDING_ADAPTER = TypeAdapter(TriageFinding)
 
@@ -47,3 +47,33 @@ def get_job(session: Session, job_id: uuid.UUID) -> dict | None:
         "finding": deserialize_finding(job.finding) if job.finding is not None else None,
         "error": job.error,
     }
+
+
+def get_cached_response(session: Session, cache_key: str) -> dict | None:
+    """Look up a cached real-LLM response by its content-derived key
+    (`llm_cache.compute_cache_key`). Returns `None` on a cache miss --
+    never raises for a missing key."""
+    row = session.query(LLMResponseCache).filter_by(cache_key=cache_key).one_or_none()
+    if row is None:
+        return None
+    return row.response_json
+
+
+def store_cached_response(
+    session: Session,
+    cache_key: str,
+    prompt_version: str,
+    model_string: str,
+    response_json: dict,
+) -> None:
+    """Insert a cached response row. Called only on a cache miss, after a
+    real call succeeds -- see `groq_llm.py::GroqLLMClient.next_action`."""
+    row = LLMResponseCache(
+        id=uuid.uuid4(),
+        cache_key=cache_key,
+        prompt_version=prompt_version,
+        model_string=model_string,
+        response_json=response_json,
+    )
+    session.add(row)
+    session.commit()

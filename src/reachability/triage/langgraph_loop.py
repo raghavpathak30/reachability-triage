@@ -54,6 +54,14 @@ from reachability.index.reachability_models import ReachabilityResult
 
 from .agent_models import Message, ToolCallRecord, TriageFinding
 from .index_adapter import RepoIndex
+from .llm_errors import (
+    LLMMalformedResponseError,
+    LLMRateLimitedError,
+    LLMRefusalError,
+    LLMTimeoutError,
+    LLMTransportError,
+    LLMTruncatedError,
+)
 from .sandbox import sandbox_untrusted_text
 from .stub_llm import FinalAnswerAction, StubLLMClient, ToolCallAction
 from .tool_dispatch import (
@@ -62,6 +70,21 @@ from .tool_dispatch import (
     _dispatch_tool,
     _is_well_formed_tool_call,
 )
+
+# Phase 5 U2: every LLMError subclass the agent node catches, mapped to the
+# hard-coded reason-string prefix used by `finalize_llm_error_node` --
+# matching the existing convention of `langgraph_loop.py:185`/`:198`/`:220`.
+# `GroqConfigError` is deliberately absent: it is a startup/configuration
+# failure (missing API key), not a per-call degradation case, and must
+# fail client construction, never be caught mid-loop (see `job_runner.py`).
+_LLM_ERROR_REASON_PREFIXES: dict[type[Exception], str] = {
+    LLMTimeoutError: "llm_timeout",
+    LLMRateLimitedError: "llm_rate_limited",
+    LLMTransportError: "llm_transport_error",
+    LLMRefusalError: "llm_refusal",
+    LLMTruncatedError: "llm_truncated",
+    LLMMalformedResponseError: "llm_malformed_response",
+}
 
 
 class LangGraphTriageState(TypedDict):
@@ -83,6 +106,8 @@ class LangGraphTriageState(TypedDict):
     pending_final_target_module: str | None
     pending_final_target_symbol: str | None
     pending_final_rationale: str | None
+    pending_llm_error_class: str | None
+    pending_llm_error_detail: str | None
     raw_tool_result: object | None
     finding: TriageFinding | None
 
@@ -131,7 +156,14 @@ def build_langgraph_triage_graph(
     graph state."""
 
     def agent_node(state: LangGraphTriageState) -> dict:
-        return _stub_llm_adapter(llm_client, state["messages"])
+        try:
+            return _stub_llm_adapter(llm_client, state["messages"])
+        except tuple(_LLM_ERROR_REASON_PREFIXES) as exc:
+            return {
+                "pending_action_kind": "llm_error",
+                "pending_llm_error_class": type(exc).__name__,
+                "pending_llm_error_detail": str(exc),
+            }
 
     def tools_node(state: LangGraphTriageState) -> dict:
         tool_name = state["pending_tool_name"]
@@ -202,6 +234,30 @@ def build_langgraph_triage_graph(
         )
         return {"finding": finding}
 
+    def finalize_llm_error_node(state: LangGraphTriageState) -> dict:
+        error_class_name = state["pending_llm_error_class"]
+        detail = state["pending_llm_error_detail"]
+        prefix = next(
+            (
+                p
+                for cls, p in _LLM_ERROR_REASON_PREFIXES.items()
+                if cls.__name__ == error_class_name
+            ),
+            "llm_error",
+        )
+        finding = TriageFinding(
+            result=ReachabilityResult(
+                target_module=state["target_module"],
+                target_symbol=state["target_symbol"],
+                verdict=Verdict.UNKNOWN,
+                path=None,
+                reason=f"{prefix}: {detail}",
+            ),
+            rationale="",
+            tool_calls=state["tool_calls"],
+        )
+        return {"finding": finding}
+
     def finalize_answer_node(state: LangGraphTriageState) -> dict:
         target_module = state["pending_final_target_module"]
         target_symbol = state["pending_final_target_symbol"]
@@ -241,7 +297,9 @@ def build_langgraph_triage_graph(
 
     def _route_after_agent(
         state: LangGraphTriageState,
-    ) -> Literal["tools", "malformed", "finalize_answer"]:
+    ) -> Literal["tools", "malformed", "finalize_answer", "llm_error"]:
+        if state["pending_action_kind"] == "llm_error":
+            return "llm_error"
         if state["pending_action_kind"] == "final_answer":
             return "finalize_answer"
         if _is_well_formed_tool_call(state["pending_tool_name"], state["pending_tool_arguments"]):
@@ -254,6 +312,7 @@ def build_langgraph_triage_graph(
     graph.add_node("sanitize", sanitize_node)
     graph.add_node("finalize_budget_exceeded", finalize_budget_exceeded_node)
     graph.add_node("finalize_malformed_tool_call", finalize_malformed_tool_call_node)
+    graph.add_node("finalize_llm_error", finalize_llm_error_node)
     graph.add_node("finalize_answer", finalize_answer_node)
 
     graph.set_conditional_entry_point(
@@ -267,6 +326,7 @@ def build_langgraph_triage_graph(
             "tools": "tools",
             "malformed": "finalize_malformed_tool_call",
             "finalize_answer": "finalize_answer",
+            "llm_error": "finalize_llm_error",
         },
     )
     graph.add_edge("tools", "sanitize")
@@ -277,6 +337,7 @@ def build_langgraph_triage_graph(
     )
     graph.add_edge("finalize_budget_exceeded", END)
     graph.add_edge("finalize_malformed_tool_call", END)
+    graph.add_edge("finalize_llm_error", END)
     graph.add_edge("finalize_answer", END)
 
     return graph.compile()
@@ -313,6 +374,8 @@ def run_triage_loop_langgraph(
         "pending_final_target_module": None,
         "pending_final_target_symbol": None,
         "pending_final_rationale": None,
+        "pending_llm_error_class": None,
+        "pending_llm_error_detail": None,
         "raw_tool_result": None,
         "finding": None,
     }

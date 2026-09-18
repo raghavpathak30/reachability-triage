@@ -42,6 +42,7 @@ from reachability.triage import job_runner
 from reachability.triage.acquisition import AcquisitionError
 from reachability.triage.index_adapter import build_repo_index
 from reachability.triage.job_runner import DEFAULT_TOOL_CALL_BUDGET
+from reachability.triage.stub_llm import DeterministicPolicyStubLLMClient
 from reachability.triage.worker import run_worker_once
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -110,13 +111,24 @@ def test_full_lifecycle_completed_via_monkeypatched_chain(monkeypatch, db_sessio
     `02_transitive_three_hop`, known to produce a `REACHABLE` verdict with
     a 3-edge path (`label.json`'s `allowed_verdicts: ["reachable"]`).
     `build_repo_index` is left un-mocked, so it runs for real against that
-    fixture directory; `run_triage_loop_langgraph` also runs for real via the real
-    `DeterministicPolicyStubLLMClient`.
+    fixture directory; `run_triage_loop_langgraph` also runs for real, but
+    `job_runner.GroqLLMClient` is monkeypatched to
+    `DeterministicPolicyStubLLMClient` for this test specifically -- since
+    Phase 5 U5, `run_triage_job`'s production path constructs a real
+    `GroqLLMClient`, which needs `GROQ_API_KEY` and a real network call;
+    this test needs a deterministic `reachable` verdict and must not
+    depend on either, matching this project's own U1/U5 guidance that
+    tests use the stub directly rather than the production client.
     """
     target_module, target_symbol = _resolve_fixture_target()
 
     monkeypatch.setattr(
         job_runner, "acquire_source", lambda request, workdir: FIXTURE_REPO
+    )
+    monkeypatch.setattr(
+        job_runner,
+        "GroqLLMClient",
+        lambda *a, **kw: DeterministicPolicyStubLLMClient(target_module, target_symbol),
     )
 
     response = client.post(
@@ -172,7 +184,19 @@ def test_full_lifecycle_failed_via_monkeypatched_acquisition_error(monkeypatch, 
 
 
 @pytest.mark.network
-def test_resolvable_package_reaches_completed(db_session):
+def test_resolvable_package_reaches_completed(db_session, monkeypatch):
+    # This test's own point is the real acquire_source/build_repo_index
+    # chain (a real PyPI download and real indexing) -- not the LLM
+    # client, which is monkeypatched to the deterministic stub so this
+    # test stays independent of GROQ_API_KEY, matching every other
+    # non-real-model-specific test in this suite post-Phase-5-U5.
+    monkeypatch.setattr(
+        job_runner,
+        "GroqLLMClient",
+        lambda *a, **kw: DeterministicPolicyStubLLMClient(
+            "six", "this_symbol_does_not_exist_in_six"
+        ),
+    )
     response = client.post(
         "/v1/triage",
         json={

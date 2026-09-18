@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Phase 5 U4: manual-only trigger for the `eval-real` job below. No
+  # `schedule:` cron -- see DECISIONS.md's Phase 5 U4 section for why an
+  # unattended scheduled run against a fresh, empty-cache CI runner was
+  # rejected.
+  workflow_dispatch:
 
 jobs:
   test:
@@ -44,6 +49,7 @@ jobs:
         run: echo "DATABASE_URL=postgresql+psycopg://postgres@localhost:5432/postgres" >> "$GITHUB_ENV"
       - run: pytest tests/test_worker_concurrency.py -v
 
+  # Stub lane: deterministic, no real API call, required on every push/PR.
   eval:
     runs-on: ubuntu-latest
     steps:
@@ -53,3 +59,39 @@ jobs:
           python-version: "3.13"
       - run: pip install -r requirements.txt
       - run: python scripts/run_eval_suite.py
+
+  # Real lane: calls the live Groq API. workflow_dispatch-only -- never
+  # runs on a normal push/PR, so it structurally cannot block one, and it
+  # is not in the required-status-checks list either. Gated behind a
+  # GitHub Environment (required reviewers) so a manual trigger can't be
+  # clicked repeatedly without a second person's approval -- a cheap
+  # guardrail against unbounded real-API spend on a job with no rate limit
+  # otherwise. TRIAGE_LLM_CACHE_DISABLED is required, not optional: this
+  # job provisions no Postgres, and U3's cache check unconditionally reads
+  # DATABASE_URL if enabled, which would crash on the first LLM call
+  # otherwise.
+  eval-real:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: eval-real-gate
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      TRIAGE_LLM_CACHE_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt
+      - name: Run stub lane (for comparison)
+        run: python scripts/run_eval_suite.py --lane=stub
+      - name: Run real lane
+        run: python scripts/run_eval_suite.py --lane=real
+      - name: Diff stub vs real lane
+        run: python scripts/diff_eval_lanes.py
+      - name: Real-model injection resistance (pytest -m real_llm)
+        run: pytest -m real_llm -v
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eval-real-results
+          path: results/*.json
