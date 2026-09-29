@@ -28,6 +28,19 @@ Between fixtures (not between in-run retries), `TRIAGE_INJECTION_SUITE_DELAY_SEC
 (`_MAX_ATTEMPTS=3`, `_RETRY_BACKOFF_SECONDS`) is untouched; this script's
 fixture-level retry and inter-fixture sleep are independent and additive.
 
+**Phase 6b opt-in: waiting out a 429 inside an investigation.** This script
+(and only this script) constructs `GroqLLMClient(wait_on_rate_limit=True,
+rate_limit_max_total_wait_seconds=...)`: on a 429 the client sleeps the
+`retry-after` interval (fallback 20s) and re-sends the same request, up to
+`TRIAGE_INJECTION_SUITE_MAX_TOTAL_WAIT_SECONDS` (default 900) of total
+sleep per client (one client per fixture attempt). A request whose reserved
+size (prompt plus the provider-default completion reservation -- no
+`max_tokens` is sent) exceeds the TPM limit can never be admitted; that
+ends as `llm_request_too_large` and is not retried here. Each fixture's
+JSON records the per-request `request_usage_log`, rate-limit events (with
+the raw status/body/headers) and the final `reason`; Groq organization IDs
+are redacted from everything written.
+
 **Exit code is the actual gate**, not `pytest`'s. Exits `0` only when the
 final report's `overall` is `"PASS"` or `"FAIL"` -- i.e. every fixture
 reached `COMPLETED` (full completion, regardless of whether the injection
@@ -42,6 +55,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -71,6 +85,21 @@ FIXTURE_REPO = REPO_ROOT / "tests" / "fixtures" / "l5" / "11_dead_function_call_
 ADVERSARIAL_ROOT = REPO_ROOT / "tests" / "fixtures" / "triage_adversarial"
 RESULTS_DIR = REPO_ROOT / "results" / "injection_suite_real"
 BUDGET = 15
+
+_ORG_ID_RE = re.compile(r"org_[A-Za-z0-9]+")
+
+
+def _redact_org_ids(value):
+    """The single redaction point: recursively replaces Groq organization
+    IDs in every string of a report structure. Applied immediately before
+    every `write_report` call in this script."""
+    if isinstance(value, str):
+        return _ORG_ID_RE.sub("org_[REDACTED]", value)
+    if isinstance(value, dict):
+        return {_redact_org_ids(k): _redact_org_ids(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redact_org_ids(v) for v in value]
+    return value
 
 
 def _load_label(fixture_name: str) -> dict:
@@ -156,7 +185,12 @@ def _run_once(fixture_name: str, spec: dict) -> tuple[FixtureRunResult, dict]:
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(tool_dispatch, "find_callers", _fake_find_callers)
-        client = GroqLLMClient()
+        client = GroqLLMClient(
+            wait_on_rate_limit=True,
+            rate_limit_max_total_wait_seconds=float(
+                os.environ.get("TRIAGE_INJECTION_SUITE_MAX_TOTAL_WAIT_SECONDS", "900")
+            ),
+        )
         finding = run_triage_loop_langgraph(
             client, repo_index, spec["target_module"], spec["target_symbol"], budget=BUDGET
         )
@@ -169,9 +203,18 @@ def _run_once(fixture_name: str, spec: dict) -> tuple[FixtureRunResult, dict]:
     result = FixtureRunResult(
         fixture_name=fixture_name, termination_cause=cause, injection_won=injection_won
     )
+    usage_log = list(client.request_usage_log)
     extra = {
         "total_tokens_used": client.total_tokens_used,
         "total_cost_accrued": client.total_cost_accrued,
+        "request_usage_log": usage_log,
+        "request_count": len(usage_log),
+        "max_single_request_total_tokens": max((e["total_tokens"] for e in usage_log), default=0),
+        "max_prompt_tokens": max((e["prompt_tokens"] for e in usage_log), default=0),
+        "rate_limit_events": list(client.rate_limit_events),
+        "total_rate_limit_wait_seconds": client.total_rate_limit_wait_seconds,
+        "max_tokens": client.max_tokens_sent,
+        "reason": finding.result.reason,
     }
     return result, extra
 
@@ -185,6 +228,7 @@ def _run_fixture_with_retry(fixture_name: str, spec: dict) -> dict:
     attempt = 0
     total_tokens = 0
     total_cost = 0.0
+    attempt_details: list[dict] = []
     while True:
         attempt += 1
         if spec["secret_pattern"] is not None:
@@ -194,6 +238,9 @@ def _run_fixture_with_retry(fixture_name: str, spec: dict) -> dict:
             result, extra = _run_once(fixture_name, spec)
         total_tokens += extra["total_tokens_used"]
         total_cost += extra["total_cost_accrued"]
+        attempt_details.append(
+            {"attempt": attempt, "termination_cause": result.termination_cause.value, **extra}
+        )
 
         if result.termination_cause != TerminationCause.LLM_RATE_LIMITED:
             break
@@ -216,6 +263,19 @@ def _run_fixture_with_retry(fixture_name: str, spec: dict) -> dict:
         "attempts": attempt,
         "total_tokens_used": total_tokens,
         "total_cost_accrued": total_cost,
+        "reason": extra["reason"],
+        "request_count": sum(d["request_count"] for d in attempt_details),
+        "max_single_request_total_tokens": max(
+            d["max_single_request_total_tokens"] for d in attempt_details
+        ),
+        "rate_limit_events": [e for d in attempt_details for e in d["rate_limit_events"]],
+        "total_rate_limit_wait_seconds": sum(
+            d["total_rate_limit_wait_seconds"] for d in attempt_details
+        ),
+        "max_tokens": extra["max_tokens"],
+        "max_tokens_note": "not sent; provider default applies",
+        "request_usage_log": extra["request_usage_log"],
+        "attempt_details": attempt_details,
     }
 
 
@@ -245,7 +305,7 @@ def main() -> int:
 
         spec = _fixture_spec(fixture_name)
         row = _run_fixture_with_retry(fixture_name, spec)
-        write_report(row, RESULTS_DIR / f"{fixture_name}.json")
+        write_report(_redact_org_ids(row), RESULTS_DIR / f"{fixture_name}.json")
         per_fixture_rows.append(row)
         print(f"{fixture_name}: {row['termination_cause']} (attempts={row['attempts']})")
 
@@ -267,7 +327,7 @@ def main() -> int:
     report = build_report(results)
     timestamp = int(time.time())
     summary_path = REPO_ROOT / "results" / f"injection_suite_real_summary_{timestamp}.json"
-    write_report(report, summary_path)
+    write_report(_redact_org_ids(report), summary_path)
 
     print()
     print(f"fixtures completed: {report['completed']} / {report['total']}")
