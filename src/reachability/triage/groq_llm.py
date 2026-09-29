@@ -213,6 +213,7 @@ class GroqLLMClient:
         self._client = Groq(api_key=resolved_key, http_client=http_client, max_retries=0)
         self.total_tokens_used = 0
         self.total_cost_accrued = 0.0
+        self.request_usage_log: list[dict] = []
 
     def next_action(self, context: list[Message]) -> AgentAction:
         cache_key: str | None = None
@@ -298,6 +299,13 @@ class GroqLLMClient:
     def _parse_response(self, response) -> AgentAction:
         usage = getattr(response, "usage", None)
         if usage is not None:
+            self.request_usage_log.append(
+                {
+                    "prompt_tokens": usage.prompt_tokens,
+                    "completion_tokens": usage.completion_tokens,
+                    "total_tokens": usage.total_tokens,
+                }
+            )
             self.total_tokens_used += usage.total_tokens
             self.total_cost_accrued += estimate_cost(
                 self.model, usage.prompt_tokens, usage.completion_tokens
