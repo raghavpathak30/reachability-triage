@@ -23,7 +23,26 @@ class LLMTimeoutError(LLMError):
 
 
 class LLMRateLimitedError(LLMError):
-    """The provider returned HTTP 429. Transient -- retried."""
+    """The provider returned HTTP 429. Transient -- retried.
+
+    `signal` is populated only when the client's opt-in
+    `wait_on_rate_limit` is on (`groq_llm.py`): a dict with `retry_after`,
+    `limit`, `requested`, `status_code`, `raw_body`, `headers`. `None`
+    otherwise."""
+
+    signal: dict | None = None
+
+
+class LLMRequestTooLargeError(LLMError):
+    """The provider reported that this single request, as reserved (prompt
+    plus the provider's default completion reservation -- this client sends
+    no `max_tokens`), exceeds the tokens-per-minute limit, so it can never
+    be admitted and waiting cannot help. Not retried. Raised only when the
+    client's opt-in `wait_on_rate_limit` is on. Says nothing about the
+    prompt alone. `signal` carries `limit`/`requested`/`status_code`/
+    `raw_body`/`headers`."""
+
+    signal: dict | None = None
 
 
 class LLMTransportError(LLMError):

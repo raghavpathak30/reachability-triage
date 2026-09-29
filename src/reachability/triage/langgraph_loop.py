@@ -58,6 +58,7 @@ from .llm_errors import (
     LLMMalformedResponseError,
     LLMRateLimitedError,
     LLMRefusalError,
+    LLMRequestTooLargeError,
     LLMTimeoutError,
     LLMTransportError,
     LLMTruncatedError,
@@ -69,6 +70,7 @@ from .termination_cause import (
     LLM_MALFORMED_RESPONSE_PREFIX,
     LLM_RATE_LIMITED_PREFIX,
     LLM_REFUSAL_PREFIX,
+    LLM_REQUEST_TOO_LARGE_PREFIX,
     LLM_TIMEOUT_PREFIX,
     LLM_TRANSPORT_ERROR_PREFIX,
     LLM_TRUNCATED_PREFIX,
@@ -94,6 +96,7 @@ from .tool_dispatch import (
 _LLM_ERROR_REASON_PREFIXES: dict[type[Exception], str] = {
     LLMTimeoutError: LLM_TIMEOUT_PREFIX,
     LLMRateLimitedError: LLM_RATE_LIMITED_PREFIX,
+    LLMRequestTooLargeError: LLM_REQUEST_TOO_LARGE_PREFIX,
     LLMTransportError: LLM_TRANSPORT_ERROR_PREFIX,
     LLMRefusalError: LLM_REFUSAL_PREFIX,
     LLMTruncatedError: LLM_TRUNCATED_PREFIX,

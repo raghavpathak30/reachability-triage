@@ -49,7 +49,10 @@ fresh response on a miss. A cache hit never touches
 from __future__ import annotations
 
 import json
+import math
+import re
 import time
+from collections.abc import Callable
 
 import groq as groq_sdk
 import httpx
@@ -62,6 +65,7 @@ from .llm_errors import (
     LLMMalformedResponseError,
     LLMRateLimitedError,
     LLMRefusalError,
+    LLMRequestTooLargeError,
     LLMTimeoutError,
     LLMTransportError,
     LLMTruncatedError,
@@ -74,6 +78,20 @@ _SUBMIT_FINAL_ANSWER_TOOL = "submit_final_answer"
 _MAX_ATTEMPTS = 3
 _RETRY_BACKOFF_SECONDS = [1.0, 2.0]
 _RETRYABLE_ERRORS = (LLMTimeoutError, LLMRateLimitedError, LLMTransportError)
+
+_RATE_LIMIT_FALLBACK_WAIT_SECONDS = 20.0
+_RATE_LIMIT_WAIT_MARGIN_SECONDS = 0.5
+_RATE_LIMIT_MIN_WAIT_SECONDS = 1.0
+_RAW_BODY_MAX_CHARS = 2000
+
+# No `max_tokens` is sent by `_raw_call`; the provider's default completion
+# reservation applies. Recorded (never read by `_raw_call`) so a 429's
+# "Requested" figure is not mistaken for a prompt-only count. If
+# `max_tokens` is ever sent, update this in one place.
+MAX_TOKENS_SENT = None
+
+_LIMIT_RE = re.compile(r"Limit\s+(\d+)")
+_REQUESTED_RE = re.compile(r"Requested\s+(\d+)")
 
 _TOOL_RESULT_PREFIX = "[tool result]\n"
 
@@ -137,6 +155,67 @@ _SYSTEM_PROMPT = (
     "your job is to gather evidence and name the correct target, not to "
     "decide or assert the verdict yourself."
 )
+
+
+def _parse_rate_limit_signal(exc: Exception) -> dict:
+    """Best-effort extraction of retry-after/limit/requested plus the raw
+    status/body/headers from an SDK status error. Never raises: any failure
+    yields a signal with every field `None`/empty."""
+    signal: dict = {
+        "retry_after": None,
+        "limit": None,
+        "requested": None,
+        "status_code": None,
+        "raw_body": None,
+        "headers": {},
+    }
+    try:
+        response = getattr(exc, "response", None)
+        signal["status_code"] = getattr(exc, "status_code", None)
+        headers = {}
+        text = ""
+        if response is not None:
+            headers = {
+                k.lower(): v
+                for k, v in response.headers.items()
+                if k.lower() == "retry-after" or k.lower().startswith("x-ratelimit-")
+            }
+            text = response.text or ""
+        signal["headers"] = headers
+        signal["raw_body"] = text[:_RAW_BODY_MAX_CHARS]
+
+        raw_retry_after = headers.get("retry-after")
+        if raw_retry_after is not None:
+            try:
+                value = float(raw_retry_after)
+            except ValueError:
+                value = None
+            if value is not None and math.isfinite(value) and value >= 0:
+                signal["retry_after"] = value
+
+        search_text = text or str(exc)
+        limit_match = _LIMIT_RE.search(search_text)
+        requested_match = _REQUESTED_RE.search(search_text)
+        if limit_match:
+            signal["limit"] = int(limit_match.group(1))
+        elif "x-ratelimit-limit-tokens" in headers:
+            try:
+                signal["limit"] = int(headers["x-ratelimit-limit-tokens"])
+            except ValueError:
+                pass
+        if requested_match:
+            signal["requested"] = int(requested_match.group(1))
+    except Exception:
+        pass
+    return signal
+
+
+def _signal_is_oversized(signal: dict | None) -> bool:
+    if not signal:
+        return False
+    limit = signal.get("limit")
+    requested = signal.get("requested")
+    return limit is not None and requested is not None and requested > limit
 
 
 def _json_type_for(expected_type: type | tuple) -> str | list[str]:
@@ -203,7 +282,23 @@ class GroqLLMClient:
         model: str | None = None,
         timeout: float | None = None,
         http_client: "httpx.Client | None" = None,
+        wait_on_rate_limit: bool = False,
+        rate_limit_max_total_wait_seconds: float = 900.0,
+        sleep_fn: Callable[[float], None] | None = None,
     ) -> None:
+        if not math.isfinite(rate_limit_max_total_wait_seconds) or (
+            rate_limit_max_total_wait_seconds < 0
+        ):
+            raise ValueError(
+                "rate_limit_max_total_wait_seconds must be finite and >= 0, got "
+                f"{rate_limit_max_total_wait_seconds!r}"
+            )
+        self._wait_on_rate_limit = wait_on_rate_limit
+        self._rate_limit_max_total_wait = rate_limit_max_total_wait_seconds
+        self._sleep_fn = sleep_fn
+        self._total_rate_limit_wait = 0.0
+        self.rate_limit_events: list[dict] = []
+        self.max_tokens_sent = MAX_TOKENS_SENT
         self.model = model or GROQ_MODEL
         self._timeout = timeout if timeout is not None else GROQ_TIMEOUT_SECONDS
         resolved_key = api_key if api_key is not None else get_groq_api_key()
@@ -258,7 +353,12 @@ class GroqLLMClient:
 
         return action
 
+    def _sleep(self, seconds: float) -> None:
+        (self._sleep_fn or time.sleep)(seconds)
+
     def _call_with_retry(self, messages: list[dict]):
+        if self._wait_on_rate_limit:
+            return self._call_with_rate_limit_wait(messages)
         last_exc: Exception | None = None
         for attempt in range(_MAX_ATTEMPTS):
             try:
@@ -266,9 +366,51 @@ class GroqLLMClient:
             except _RETRYABLE_ERRORS as exc:
                 last_exc = exc
                 if attempt < _MAX_ATTEMPTS - 1:
-                    time.sleep(_RETRY_BACKOFF_SECONDS[attempt])
+                    self._sleep(_RETRY_BACKOFF_SECONDS[attempt])
         assert last_exc is not None
         raise last_exc
+
+    def _call_with_rate_limit_wait(self, messages: list[dict]):
+        """Opt-in path (`wait_on_rate_limit=True`). A 429 consumes only the
+        total-wait cap, never one of the `_MAX_ATTEMPTS` attempts; timeouts
+        and transport errors keep the ordinary attempt counter/backoff."""
+        attempt = 0
+        while True:
+            try:
+                return self._raw_call(messages)
+            except LLMRateLimitedError as exc:
+                signal = exc.signal or {}
+                if _signal_is_oversized(signal):
+                    raise self._too_large_error(signal, str(exc)) from exc
+                retry_after = signal.get("retry_after")
+                if retry_after is None:
+                    retry_after = _RATE_LIMIT_FALLBACK_WAIT_SECONDS
+                wait = max(_RATE_LIMIT_MIN_WAIT_SECONDS, retry_after) + _RATE_LIMIT_WAIT_MARGIN_SECONDS
+                if self._total_rate_limit_wait + wait > self._rate_limit_max_total_wait:
+                    raise
+                self.rate_limit_events.append({**signal, "waited": wait})
+                self._sleep(wait)
+                self._total_rate_limit_wait += wait
+            except (LLMTimeoutError, LLMTransportError):
+                if attempt >= _MAX_ATTEMPTS - 1:
+                    raise
+                self._sleep(_RETRY_BACKOFF_SECONDS[attempt])
+                attempt += 1
+
+    @staticmethod
+    def _too_large_error(signal: dict, detail: str) -> LLMRequestTooLargeError:
+        error = LLMRequestTooLargeError(
+            f"reserved request (prompt plus provider-default completion reservation) "
+            f"exceeds the tokens-per-minute limit and can never be admitted: "
+            f"requested={signal.get('requested')} limit={signal.get('limit')} "
+            f"status={signal.get('status_code')}; {detail}"
+        )
+        error.signal = signal
+        return error
+
+    @property
+    def total_rate_limit_wait_seconds(self) -> float:
+        return self._total_rate_limit_wait
 
     def _raw_call(self, messages: list[dict]):
         try:
@@ -282,10 +424,17 @@ class GroqLLMClient:
         except groq_sdk.APITimeoutError as exc:
             raise LLMTimeoutError(str(exc)) from exc
         except groq_sdk.RateLimitError as exc:
-            raise LLMRateLimitedError(str(exc)) from exc
+            rate_limited = LLMRateLimitedError(str(exc))
+            if self._wait_on_rate_limit:
+                rate_limited.signal = _parse_rate_limit_signal(exc)
+            raise rate_limited from exc
         except groq_sdk.APIConnectionError as exc:
             raise LLMTransportError(str(exc)) from exc
         except groq_sdk.APIStatusError as exc:
+            if self._wait_on_rate_limit:
+                signal = _parse_rate_limit_signal(exc)
+                if signal["status_code"] == 413 or _signal_is_oversized(signal):
+                    raise self._too_large_error(signal, str(exc)) from exc
             # Any other 4xx/5xx status this project doesn't have a more
             # specific mapping for (400/401/403/404/409/422/5xx) -- treated
             # as a transport-layer failure: the request never produced a

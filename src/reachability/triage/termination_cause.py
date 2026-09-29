@@ -8,7 +8,7 @@ rejected as touching the public return shape for no benefit).
 
 `compute_termination_cause` is a pure function, no I/O, deriving a
 `TerminationCause` from an already-produced `TriageFinding`. It is the
-single source of truth for the nine loop-level bail-out reason-prefix
+single source of truth for the ten loop-level bail-out reason-prefix
 constants: `langgraph_loop.py` imports and uses these same constants when
 building its own reason strings (see that module's step-1a edit), instead
 of duplicating the literal values.
@@ -42,6 +42,7 @@ BUDGET_EXCEEDED_PREFIX = "budget_exceeded"
 MALFORMED_TOOL_CALL_PREFIX = "malformed_tool_call_argument"
 LLM_TIMEOUT_PREFIX = "llm_timeout"
 LLM_RATE_LIMITED_PREFIX = "llm_rate_limited"
+LLM_REQUEST_TOO_LARGE_PREFIX = "llm_request_too_large"
 LLM_TRANSPORT_ERROR_PREFIX = "llm_transport_error"
 LLM_REFUSAL_PREFIX = "llm_refusal"
 LLM_TRUNCATED_PREFIX = "llm_truncated"
@@ -54,7 +55,7 @@ class TerminationCause(str, Enum):
     member meaning "a model-authored investigation actually ran to a
     decidable conclusion" -- every other member is a loop-level bail-out,
     and `UNCLASSIFIED` is the conservative default for an `UNKNOWN`-verdict
-    run whose reason matches none of the nine known bail-out prefixes.
+    run whose reason matches none of the ten known bail-out prefixes.
     `UNCLASSIFIED` must never be treated as `COMPLETED` anywhere in this
     project's reporting logic."""
 
@@ -64,6 +65,7 @@ class TerminationCause(str, Enum):
     TARGET_NOT_FOUND = "target_not_found"
     LLM_TIMEOUT = "llm_timeout"
     LLM_RATE_LIMITED = "llm_rate_limited"
+    LLM_REQUEST_TOO_LARGE = "llm_request_too_large"
     LLM_TRANSPORT_ERROR = "llm_transport_error"
     LLM_REFUSAL = "llm_refusal"
     LLM_TRUNCATED = "llm_truncated"
@@ -72,9 +74,9 @@ class TerminationCause(str, Enum):
 
 
 # Ordered so a more-specific prefix never gets shadowed by a shorter one
-# that happens to be a string-prefix of it. None of the nine current
+# that happens to be a string-prefix of it. None of the ten current
 # prefixes collide this way, but this module's own conformance test
-# (`tests/test_termination_cause.py`) drives every one of the loop's nine
+# (`tests/test_termination_cause.py`) drives every one of the loop's ten
 # actual bail-out paths through this table, so an accidental future
 # collision would fail loudly rather than silently misclassify.
 _UNKNOWN_VERDICT_REASON_PREFIXES: dict[str, TerminationCause] = {
@@ -82,6 +84,7 @@ _UNKNOWN_VERDICT_REASON_PREFIXES: dict[str, TerminationCause] = {
     MALFORMED_TOOL_CALL_PREFIX: TerminationCause.MALFORMED_TOOL_CALL,
     LLM_TIMEOUT_PREFIX: TerminationCause.LLM_TIMEOUT,
     LLM_RATE_LIMITED_PREFIX: TerminationCause.LLM_RATE_LIMITED,
+    LLM_REQUEST_TOO_LARGE_PREFIX: TerminationCause.LLM_REQUEST_TOO_LARGE,
     LLM_TRANSPORT_ERROR_PREFIX: TerminationCause.LLM_TRANSPORT_ERROR,
     LLM_REFUSAL_PREFIX: TerminationCause.LLM_REFUSAL,
     LLM_TRUNCATED_PREFIX: TerminationCause.LLM_TRUNCATED,
@@ -96,7 +99,7 @@ def compute_termination_cause(finding: TriageFinding) -> TerminationCause:
 
     `COMPLETED` iff `verdict != Verdict.UNKNOWN` (see this module's
     docstring for why `reason is None` is the wrong rule). For an
-    `UNKNOWN`-verdict run, `reason` is matched against the nine known
+    `UNKNOWN`-verdict run, `reason` is matched against the ten known
     prefixes/exact-match string above; anything else -- including a
     `reason` that happens to be `None` for some future, unenumerated
     bail-out path -- is `UNCLASSIFIED`, never `COMPLETED`.
