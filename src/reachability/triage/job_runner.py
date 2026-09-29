@@ -20,18 +20,17 @@ addendum):
    `request.target_symbol`), now required/optional fields on that model.
    A real caller (e.g. triaging a CVE advisory) always names a specific
    vulnerable symbol; this module never derives a target automatically.
-2. **Production "LLM" client** -- **Phase 5 U5 status note (supersedes the
-   text below as originally written for Phase 2 U5): this is now the real
-   `GroqLLMClient` (`groq_llm.py`), instantiated fresh per job, not the
-   deterministic stub.** The swap happened only after
-   `agent_docs/PHASE5_INJECTION_REAL_MODEL.md` showed zero injection wins
-   across every real-model adversarial run performed in that unit -- see
-   that document for the full gate and its honest caveats.
-   `DeterministicPolicyStubLLMClient` (`stub_llm.py`) remains in the
-   codebase and is still used by the eval harness's stub lane
-   (`eval_harness.py`, default `lane="stub"`) and by every gate test
-   through Phase LangGraph -- it is simply no longer what
-   `run_triage_job` constructs.
+2. **Production "LLM" client** -- **Phase 7 status note (supersedes the
+   Phase 5 U5 text as originally written): the client is selected per job
+   by the `TRIAGE_LLM_MODE` env var (`resolve_llm_mode` /
+   `_build_llm_client` below).** Unset or `groq` constructs the real
+   `GroqLLMClient` (`groq_llm.py`), instantiated fresh per job, exactly as
+   Phase 5 U5 did; `stub` constructs `DeterministicPolicyStubLLMClient`
+   (`stub_llm.py`), which docker compose opts into by default so the stack
+   runs with no Groq key; any other value fails the job. The Phase 5 swap
+   to Groq was made with `agent_docs/PHASE5_INJECTION_REAL_MODEL.md`'s
+   real-model injection gate NOT met (see DECISIONS.md sections 13-14) --
+   real-model injection resistance is unclaimed.
 3. **Tool-call budget** -- `DEFAULT_TOOL_CALL_BUDGET = 30`, fixed for every
    job in this unit; not exposed on `TriageRequest`.
 4. **Workdir lifecycle** -- `run_triage_job` opens exactly one
@@ -85,6 +84,7 @@ Phase LangGraph addendum).
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -95,6 +95,7 @@ from .groq_llm import GroqLLMClient
 from .index_adapter import build_repo_index
 from .langgraph_loop import run_triage_loop_langgraph
 from .sandbox import sandbox_untrusted_text
+from .stub_llm import DeterministicPolicyStubLLMClient
 
 if TYPE_CHECKING:
     from main import TriageRequest
@@ -102,6 +103,31 @@ if TYPE_CHECKING:
 DEFAULT_TOOL_CALL_BUDGET = 30
 
 _MAX_ERROR_LENGTH = 2000
+
+LLM_MODES = ("groq", "stub")
+
+
+def resolve_llm_mode() -> str:
+    """Resolve `TRIAGE_LLM_MODE` (unset or empty -> `groq`). Single source
+    of truth shared with `worker.py::main`. Raises `ValueError` for any
+    value other than `groq`/`stub` -- no silent fallback.
+    """
+    raw = os.environ.get("TRIAGE_LLM_MODE")
+    if raw is None or raw == "":
+        return "groq"
+    if raw not in LLM_MODES:
+        raise ValueError(
+            f"TRIAGE_LLM_MODE must be one of {', '.join(LLM_MODES)} (got {raw!r})"
+        )
+    return raw
+
+
+def _build_llm_client(mode: str, request: "TriageRequest"):
+    if mode == "stub":
+        return DeterministicPolicyStubLLMClient(
+            request.target_module, request.target_symbol
+        )
+    return GroqLLMClient()
 
 
 class EmptyRepoIndexError(RuntimeError):
@@ -141,9 +167,11 @@ def run_triage_job(
     docstring for the full exception-handling contract.
     """
     record["status"] = "running"
+    record["llm_mode"] = None
     llm_client = None
 
     try:
+        record["llm_mode"] = resolve_llm_mode()
         with tempfile.TemporaryDirectory(
             prefix="reachability-triage-", ignore_cleanup_errors=True
         ) as workdir:
@@ -154,12 +182,9 @@ def run_triage_job(
                     f"build_repo_index succeeded but found zero modules "
                     f"under {source_path.name}"
                 )
-            # Phase 5 U5: swapped from DeterministicPolicyStubLLMClient to
-            # the real GroqLLMClient, gated on
-            # agent_docs/PHASE5_INJECTION_REAL_MODEL.md showing zero
-            # injection wins across every real-model adversarial run
-            # performed in that unit.
-            llm_client = GroqLLMClient()
+            # Phase 7: client chosen by TRIAGE_LLM_MODE; unset means the
+            # real GroqLLMClient (see this module's docstring, decision 2).
+            llm_client = _build_llm_client(record["llm_mode"], request)
             finding = run_triage_loop_langgraph(
                 llm_client,
                 repo_index,

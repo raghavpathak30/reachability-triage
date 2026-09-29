@@ -123,6 +123,15 @@ class TriageOut(BaseModel):
     status: TriageStatus
     finding: TriageFinding | None = None
     error: str | None = None
+    llm_mode: str | None = Field(
+        default=None,
+        description=(
+            "LLM client mode that produced the verdict: 'stub' (deterministic "
+            "policy client, not a real model) or 'groq'. Null until the job "
+            "is finalized. On a job that fails before the client is built it "
+            "is still the resolved mode if TRIAGE_LLM_MODE resolved, else null."
+        ),
+    )
 
 
 # --- Routes ---

@@ -1,0 +1,11 @@
+# Override used only by scripts/smoke_compose.sh and scripts/demo.sh: feeds the
+# worker offline fixture wheels so acquisition needs no network. The base
+# docker-compose.yml has neither the mount nor the pip env vars, so a real
+# user still gets real PyPI.
+services:
+  worker:
+    environment:
+      PIP_FIND_LINKS: /wheels
+      PIP_NO_INDEX: "1"
+    volumes:
+      - ${FIXTURE_WHEELS_DIR:?set FIXTURE_WHEELS_DIR to the wheel directory}:/wheels:ro

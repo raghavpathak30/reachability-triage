@@ -194,3 +194,50 @@ def test_main_fails_fast_on_missing_groq_api_key(monkeypatch):
 
     with pytest.raises(GroqConfigError):
         worker_main()
+
+
+
+def test_main_stub_mode_starts_without_groq_api_key(monkeypatch):
+    """Phase 7 (critique R1): TRIAGE_LLM_MODE=stub must not require
+    GROQ_API_KEY -- main() gets past its pre-loop checks and reaches
+    `get_sessionmaker()` (which needs DATABASE_URL, unset here), rather
+    than raising GroqConfigError first."""
+    monkeypatch.setenv("TRIAGE_LLM_MODE", "stub")
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    from reachability.triage import llm_config
+
+    llm_config.reset_api_key_cache_for_tests()
+
+    with pytest.raises(KeyError):
+        worker_main()
+
+
+def test_main_invalid_mode_fails_at_startup(monkeypatch):
+    monkeypatch.setenv("TRIAGE_LLM_MODE", "bogus")
+    monkeypatch.setenv("GROQ_API_KEY", "irrelevant")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    with pytest.raises(ValueError, match="TRIAGE_LLM_MODE"):
+        worker_main()
+
+
+def test_finalize_persists_llm_mode(db_session):
+    job_id = _insert_queued_job(db_session, {"package": "x", "version": "1", "target_module": "x"})
+    session_factory = _session_factory_for(db_session)
+    session = session_factory()
+    try:
+        claimed = claim_next_queued_job(session, "w1")
+        finalize_job(
+            session,
+            claimed["id"],
+            "w1",
+            claimed["attempt_count"],
+            {"status": "failed", "error": "e", "llm_mode": "stub"},
+        )
+    finally:
+        session.close()
+
+    row = db_session.get(TriageJob, job_id)
+    db_session.refresh(row)
+    assert row.llm_mode == "stub"

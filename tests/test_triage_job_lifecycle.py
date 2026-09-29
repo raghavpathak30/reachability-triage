@@ -150,6 +150,9 @@ def test_full_lifecycle_completed_via_monkeypatched_chain(monkeypatch, db_sessio
     body = client.get(f"/v1/triage/{triage_id}").json()
 
     assert body["status"] == "completed"
+    # Phase 7: mode unset resolves to groq (the client is then
+    # monkeypatched to the stub above), so the recorded mode is "groq".
+    assert body["llm_mode"] == "groq"
     assert body["finding"]["result"]["verdict"] == "reachable"
     assert body["finding"]["result"]["path"] is not None
     assert len(body["finding"]["result"]["path"]) > 0
@@ -264,3 +267,33 @@ def test_unresolvable_package_reaches_failed(db_session):
 
     assert body["status"] == "failed"
     assert body["error"]
+
+
+def test_stub_mode_job_records_llm_mode_stub_over_http(monkeypatch, db_session):
+    """Phase 7 A2: TRIAGE_LLM_MODE=stub, no monkeypatching of the client at
+    all -- the real stub client runs and GET returns llm_mode == "stub"."""
+    target_module, target_symbol = _resolve_fixture_target()
+    monkeypatch.setenv("TRIAGE_LLM_MODE", "stub")
+    monkeypatch.setattr(
+        job_runner, "acquire_source", lambda request, workdir: FIXTURE_REPO
+    )
+
+    response = client.post(
+        "/v1/triage",
+        json={
+            "package": "unused",
+            "version": "0.0.0",
+            "target_module": target_module,
+            "target_symbol": target_symbol,
+        },
+    )
+    triage_id = response.json()["id"]
+    assert response.json()["llm_mode"] is None
+
+    session_factory = _session_factory_for(db_session)
+    assert run_worker_once(session_factory, "test-worker", DEFAULT_TOOL_CALL_BUDGET) is True
+
+    body = client.get(f"/v1/triage/{triage_id}").json()
+    assert body["status"] == "completed"
+    assert body["llm_mode"] == "stub"
+    assert body["finding"]["result"]["verdict"] == "reachable"

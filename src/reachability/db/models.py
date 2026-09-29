@@ -47,6 +47,10 @@ class TriageJob(Base):
     total_cost: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
     model_string: Mapped[str | None] = mapped_column(String(100), nullable=True)
     prompt_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Phase 7: which LLM client mode ("stub" | "groq") produced this job's
+    # verdict; NULL for jobs not yet finalized or finalized before this
+    # column existed. Metadata only.
+    llm_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     __table_args__ = (
         CheckConstraint(

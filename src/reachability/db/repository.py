@@ -47,6 +47,7 @@ def get_job(session: Session, job_id: uuid.UUID) -> dict | None:
         "status": job.status,
         "finding": deserialize_finding(job.finding) if job.finding is not None else None,
         "error": job.error,
+        "llm_mode": job.llm_mode,
     }
 
 

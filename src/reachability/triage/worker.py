@@ -38,7 +38,12 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ..db.repository import serialize_finding
 from ..db.session import get_sessionmaker
-from .job_runner import DEFAULT_TOOL_CALL_BUDGET, run_triage_job, sanitize_error
+from .job_runner import (
+    DEFAULT_TOOL_CALL_BUDGET,
+    resolve_llm_mode,
+    run_triage_job,
+    sanitize_error,
+)
 from .reaper import reap_stale_jobs
 
 if TYPE_CHECKING:
@@ -87,6 +92,7 @@ _FINALIZE_SQL = text(
     SET status = :final_status, finding = :finding_json, error = :error,
         token_count = :token_count, total_cost = :total_cost,
         model_string = :model_string, prompt_version = :prompt_version,
+        llm_mode = :llm_mode,
         updated_at = now()
     WHERE id = :id AND worker_id = :worker_id AND attempt_count = :claimed_attempt_count
     RETURNING id
@@ -118,6 +124,7 @@ def _record_from_claimed(claimed: dict) -> dict:
         "target": claimed["target"],
         "finding": None,
         "error": None,
+        "llm_mode": None,
     }
 
 
@@ -159,6 +166,7 @@ def finalize_job(
             "total_cost": record.get("total_cost"),
             "model_string": record.get("model_string"),
             "prompt_version": record.get("prompt_version"),
+            "llm_mode": record.get("llm_mode"),
             "id": job_id,
             "worker_id": worker_id,
             "claimed_attempt_count": claimed_attempt_count,
@@ -230,9 +238,13 @@ def main() -> None:
     # constructing an LLM client) before failing on a simple
     # misconfiguration. GroqConfigError is intentionally not caught here;
     # a misconfigured worker process should not start at all.
+    # Phase 7: the key is required only when TRIAGE_LLM_MODE resolves to
+    # groq (unset -> groq, so the unset default still fails fast); an
+    # invalid mode raises ValueError here too.
     from .llm_config import get_groq_api_key
 
-    get_groq_api_key()
+    if resolve_llm_mode() == "groq":
+        get_groq_api_key()
 
     timeout_seconds = int(
         os.environ.get("TRIAGE_STALE_JOB_TIMEOUT_SECONDS", DEFAULT_STALE_JOB_TIMEOUT_SECONDS)

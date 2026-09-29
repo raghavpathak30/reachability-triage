@@ -271,3 +271,97 @@ def test_sanitize_error_against_real_captured_exceptions(tmp_path):
         build_repo_index(nonexistent)
     sanitized3 = sanitize_error(exc_info3.value)
     assert str(nonexistent) not in sanitized3
+
+
+
+# --- Phase 7: TRIAGE_LLM_MODE selection -------------------------------------
+
+
+def _patch_chain_for_mode_tests(monkeypatch, tmp_path, constructed):
+    monkeypatch.setattr(job_runner, "acquire_source", lambda request, workdir: tmp_path)
+    monkeypatch.setattr(
+        job_runner,
+        "build_repo_index",
+        lambda repo_root: RepoIndex(
+            report=DiscoveryReport(
+                modules=["fake"], import_tables={}, unparsed=[], star_import_count=0
+            ),
+            symbol_index={},
+            edges=[],
+            entrypoints=[],
+        ),
+    )
+    finding = _make_finding()
+
+    def _fake_loop(llm_client, repo_index, target_module, target_symbol, budget):
+        constructed.append(llm_client)
+        return finding
+
+    monkeypatch.setattr(job_runner, "run_triage_loop_langgraph", _fake_loop)
+
+
+def test_mode_unset_constructs_groq_client(tmp_path, monkeypatch):
+    monkeypatch.delenv("TRIAGE_LLM_MODE", raising=False)
+    constructed = []
+    _patch_chain_for_mode_tests(monkeypatch, tmp_path, constructed)
+    sentinel = object()
+    monkeypatch.setattr(job_runner, "GroqLLMClient", lambda *a, **kw: sentinel)
+
+    record = _make_record(uuid.uuid4())
+    run_triage_job(record, _make_request())
+
+    assert record["status"] == "completed"
+    assert constructed == [sentinel]
+    assert record["llm_mode"] == "groq"
+
+
+def test_mode_groq_constructs_groq_client(tmp_path, monkeypatch):
+    monkeypatch.setenv("TRIAGE_LLM_MODE", "groq")
+    constructed = []
+    _patch_chain_for_mode_tests(monkeypatch, tmp_path, constructed)
+    sentinel = object()
+    monkeypatch.setattr(job_runner, "GroqLLMClient", lambda *a, **kw: sentinel)
+
+    record = _make_record(uuid.uuid4())
+    run_triage_job(record, _make_request())
+
+    assert constructed == [sentinel]
+    assert record["llm_mode"] == "groq"
+
+
+def test_mode_stub_constructs_stub_client_without_groq(tmp_path, monkeypatch):
+    from reachability.triage.stub_llm import DeterministicPolicyStubLLMClient
+
+    monkeypatch.setenv("TRIAGE_LLM_MODE", "stub")
+    constructed = []
+    _patch_chain_for_mode_tests(monkeypatch, tmp_path, constructed)
+
+    def _groq_must_not_be_built(*a, **kw):
+        raise AssertionError("GroqLLMClient must not be constructed in stub mode")
+
+    monkeypatch.setattr(job_runner, "GroqLLMClient", _groq_must_not_be_built)
+
+    record = _make_record(uuid.uuid4())
+    run_triage_job(record, _make_request(target_symbol="fn"))
+
+    assert record["status"] == "completed"
+    assert record["finding"] is not None
+    assert len(constructed) == 1
+    assert isinstance(constructed[0], DeterministicPolicyStubLLMClient)
+    assert record["llm_mode"] == "stub"
+
+
+def test_mode_bogus_fails_job_with_named_error(monkeypatch):
+    monkeypatch.setenv("TRIAGE_LLM_MODE", "bogus")
+
+    def _acquire_must_not_run(request, workdir):
+        raise AssertionError("mode must be validated before acquisition")
+
+    monkeypatch.setattr(job_runner, "acquire_source", _acquire_must_not_run)
+
+    record = _make_record(uuid.uuid4())
+    run_triage_job(record, _make_request())
+
+    assert record["status"] == "failed"
+    assert "TRIAGE_LLM_MODE" in record["error"]
+    assert record["llm_mode"] is None

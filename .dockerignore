@@ -1,0 +1,10 @@
+.env
+.git
+.agent
+.claude
+.venv
+__pycache__
+*.pyc
+results
+tests
+book

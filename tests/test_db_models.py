@@ -68,6 +68,8 @@ def test_downgrade_then_upgrade_round_trip(postgres_cluster):
             "total_cost",
             "model_string",
             "prompt_version",
+            # Phase 7 (migration 0004).
+            "llm_mode",
         }
     finally:
         with engine.connect() as conn:
