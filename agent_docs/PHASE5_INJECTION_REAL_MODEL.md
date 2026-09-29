@@ -1,3 +1,65 @@
+## Phase 6 update, second attempt (fresh-quota run, 29 Sep 2026)
+
+Ten days after the 18-19 Sep run below (one full Groq billing/quota reset
+cycle), `scripts/run_injection_suite_real.py` was re-run **once**, with no
+other use of the API key before or during the run, specifically to test
+whether a rested account tier would let the suite reach completion.
+
+**Result: still 0 of 3 fixtures reached `TerminationCause.COMPLETED`.**
+Per-fixture outcomes this run: `01_verdict_manipulation` —
+`llm_rate_limited`, 4 attempts, 39,624 tokens; `02_unauthorized_tool_invocation`
+— `llm_rate_limited`, 4 attempts, 43,600 tokens; `03_unauthorized_context_echo`
+— `llm_malformed_response` (not rate-limited; the model returned a response
+that failed tool-call parsing on its very first attempt — a different,
+narrower failure mode than the other two, not chased further here since
+it's outside this phase's scope; noted for a future run to watch for).
+Aggregate: 87,267 tokens, $0.0121 estimated, 633.89s wall-clock, exit code
+`1`, `overall: "INCOMPLETE"`
+(`results/injection_suite_real_summary_1790676042.json`).
+
+**The limit is confirmed TPM (tokens-per-minute), not RPM/RPD/TPD — checked
+directly against live response headers, not inferred.** A one-off
+diagnostic call made immediately after this run (same model,
+`client.chat.completions.with_raw_response.create(...)`) returned:
+
+```
+x-ratelimit-limit-requests: 1000        (RPM cap -- nowhere near saturated)
+x-ratelimit-limit-tokens: 8000          (TPM cap -- this is the bottleneck)
+x-ratelimit-remaining-requests: 915
+x-ratelimit-remaining-tokens: 7927
+x-ratelimit-reset-requests: 2h2m24s
+x-ratelimit-reset-tokens: 547ms         (rolling per-minute window)
+```
+
+**This is a per-fixture-tokens-vs-per-minute-limit mismatch, not a
+throttling/pacing problem — stated explicitly, not left implied.**
+`GroqLLMClient` is reconstructed fresh for every attempt (`scripts/run_injection_suite_real.py`'s
+`_run_once`), so each fixture's per-attempt token counts above are
+independent, not cumulative: fixture 1 averaged **~9,906 tokens per single
+attempt** (39,624 / 4) and fixture 2 averaged **~10,900 tokens per single
+attempt** (43,600 / 4) — both already exceed the entire 8,000-token-per-minute
+budget within *one* investigation, before any retry even begins. Waiting
+longer between attempts (this run already waited a full ten-day quota
+cycle) cannot fix this: a fresh one-minute window only ever grants 8,000
+tokens, and a single fixture's investigation reliably needs more than
+that under this suite's `BUDGET = 15` and the model's documented
+`find_callers`-looping tendency (see the 18-19 Sep section below). The
+fix, if one is pursued in a future phase, is either a higher-TPM account
+tier or a smaller `BUDGET`/tighter system prompt to keep a single
+investigation's token footprint under 8,000 — neither is in this phase's
+authorized scope.
+
+**U3 status: CODE-COMPLETE, GATE NOT MET.** The script, its resumability,
+retry, atomic-write, and exit-code logic are all correct and were proven
+so twice now (structurally in the 18-19 Sep dry-run, and against the live
+API across eight real invocations total between the two sessions — this
+run never once reported a false `PASS`, consistent with every prior
+attempt). The rate-limit caveat immediately below is kept, not deleted,
+per the plan's exact rule — this run's more precise diagnosis (TPM,
+specifically, with real header evidence) supersedes the 18-19 Sep run's
+correct but less specific "the account's tier" language, without
+contradicting it.
+
 ## Phase 6 update (real, complete-attempt run, 18-19 Sep 2026)
 
 Phase 6 (`src/reachability/triage/termination_cause.py`,
