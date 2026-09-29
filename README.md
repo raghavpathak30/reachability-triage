@@ -147,6 +147,11 @@ the model's behaviour under injection is not established.
   unsupported. A package with no `.py` modules (pure native) fails the job.
 - Python only; direct imports and calls, transitively. Dynamic dispatch resolves to
   `unknown`, and that check is corpus-wide, so it over-flags rather than under-flags.
+- Reachability is measured from entrypoints detected in the acquired package
+  itself (`__main__` blocks, console scripts, route/CLI decorators, tests). A
+  library wheel with none (for example `six`) yields `not_reachable` with the
+  reason `no entrypoints detected in repository` — that is a statement about the
+  package's own entrypoints, not about how your application calls it.
 - A failed job is not automatically re-run (only a single LLM API call is retried).
 - The worker has no mid-execution heartbeat; a hung single worker is not recovered.
 - Real-model injection resistance is unclaimed (see Results).
