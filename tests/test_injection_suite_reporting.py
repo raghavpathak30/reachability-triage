@@ -161,6 +161,22 @@ def test_fail_when_all_complete_but_one_wins():
     assert report["overall"] == "FAIL"
 
 
+def test_request_too_large_lands_in_not_run_and_is_incomplete():
+    results = [
+        FixtureRunResult("too_large_fixture", TerminationCause.LLM_REQUEST_TOO_LARGE, None),
+        _run_and_classify("no_win_fixture_1", _no_win_responder),
+        _run_and_classify("no_win_fixture_2", _no_win_responder),
+    ]
+
+    report = build_report(results)
+
+    assert report["completed"] == 2
+    assert report["overall"] == "INCOMPLETE"
+    assert report["not_run"] == [
+        {"fixture": "too_large_fixture", "termination_cause": "llm_request_too_large"}
+    ]
+
+
 def test_write_report_is_atomic(tmp_path):
     report = {"overall": "PASS", "total": 1, "completed": 1, "not_run": [], "results": []}
     path = tmp_path / "nested" / "report.json"

@@ -1,5 +1,5 @@
 """Phase 6 U1 gate — `compute_termination_cause` correctly classifies every
-one of `run_triage_loop_langgraph`'s nine loop-level bail-out paths, plus
+one of `run_triage_loop_langgraph`'s ten loop-level bail-out paths, plus
 the genuine-completion case, without ever misclassifying a completed
 `NOT_REACHABLE` run as not-completed (the B1 regression this phase exists
 to fix -- see `termination_cause.py`'s own docstring).
@@ -65,6 +65,30 @@ def _transport_error_responder(call_number, request):
     import httpx
 
     raise httpx.ConnectError("simulated connect error", request=request)
+
+
+def _request_too_large_responder(call_number, request):
+    import httpx
+
+    return httpx.Response(
+        413, json={"error": {"message": "Request too large: Limit 8000, Requested 9500"}}, request=request
+    )
+
+
+def _run_wait_enabled_llm_error(responder):
+    import httpx
+
+    from test_llm_failure_semantics import FakeGroqTransport
+
+    transport = FakeGroqTransport(responder)
+    client = GroqLLMClient(
+        api_key="fake-key-not-real",
+        http_client=httpx.Client(transport=transport),
+        wait_on_rate_limit=True,
+        sleep_fn=lambda seconds: None,
+    )
+    repo_index = build_repo_index(FIXTURE_REPO)
+    return run_triage_loop_langgraph(client, repo_index, "app.sink", "vulnerable", budget=5)
 
 
 def _refusal_responder(call_number, request):
@@ -147,6 +171,12 @@ def test_llm_timeout_member():
 def test_llm_rate_limited_member():
     finding, _transport = _run_llm_error(_rate_limited_responder)
     assert compute_termination_cause(finding) == TerminationCause.LLM_RATE_LIMITED
+
+
+def test_llm_request_too_large_member():
+    finding = _run_wait_enabled_llm_error(_request_too_large_responder)
+    assert finding.result.reason.startswith("llm_request_too_large")
+    assert compute_termination_cause(finding) == TerminationCause.LLM_REQUEST_TOO_LARGE
 
 
 def test_llm_transport_error_member():
@@ -246,6 +276,7 @@ def test_every_reachable_loop_bailout_reason_maps_to_a_known_member():
         ),
         _run_llm_error(_timeout_responder)[0],
         _run_llm_error(_rate_limited_responder)[0],
+        _run_wait_enabled_llm_error(_request_too_large_responder),
         _run_llm_error(_transport_error_responder)[0],
         _run_llm_error(_refusal_responder)[0],
         _run_llm_error(_truncated_responder)[0],
