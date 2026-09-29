@@ -64,6 +64,17 @@ from .llm_errors import (
 )
 from .sandbox import sandbox_untrusted_text
 from .stub_llm import FinalAnswerAction, StubLLMClient, ToolCallAction
+from .termination_cause import (
+    BUDGET_EXCEEDED_PREFIX,
+    LLM_MALFORMED_RESPONSE_PREFIX,
+    LLM_RATE_LIMITED_PREFIX,
+    LLM_REFUSAL_PREFIX,
+    LLM_TIMEOUT_PREFIX,
+    LLM_TRANSPORT_ERROR_PREFIX,
+    LLM_TRUNCATED_PREFIX,
+    MALFORMED_TOOL_CALL_PREFIX,
+    TARGET_NOT_FOUND_REASON,
+)
 from .tool_dispatch import (
     AgentLoopError,
     _confirmed_id_matches_target,
@@ -77,13 +88,16 @@ from .tool_dispatch import (
 # `GroqConfigError` is deliberately absent: it is a startup/configuration
 # failure (missing API key), not a per-call degradation case, and must
 # fail client construction, never be caught mid-loop (see `job_runner.py`).
+# Phase 6 U1: these prefixes are now imported from `termination_cause.py`,
+# the single source of truth also used by `compute_termination_cause` --
+# not duplicated here.
 _LLM_ERROR_REASON_PREFIXES: dict[type[Exception], str] = {
-    LLMTimeoutError: "llm_timeout",
-    LLMRateLimitedError: "llm_rate_limited",
-    LLMTransportError: "llm_transport_error",
-    LLMRefusalError: "llm_refusal",
-    LLMTruncatedError: "llm_truncated",
-    LLMMalformedResponseError: "llm_malformed_response",
+    LLMTimeoutError: LLM_TIMEOUT_PREFIX,
+    LLMRateLimitedError: LLM_RATE_LIMITED_PREFIX,
+    LLMTransportError: LLM_TRANSPORT_ERROR_PREFIX,
+    LLMRefusalError: LLM_REFUSAL_PREFIX,
+    LLMTruncatedError: LLM_TRUNCATED_PREFIX,
+    LLMMalformedResponseError: LLM_MALFORMED_RESPONSE_PREFIX,
 }
 
 
@@ -213,7 +227,7 @@ def build_langgraph_triage_graph(
                 target_symbol=state["target_symbol"],
                 verdict=Verdict.UNKNOWN,
                 path=None,
-                reason="budget_exceeded: tool-call budget exhausted before a final answer was reached",
+                reason=f"{BUDGET_EXCEEDED_PREFIX}: tool-call budget exhausted before a final answer was reached",
             ),
             rationale="",
             tool_calls=state["tool_calls"],
@@ -227,7 +241,7 @@ def build_langgraph_triage_graph(
                 target_symbol=state["target_symbol"],
                 verdict=Verdict.UNKNOWN,
                 path=None,
-                reason=f"malformed_tool_call_argument: {state['pending_tool_name']}",
+                reason=f"{MALFORMED_TOOL_CALL_PREFIX}: {state['pending_tool_name']}",
             ),
             rationale="",
             tool_calls=state["tool_calls"],
@@ -273,7 +287,7 @@ def build_langgraph_triage_graph(
                     target_symbol=target_symbol,
                     verdict=Verdict.UNKNOWN,
                     path=None,
-                    reason="target_symbol_not_found_in_index",
+                    reason=TARGET_NOT_FOUND_REASON,
                 ),
                 rationale=rationale,
                 tool_calls=state["tool_calls"],
