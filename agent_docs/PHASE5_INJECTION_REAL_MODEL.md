@@ -1,3 +1,59 @@
+## Phase 6 update (real, complete-attempt run, 18-19 Sep 2026)
+
+Phase 6 (`src/reachability/triage/termination_cause.py`,
+`src/reachability/triage/injection_suite_reporting.py`,
+`scripts/run_injection_suite_real.py`) built the instrumentation this
+document's own caveat below called for: every run is now classified by
+`TerminationCause`, so a rate-limited early exit and a genuinely completed,
+resisted investigation are never conflated again (see `DECISIONS.md` §13).
+`scripts/run_injection_suite_real.py` was then run against the live Groq
+API, throttled by design (90s between fixtures, up to 3 in-run retries at
+60s backoff for a rate-limited fixture), **seven separate times** across
+roughly 1.5 hours of real wall-clock time on 18-19 Sep 2026, including two
+deliberate multi-minute cooldowns (180s, then twice 300s) between
+invocations specifically to let the account's TPM window clear.
+
+**Result: 0 of 3 fixtures reached `TerminationCause.COMPLETED` on every one
+of the seven invocations.** All three fixtures terminated
+`llm_rate_limited` on the final (7th) run; the fixture-level in-run retry
+(up to 3 additional attempts at 60s backoff) was exhausted every time
+without ever getting a fixture to complete. A direct, isolated control
+call against the same API key/model with the exact same system prompt and
+tool-schema payload the loop sends (819 total tokens) succeeded cleanly
+moments before the final invocation, confirming the account's key itself
+was valid and not globally blocked — the rate limit is specifically
+tripped by this loop's own multi-call investigation pattern (per this
+document's original caveat below: the model repeatedly re-calling
+`find_callers` without making progress, sometimes up to 9 times in one
+run, each call carrying a larger accumulated context than the last),
+which can burn through the account's 8000 TPM tier within a single
+fixture's own investigation, independent of the inter-fixture throttling
+this script adds. One run (`01_verdict_manipulation`) got far enough into
+its own investigation to consume 23,859 tokens across its 4 attempts
+before giving up — direct evidence the loop was making real progress into
+the conversation, not being blocked from message 1.
+
+**This is a genuine, disclosed non-completion, not a claimed pass.** Per
+this project's own standing rule, "100% complete" needs the actual result
+file, not a statement of intent — it is not claimed here. The final run's
+summary report is `results/injection_suite_real_summary_1789763041.json`
+(`overall: "INCOMPLETE"`, `completed: 0`, `total: 3`); the script's own
+exit code was `1` on every one of the seven invocations, exactly the
+"never read a `0` as this gate passing unless `overall` is `PASS`/`FAIL`"
+design this phase specifies. **The rate-limit caveat below is therefore
+kept, not deleted** (per the plan's own explicit rule: delete only on
+actual 100% completion) — updated here with the new, precise number: 0 of
+3 fixtures completed across seven real, throttled attempts, not "most
+observed runs," a materially more precise (and more discouraging) number
+than this document's original prose below could state before Phase 6's
+instrumentation existed to measure it honestly. A future run against a
+less-saturated key/tier, or with a larger tool-call budget than this
+suite's `BUDGET = 15` (unchanged by Phase 6 — the plan did not authorize
+tuning it), remains the open path to a genuine completed-and-resisted
+observation.
+
+---
+
 # Phase 5 U5 — injection resistance against the real model (18 Sep 2026)
 
 ## What this records

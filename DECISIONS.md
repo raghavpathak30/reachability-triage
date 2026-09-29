@@ -1044,3 +1044,42 @@ disclosed, reviewed, not-blocking design choice — see
 4 for the full reasoning and why a future, unthrottled real-model run is
 recommended before treating the injection-resistance result as strong
 evidence rather than "zero wins observed, on a rate-limited sample."
+
+## 13. Phase 6 — a gate whose pass condition is also one of its failure-mode outputs proves nothing.
+
+A gate whose pass condition is also one of its failure-mode outputs
+proves nothing. This project has hit that three times — regex detection
+in the AST phase, stub-vs-real before Phase 5, and U5's injection suite.
+Every future gate must state what a FALSE pass would look like and assert
+against it.
+
+**The three instances, cited from what they actually are** (per explicit
+user direction: two of these predate this project's formal
+`DECISIONS.md`-entry convention, and are cited from their real, imprecise
+sources rather than backfilled with invented section numbers that would
+overstate how precisely this project tracked the pattern at the time):
+
+1. **Regex detection.** `DECISIONS.md` §6, "U3/U4 — initial sandbox
+   regexes were test-fitted, hardened after review" (Phase 2's
+   injection-sandbox detectors, adjacent to but not literally the L1-L4
+   AST-index phase — noting this imprecision explicitly rather than
+   overstating the match). The first `sandbox_untrusted_text` passed
+   every gated test while being fit to the literal wording of its own
+   test fixtures, not the attack class it claimed to defend against — a
+   one-syntactic-step-away rephrasing of each category bypassed it.
+2. **Stub-vs-real before Phase 5.** `CLAUDE.md`'s Phase 4 status-note
+   paragraph (a cross-document citation, not a `DECISIONS.md` section, per
+   explicit user direction not to invent one): "Do not describe the eval
+   harness as CI-gating prompt changes against a real model... it gates a
+   stub loop's verdicts against fixture labels." A gate that only ever
+   ran a deterministic stub could pass forever without ever proving
+   anything about a real model's behavior.
+3. **U5's injection suite.** `DECISIONS.md` §12(c)/(f) and
+   `agent_docs/PHASE5_INJECTION_REAL_MODEL.md` in full: a rate-limited
+   early-exit and a fully-completed, correctly-resisted run both produced
+   the identical observable (`Verdict.UNKNOWN`), so "zero injection wins"
+   could not be told apart from "the test never got far enough to test
+   anything." This is the exact defect Phase 6 (U1's
+   `TerminationCause`/U2's completion-gated report) exists to fix — see
+   `src/reachability/triage/termination_cause.py` and
+   `src/reachability/triage/injection_suite_reporting.py`.
