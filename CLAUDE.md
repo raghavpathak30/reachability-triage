@@ -5,15 +5,15 @@ Edits here do nothing until `/clear`, `/compact`, or restart.
 
 - Stack as SHIPPED: Python, FastAPI, uvicorn, pydantic. Single `main.py`.
 - Package manager: pip + venv (`requirements.txt`) — always this, never switch
-- Test command: none yet — `pytest` once tests exist
+- Test command: `pytest` (bare, full run)
 - Lint/typecheck command: none configured
 - Run command: `uvicorn main:app --reload`
-- Build command: none (no Docker files in the repo yet)
+- Build command: `docker compose build`
 - Do not touch: `.agent/`, `.venv/`, `__pycache__/`
 - Success criteria for any change: the app starts clean, no debug prints
 
 ## NOT BUILT — do not describe these as existing
-Docker, a distributed task broker/queue, capped retries-with-backoff **at
+A distributed task broker/queue, capped retries-with-backoff **at
 the job-lifecycle level** (a failed/errored triage job is not automatically
 re-run — Phase 5 U2's retry-with-backoff is scoped to a single
 `GroqLLMClient` API call, not the job as a whole, see the Phase 5
@@ -149,12 +149,14 @@ same as any other crash-during-execute case.
 Phase 5 (`src/reachability/triage/groq_llm.py`, `llm_errors.py`,
 `llm_config.py`, `llm_cache.py`) is built: `job_runner.py` now
 constructs a real `GroqLLMClient` (Groq, model pinned in `llm_config.py`)
-unconditionally for every production job — this is a **second
+whenever `TRIAGE_LLM_MODE` is unset or `groq` (Phase 7 made this
+mode-selected, no longer unconditional — see the Phase 7 paragraph below;
+`job_runner.py:110-130`) — this is a **second
 implementation of the unchanged `StubLLMClient` Protocol**
 (`stub_llm.py:95-98`, byte-for-byte untouched), not a widened interface.
 `DeterministicPolicyStubLLMClient` still exists and still drives the
-CI-blocking eval gate's stub lane; production jobs simply no longer
-construct it. A typed error taxonomy (`llm_errors.py`: timeout,
+CI-blocking eval gate's stub lane; with `TRIAGE_LLM_MODE` unset,
+production jobs do not construct it (with `stub`, they do). A typed error taxonomy (`llm_errors.py`: timeout,
 rate-limited, transport, refusal, truncated, malformed-response) degrades
 every failure class to `Verdict.UNKNOWN` with a preserved reason string,
 never a wrong confident verdict — timeout/rate-limited/transport retry up
@@ -168,14 +170,13 @@ last part was a post-review fix, see DECISIONS.md §12(e); the original
 key omitted the literal prompt text and could have gone stale across a
 future in-code prompt edit without bumping `PROMPT_VERSION`), bypassable
 via `TRIAGE_LLM_CACHE_DISABLED`. The production client swap
-(`job_runner.py`) was deliberately deferred until a real-model
-injection-resistance gate passed (`agent_docs/PHASE5_INJECTION_REAL_MODEL.md`):
-zero observed injection wins across every real-model adversarial run
-performed — a real, honestly-caveated result (an 8000-TPM rate-limited
-API tier meant most runs degraded to `unknown` before reaching a final
-answer, so this proves "the model never gave the attacker's wrong
-answer," not "the model resisted injection while actively completing an
-investigation" — see the doc for the full caveat). A new, non-blocking
+(`job_runner.py`) was made citing a real-model injection-resistance gate
+(`agent_docs/PHASE5_INJECTION_REAL_MODEL.md`) that was **not met**: zero
+observed injection wins, but no real-model adversarial run ever completed
+an investigation (latest: 0 of 3 — two `budget_exceeded`, one
+`llm_malformed_response`, `DECISIONS.md` §14), and budget exhaustion is not
+counted as resistance (§13). **Real-model injection resistance is
+unclaimed.** A new, non-blocking
 `eval-real` CI job (`.github/workflows/tests.yml`) runs the same
 30-fixture eval corpus against the real client — `workflow_dispatch`-only,
 never on push/PR, behind a required-reviewers GitHub Environment not yet
@@ -184,6 +185,23 @@ created as of this merge (repo-admin action needed, along with adding the
 the existing, unchanged `eval` job remains the sole CI-blocking gate. See
 DECISIONS.md §12 for the full unit-by-unit rationale and what this phase
 does and does not close.
+
+Phase 7 (`Dockerfile`, `docker-compose.yml`, `docker-compose.smoke.yml`,
+`scripts/smoke_compose.sh`, `scripts/demo.sh`, `agent_docs/DEMO.md`) is
+built: a local Docker Compose stack (`db`, one-shot `migrate`, `api`,
+`worker`) that runs with no Groq key, because compose sets
+`TRIAGE_LLM_MODE=stub` (`DeterministicPolicyStubLLMClient`, a deterministic
+policy, **not a real model**). The code default when the variable is unset
+is still `GroqLLMClient`; any other value fails the job, and the worker at
+startup (`job_runner.py:110`, `worker.py:246`). The static index and
+call-graph analysis are real in both modes. `triage_jobs.llm_mode`
+(migration 0004) records which mode produced each verdict and
+`GET /v1/triage/{id}` returns it. `scripts/smoke_compose.sh` (CI job
+`compose-smoke`) runs three offline fixture wheels (02/09/13) through the
+stack and checks verdicts against `label.json` allowed sets. This is local
+only: no auth, no deployment. Still NOT BUILT: job-level retries, quotas,
+cost accounting as a system, a worker heartbeat (the worker healthcheck
+proves database connectivity only). See `DECISIONS.md` §15.
 
 AST index (`agent_docs/PHASE1_AST_INDEX.md`): L1 (module discovery + import
 map), L2 (symbol table — functions, classes, methods, nested functions,
