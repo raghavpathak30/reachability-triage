@@ -36,11 +36,7 @@ services:
       migrate:
         condition: service_completed_successfully
     healthcheck:
-      test:
-        - CMD
-        - python
-        - -c
-        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).status == 200 else 1)"
+      test: ["CMD", "python", "/app/scripts/healthcheck.py", "api"]
       interval: 2s
       timeout: 5s
       retries: 30
@@ -52,14 +48,11 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-    # Proves database connectivity from the worker container only; it does
-    # not prove the poll loop is alive (scripts/smoke_compose.sh does).
+    # Proves a Postgres server answers from the worker container only (no
+    # auth, no query); it does not prove the poll loop is alive
+    # (scripts/smoke_compose.sh does). See scripts/healthcheck.py.
     healthcheck:
-      test:
-        - CMD
-        - python
-        - -c
-        - "import os,sqlalchemy as sa; c=sa.create_engine(os.environ['DATABASE_URL']).connect(); c.execute(sa.text('SELECT 1')); c.close()"
+      test: ["CMD", "python", "/app/scripts/healthcheck.py", "worker"]
       interval: 2s
       timeout: 5s
       retries: 30

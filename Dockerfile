@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY main.py alembic.ini ./
 COPY src ./src
 COPY alembic ./alembic
+COPY scripts/healthcheck.py ./scripts/healthcheck.py
 
 USER 10001
 

@@ -96,7 +96,9 @@ clone, then tears everything down):
 bash scripts/smoke_compose.sh
 ```
 
-The worker healthcheck proves database connectivity only; job-processing liveness is proven by scripts/smoke_compose.sh.
+The worker healthcheck proves only that a Postgres server answers from the worker container (no auth, no query); job-processing liveness is proven by scripts/smoke_compose.sh.
+
+Podman is supported: `scripts/smoke_compose.sh` passes against rootless podman's Docker-API socket (`DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock`) as well as the Docker daemon.
 
 `bash scripts/demo.sh` runs a narrated three-verdict demo on the same stack (see
 `agent_docs/DEMO.md`).
