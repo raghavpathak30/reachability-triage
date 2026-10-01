@@ -95,3 +95,18 @@ jobs:
         with:
           name: eval-real-results
           path: results/*.json
+
+  # Phase 7 U2: brings the docker compose stack up on the stub LLM and
+  # checks three verdicts end-to-end over HTTP against offline fixture
+  # wheels (scripts/smoke_compose.sh, which dumps compose logs on failure).
+  # No secrets, no Environment.
+  compose-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Compose smoke
+        run: bash scripts/smoke_compose.sh
