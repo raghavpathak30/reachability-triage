@@ -124,7 +124,7 @@ def test_create_triage_response_model_fields_package_shape():
         json={"package": "requests", "version": "2.31.0", "target_module": "placeholder"},
     )
     body = response.json()
-    assert set(body.keys()) == {"id", "status", "finding", "error"}
+    assert set(body.keys()) == {"id", "status", "finding", "error", "llm_mode"}
 
 
 def test_create_triage_response_model_fields_repo_shape():
@@ -133,7 +133,7 @@ def test_create_triage_response_model_fields_repo_shape():
         json={"repo_url": "https://github.com/org/repo", "target_module": "placeholder"},
     )
     body = response.json()
-    assert set(body.keys()) == {"id", "status", "finding", "error"}
+    assert set(body.keys()) == {"id", "status", "finding", "error", "llm_mode"}
 
 
 def test_validation_error_envelope_shape():

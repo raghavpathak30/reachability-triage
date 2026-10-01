@@ -1,0 +1,65 @@
+x-app-env: &app-env
+  DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/postgres
+  TRIAGE_LLM_MODE: ${TRIAGE_LLM_MODE:-stub}
+  GROQ_API_KEY: ${GROQ_API_KEY:-}
+  TRIAGE_LLM_CACHE_DISABLED: ${TRIAGE_LLM_CACHE_DISABLED:-0}
+  TRIAGE_STALE_JOB_TIMEOUT_SECONDS: ${TRIAGE_STALE_JOB_TIMEOUT_SECONDS:-300}
+  TRIAGE_WORKER_POLL_INTERVAL_SECONDS: ${TRIAGE_WORKER_POLL_INTERVAL_SECONDS:-1.0}
+
+services:
+  db:
+    image: postgres:17.11-bookworm
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment: *app-env
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: .
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment: *app-env
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).status == 200 else 1)"
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  worker:
+    build: .
+    command: ["python", "-m", "reachability.triage.worker"]
+    environment: *app-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    # Proves database connectivity from the worker container only; it does
+    # not prove the poll loop is alive (scripts/smoke_compose.sh does).
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os,sqlalchemy as sa; c=sa.create_engine(os.environ['DATABASE_URL']).connect(); c.execute(sa.text('SELECT 1')); c.close()"
+      interval: 2s
+      timeout: 5s
+      retries: 30
