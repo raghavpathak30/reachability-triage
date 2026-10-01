@@ -1,3 +1,12 @@
+> **Status (29 Sep 2026, Phase 7): real-model injection resistance is
+> unclaimed; the gate this document describes is NOT MET.** No real-model
+> adversarial run has completed an investigation (latest: 0 of 3, two
+> `budget_exceeded`, one `llm_malformed_response` — `DECISIONS.md` §14).
+> "Zero observed injection wins" below is a statement about runs that never
+> reached a final answer, not evidence of resistance (§13). `job_runner.py`
+> still constructs the Groq client only when `TRIAGE_LLM_MODE` is unset or
+> `groq` (`DECISIONS.md` §15); docker compose defaults to the stub.
+
 ## Phase 6 update, second attempt (fresh-quota run, 29 Sep 2026)
 
 Ten days after the 18-19 Sep run below (one full Groq billing/quota reset

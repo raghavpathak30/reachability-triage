@@ -930,6 +930,11 @@ threat model already treats carefully elsewhere.
 
 ## 12. Phase 5 — real Groq LLM integration (18 Sep 2026)
 
+> **Note added 29 Sep 2026 (Phase 7).** "Unconditionally" below is superseded
+> by `TRIAGE_LLM_MODE` (§15(a)): the Groq client is constructed only when the
+> variable is unset or `groq`. The injection gate this phase's swap cited was
+> not met (§13, §14); the text below is left as written.
+
 **(a) What changed.** `src/reachability/triage/groq_llm.py`'s
 `GroqLLMClient` is a second implementation of the `StubLLMClient` Protocol
 `langgraph_loop.py` already depended on (`next_action(context: list[Message])
@@ -1135,3 +1140,63 @@ is derailing the investigation. Neither has been measured.
 raw text of fixture 03's non-tool-call reply are not written to the
 fixture JSON, so repeated identical calls cannot be diagnosed from this
 run.
+
+
+## 15. Phase 7 — ship: docker compose, stub-by-default, offline smoke (29 Sep 2026)
+
+**(a) `TRIAGE_LLM_MODE` (user-approved production-path change).**
+`src/reachability/triage/job_runner.py` `resolve_llm_mode` (line 110) and
+`_build_llm_client` (line 125) pick the client per job: unset or `groq` gives
+`GroqLLMClient()` exactly as before; `stub` gives
+`DeterministicPolicyStubLLMClient(target_module, target_symbol)`; any other
+value raises `ValueError`, so the job ends `failed` (`sanitize_error`) with
+no silent fallback. `stub_llm.py:95-98` (the Protocol), `GroqLLMClient`,
+`BUDGET`, and the model are untouched. `worker.py::main` (line 246) now
+resolves the same mode and calls `get_groq_api_key()` only when it is
+`groq`, so the unset default still fails fast without a key while `stub`
+starts with none; an invalid mode fails at worker startup.
+
+**Correction note (added 29 Sep 2026, history above not rewritten).** §12(a)
+and CLAUDE.md's Phase 5 paragraph say `job_runner.py` constructs
+`GroqLLMClient()` "unconditionally". Since Phase 7 that is true only when
+`TRIAGE_LLM_MODE` is unset or `groq`; docker compose sets `stub`. Separately,
+§12(c) and `job_runner.py`'s old decision-2 text describe the Phase 5 swap as
+made after the real-model injection gate passed. Per §13 and §14 that gate
+was **not met** (no real-model adversarial run ever completed an
+investigation); real-model injection resistance is unclaimed. The default
+for an unset variable is still the Groq client.
+
+**(b) `llm_mode` provenance.** New nullable `triage_jobs.llm_mode` column
+(migration `alembic/versions/0004_add_llm_mode_column.py`, additive, no
+backfill), set by `run_triage_job` from the resolved mode
+(`job_runner.py:174`), persisted by `worker.py`'s finalize UPDATE, returned
+by `repository.get_job` (`repository.py:50`) and `TriageOut.llm_mode`
+(`main.py:126`). A job that fails before the mode resolves (invalid value)
+records null. Metadata only; no verdict logic changed.
+
+**(c) Offline-wheel smoke.** Acquisition is `pip download
+--only-binary=:all:` only. `scripts/build_fixture_wheels.py` writes
+pure-Python wheels for fixtures 02 (reachable), 09 (not_reachable), and 13
+(unknown) with `zipfile`; `docker-compose.smoke.yml` mounts them into the
+worker with `PIP_FIND_LINKS`/`PIP_NO_INDEX`. The base compose file has
+neither, so real users hit real PyPI. `acquisition.py` and `tests/fixtures/`
+are unchanged. Each case's allowed verdict set is read from the fixture's own
+`label.json` (fixture 13 allows `["unknown","reachable"]`); `scripts/
+smoke_compose.sh` asserts `verdict in allowed`, `llm_mode == "stub"`, and,
+for the reachable case, a non-empty path (a project convention, not a label
+field). Verdicts observed over HTTP before freezing: 02 `reachable`
+(path length 3), 09 `not_reachable`, 13 `unknown`, all inside their label sets.
+
+**(d) `results/` stays gitignored** (§11): run outputs are run-specific and
+may carry org identifiers (Phase 6b redaction work).
+
+**(e) Worker healthcheck is DB connectivity only.** It opens a connection
+with `DATABASE_URL` and runs `SELECT 1`; it does not prove the poll loop is
+alive. Job-processing liveness is proven by `scripts/smoke_compose.sh`. There
+is no heartbeat (same accepted limitation as §8).
+
+**(f) Open questions carried from §14, not addressed here.** Budget: do
+clean fixtures also exhaust `BUDGET` on the real model? Malformed response:
+why did fixture 03 get a text reply instead of a tool call (the raw reply was
+not recorded)? Neither blocks shipping the stub-default stack; both block any
+real-model injection-resistance claim.
