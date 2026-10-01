@@ -72,6 +72,8 @@ curl -s -X POST "http://127.0.0.1:${API_PORT:-8000}/v1/triage" -H 'Content-Type:
 docker compose down -v
 ```
 
+The `six` example finishes `not_reachable` in stub mode, with reason `no entrypoints detected in repository`: the `six` wheel has no entrypoints of its own (no `__main__` block, console script or route), so nothing inside it reaches `raise_from`. See [Limitations](#limitations).
+
 `cp .env.example .env` is optional. The POST returns HTTP 202 and a job `id`; fetch
 the result with:
 
@@ -110,7 +112,9 @@ purpose, and the first says nothing about the second.
 ### Stub eval (deterministic policy client, not a real model)
 
 `python scripts/run_eval_suite.py` runs the full triage loop over 30 fixtures with
-`DeterministicPolicyStubLLMClient`. Last run on this branch: 30 of 30 fixtures pass,
+`DeterministicPolicyStubLLMClient`. Last recorded run: commit `4e46d56` (local run; result file
+`results/eval_4e46d56de19600867f5b8031b0a7e64954626b41.json`, gitignored, reproduce with the
+command above), 30 of 30 fixtures pass,
 G1/G2/G3/G5/G6 PASS, overall PASS (G4 is reported-only: `unknown_count=0`). This is
 the required `eval` CI job. It gates a stub loop's verdicts against hand-labelled
 fixtures; it does not gate prompts or a real model. The compose smoke test

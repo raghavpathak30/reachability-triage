@@ -27,7 +27,8 @@ def acquire_source(request: TriageRequest, workdir: Path) -> Path:
     that distribution's own PEP 517 build backend to produce metadata —
     i.e. execute attacker-controlled code on this host, while acquiring
     the very package being triaged for an unrelated vulnerability. Phase
-    2 has no sandboxing (Docker is still NOT BUILT) to contain that risk.
+    2 has no sandboxing (sandboxed execution is NOT BUILT; the Phase 7
+    compose stack exists but does not sandbox acquisition) to contain that risk.
     A package with no wheel for the running platform/Python is therefore
     treated as an unresolvable target, never as a build attempt to fall
     back on — this constraint is never relaxed, including to make a test

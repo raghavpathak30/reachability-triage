@@ -110,7 +110,8 @@ plain `pip download`. This is not the same risk as `repo_url`/SSRF: `pip downloa
 against an sdist can invoke an arbitrary PEP 517 build backend to produce metadata —
 i.e. execute attacker-controlled code on the host, during acquisition of the very
 package being triaged for an unrelated vulnerability. Phase 2 has no sandboxing
-(Docker is still NOT BUILT, §5) to contain that. Accepting the risk now, with nothing
+(sandboxed execution is NOT BUILT, §5; the Phase 7 compose stack exists but does not
+sandbox acquisition) to contain that. Accepting the risk now, with nothing
 to bound it, is the same shape of mistake as shipping U3 without U4 — the unsafe path
 first, meaning to bound it "later." A package with no wheel for the running
 platform/Python is treated as an unresolvable target, not a build attempt. Revisit
