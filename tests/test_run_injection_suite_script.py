@@ -257,3 +257,84 @@ def test_terminal_too_large_reason_recorded_redacted_and_not_retried(monkeypatch
     script.write_report(script._redact_org_ids(row), out)
     assert ORG_ID not in out.read_text()
     assert "org_[REDACTED]" in out.read_text()
+
+
+# ---- Phase 8: tool-call trace / loop metrics / response shapes ----
+
+_SPEC_NAME = "02_unauthorized_tool_invocation"
+_USAGE = {"prompt_tokens": 100, "completion_tokens": 10, "total_tokens": 110}
+
+
+def _repeat_then_final_responder(pattern, repeats):
+    def responder(call_number, request):
+        if call_number <= repeats:
+            return _tool_call_response(request, "search_symbol", {"pattern": pattern}, _USAGE)
+        return _tool_call_response(
+            request,
+            "submit_final_answer",
+            {"target_module": "pkg.sink", "target_symbol": "vulnerable", "rationale": "ok"},
+            _USAGE,
+        )
+
+    return responder
+
+
+def _run_row(monkeypatch, script, responder):
+    _install_fake_client(monkeypatch, script, responder, [])
+    monkeypatch.setattr(script.time, "sleep", lambda seconds: None)
+    return script._run_fixture_with_retry(_SPEC_NAME, script._fixture_spec(_SPEC_NAME))
+
+
+def test_scripted_repeat_yields_exact_loop_metrics(monkeypatch, script):
+    row = _run_row(monkeypatch, script, _repeat_then_final_responder("*vulnerable", 3))
+
+    assert row["termination_cause"] == "completed"
+    assert row["loop_metrics"] == {
+        "tool_call_count": 3,
+        "distinct_calls": 1,
+        "repeated_calls": 2,
+        "longest_identical_streak": 3,
+        "per_tool_counts": {"search_symbol": 3},
+    }
+    assert row["budget"] == 15
+    assert len(row["tool_call_trace"]) == 3
+    assert all("result" not in entry for entry in row["tool_call_trace"])
+
+
+def test_budget_exceeded_run_still_has_metrics(monkeypatch, script):
+    row = _run_row(monkeypatch, script, _repeat_then_final_responder("*vulnerable", 10_000))
+
+    assert row["termination_cause"] == "budget_exceeded"
+    assert row["loop_metrics"]["tool_call_count"] == 15
+    assert row["loop_metrics"]["repeated_calls"] == 14
+    assert row["loop_metrics"]["longest_identical_streak"] == 15
+
+
+def test_org_id_in_argument_never_written(monkeypatch, tmp_path, script):
+    row = _run_row(
+        monkeypatch, script, _repeat_then_final_responder(f"see {ORG_ID_SEP}, ok", 2)
+    )
+    out = tmp_path / "row.json"
+    script.write_report(script._redact_org_ids(row), out)
+
+    written = out.read_text()
+    assert ORG_ID_SEP not in written and "xyzq" not in written
+    assert "org_[REDACTED]" in written
+    assert row["loop_metrics"]["repeated_calls"] == 1
+
+
+def test_text_reply_recorded_as_shape_only(monkeypatch, tmp_path, script):
+    secret_text = "UNIQUE-REPLY-TEXT-9f3a"
+    row = _run_row(
+        monkeypatch,
+        script,
+        lambda call_number, request: _text_reply_response(request, secret_text),
+    )
+    out = tmp_path / "row.json"
+    script.write_report(script._redact_org_ids(row), out)
+
+    shape = row["response_shape_log"][0]
+    assert shape["finish_reason"] == "stop"
+    assert shape["tool_call_count"] == 0
+    assert shape["content_length"] == len(secret_text)
+    assert secret_text not in out.read_text()

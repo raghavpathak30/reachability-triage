@@ -48,6 +48,7 @@ fresh response on a miss. A cache hit never touches
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -309,6 +310,9 @@ class GroqLLMClient:
         self.total_tokens_used = 0
         self.total_cost_accrued = 0.0
         self.request_usage_log: list[dict] = []
+        # Phase 8: shape-only metadata per parsed response (never the text).
+        # Cache hits skip `_parse_response`; the real-run scripts disable the cache.
+        self.response_shape_log: list[dict] = []
 
     def next_action(self, context: list[Message]) -> AgentAction:
         cache_key: str | None = None
@@ -473,6 +477,20 @@ class GroqLLMClient:
 
         choice = response.choices[0]
         finish_reason = choice.finish_reason
+
+        content = choice.message.content
+        shape_tool_calls = choice.message.tool_calls or []
+        self.response_shape_log.append(
+            {
+                "finish_reason": finish_reason,
+                "content_length": len(content) if content else 0,
+                "tool_call_count": len(shape_tool_calls),
+                "tool_names": [str(tc.function.name)[:64] for tc in shape_tool_calls[:8]],
+                "content_sha256_12": (
+                    hashlib.sha256(content.encode()).hexdigest()[:12] if content else None
+                ),
+            }
+        )
 
         if finish_reason == "length":
             raise LLMTruncatedError("model response truncated (finish_reason=length)")

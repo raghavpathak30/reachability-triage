@@ -16,12 +16,24 @@ Writes one JSON file per fixture to
 `results/` gitignore) and prints a summary: total tokens, total estimated
 cost, wall-clock seconds, and exception count (must be zero to pass this
 gate).
+
+Phase 8 additions (diagnosis only, never a gate): each row also records the
+termination cause, a normalized content-free tool-call trace and loop metrics
+(`reachability.triage.run_trace`), per-request usage, response-shape metadata
+(never reply text) and rate-limit events. Opt-in env vars:
+`TRIAGE_REAL_RUN_MAX_TOTAL_WAIT_SECONDS` (wait out a 429 inside an
+investigation, per client; unset keeps the pre-existing no-wait client) and
+`TRIAGE_REAL_RUN_DELAY_SECONDS` (sleep between fixtures, default 0). Re-running
+resumes: a fixture whose existing row has no error and a non-infrastructure
+termination cause is skipped and its row reused. The response cache is
+disabled here, so `response_shape_log` covers every model response.
 """
 
 import json
 import os
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -48,8 +60,43 @@ from reachability.agent.eval_harness import (  # noqa: E402
 from reachability.triage.groq_llm import GroqLLMClient  # noqa: E402
 from reachability.triage.index_adapter import build_repo_index  # noqa: E402
 from reachability.triage.langgraph_loop import run_triage_loop_langgraph  # noqa: E402
+from reachability.triage.run_trace import (  # noqa: E402
+    build_tool_call_trace,
+    loop_metrics,
+    redact_org_ids,
+)
+from reachability.triage.termination_cause import compute_termination_cause  # noqa: E402
 
 RESULTS_DIR = REPO_ROOT / "results" / "real_llm"
+
+_INFRA_CAUSES = {
+    "llm_rate_limited",
+    "llm_timeout",
+    "llm_transport_error",
+    "llm_request_too_large",
+}
+
+
+def _make_client() -> GroqLLMClient:
+    max_wait = os.environ.get("TRIAGE_REAL_RUN_MAX_TOTAL_WAIT_SECONDS")
+    if max_wait is None:
+        return GroqLLMClient()
+    return GroqLLMClient(
+        wait_on_rate_limit=True, rate_limit_max_total_wait_seconds=float(max_wait)
+    )
+
+
+def _load_resumable(path: Path) -> dict | None:
+    if not path.exists():
+        return None
+    try:
+        row = json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return None
+    cause = row.get("termination_cause")
+    if row.get("error") is not None or cause is None or cause in _INFRA_CAUSES:
+        return None
+    return row
 
 
 def run_one_fixture(fixture_dir: Path) -> dict:
@@ -65,6 +112,16 @@ def run_one_fixture(fixture_dir: Path) -> dict:
         "total_cost_accrued": None,
         "elapsed_seconds": None,
         "error": None,
+        "termination_cause": None,
+        "budget": EVAL_BUDGET,
+        "allowed_verdicts": label["allowed_verdicts"],
+        "pass": None,
+        "tool_call_trace": None,
+        "loop_metrics": None,
+        "request_usage_log": None,
+        "response_shape_log": None,
+        "rate_limit_events": None,
+        "total_rate_limit_wait_seconds": None,
     }
     start = time.monotonic()
     try:
@@ -74,7 +131,7 @@ def run_one_fixture(fixture_dir: Path) -> dict:
             repo_index.symbol_index, target_module, label["sink"]["line"], fixture_dir.name
         )
 
-        client = GroqLLMClient()
+        client = _make_client()
         finding = run_triage_loop_langgraph(
             client, repo_index, target_module, target_symbol, budget=EVAL_BUDGET
         )
@@ -84,6 +141,14 @@ def run_one_fixture(fixture_dir: Path) -> dict:
         row["tool_call_count"] = len(finding.tool_calls)
         row["total_tokens_used"] = client.total_tokens_used
         row["total_cost_accrued"] = client.total_cost_accrued
+        row["termination_cause"] = compute_termination_cause(finding).value
+        row["pass"] = row["verdict"] in label["allowed_verdicts"]
+        row["tool_call_trace"] = build_tool_call_trace(finding.tool_calls)
+        row["loop_metrics"] = loop_metrics(finding.tool_calls)
+        row["request_usage_log"] = list(client.request_usage_log)
+        row["response_shape_log"] = list(client.response_shape_log)
+        row["rate_limit_events"] = list(client.rate_limit_events)
+        row["total_rate_limit_wait_seconds"] = client.total_rate_limit_wait_seconds
     except Exception as exc:  # gate requires zero unhandled exceptions
         row["error"] = f"{type(exc).__name__}: {exc}"
     row["elapsed_seconds"] = round(time.monotonic() - start, 4)
@@ -98,12 +163,22 @@ def main() -> int:
 
     start = time.monotonic()
     rows = []
-    for fixture_dir in fixture_dirs:
+    delay_seconds = float(os.environ.get("TRIAGE_REAL_RUN_DELAY_SECONDS", "0"))
+    for index, fixture_dir in enumerate(fixture_dirs):
+        existing = _load_resumable(out_dir / f"{fixture_dir.name}.json")
+        if existing is not None:
+            rows.append(existing)
+            print(f"{fixture_dir.name:45} already recorded, skipping")
+            continue
         row = run_one_fixture(fixture_dir)
         rows.append(row)
-        (out_dir / f"{row['id']}.json").write_text(json.dumps(row, indent=2) + "\n")
+        (out_dir / f"{row['id']}.json").write_text(
+            json.dumps(redact_org_ids(row), indent=2) + "\n"
+        )
         status = "ERROR" if row["error"] else row["verdict"]
         print(f"{row['id']:45} {status}")
+        if delay_seconds > 0 and index < len(fixture_dirs) - 1:
+            time.sleep(delay_seconds)
 
     elapsed = round(time.monotonic() - start, 2)
     total_tokens = sum(r["total_tokens_used"] or 0 for r in rows)
@@ -116,6 +191,8 @@ def main() -> int:
     print(f"total estimated cost (USD): {total_cost:.6f}")
     print(f"wall-clock seconds: {elapsed}")
     print(f"exception count: {exception_count}")
+    tally = Counter(r.get("termination_cause") or "error" for r in rows)
+    print("termination causes: " + ", ".join(f"{k}={v}" for k, v in sorted(tally.items())))
     print(f"per-fixture results written to: {out_dir}")
 
     return 0 if exception_count == 0 else 1
