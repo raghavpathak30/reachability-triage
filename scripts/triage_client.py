@@ -9,7 +9,10 @@ scripts/demo.sh (no jq/curl dependency).
   check  assert a `run` result against the case's label-derived allowed set
          (and llm_mode == stub, and a non-empty path when the label allows
          only `reachable`). Prints `PASS <case> <verdict> llm_mode=<mode>`;
-         exits 1 with a message otherwise.
+         exits 1 with a message otherwise. With --expect VERDICT, the verdict
+         must equal it exactly (the demo's stricter check).
+  show   print a `run` result for a human: verdict next to llm_mode, then the
+         evidence path or the reason.
 """
 
 from __future__ import annotations
@@ -91,6 +94,7 @@ def run(args: argparse.Namespace) -> int:
                 "llm_mode": record.get("llm_mode"),
                 "verdict": result.get("verdict"),
                 "path_len": len(path) if path else 0,
+                "path": [f"{e['caller_id']} -> {e['callee_id']}" for e in path] if path else [],
                 "reason": result.get("reason"),
             }
         )
@@ -110,6 +114,9 @@ def check(args: argparse.Namespace) -> int:
         print(f"FAIL {name}: missing or null finding.result.verdict", file=sys.stderr)
         return 1
     allowed = case["allowed_verdicts"]
+    if args.expect and verdict != args.expect:
+        print(f"FAIL {name}: verdict {verdict!r} != expected {args.expect!r}", file=sys.stderr)
+        return 1
     if verdict not in allowed:
         print(
             f"FAIL {name}: verdict {verdict!r} not in label allowed set {allowed}",
@@ -126,6 +133,18 @@ def check(args: argparse.Namespace) -> int:
     return 0
 
 
+def show(args: argparse.Namespace) -> int:
+    result = json.loads(args.result)
+    print(f"  verdict: {result['verdict']}    llm_mode: {result['llm_mode']}")
+    if result["path"]:
+        print("  evidence (call path):")
+        for edge in result["path"]:
+            print(f"    {edge}")
+    if result.get("reason"):
+        print(f"  reason: {result['reason']}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -139,8 +158,11 @@ def main() -> int:
     p_chk.add_argument("--cases", required=True)
     p_chk.add_argument("--case", required=True)
     p_chk.add_argument("--result", required=True)
+    p_chk.add_argument("--expect")
+    p_show = sub.add_parser("show")
+    p_show.add_argument("--result", required=True)
     args = parser.parse_args()
-    return run(args) if args.cmd == "run" else check(args)
+    return {"run": run, "check": check, "show": show}[args.cmd](args)
 
 
 if __name__ == "__main__":
