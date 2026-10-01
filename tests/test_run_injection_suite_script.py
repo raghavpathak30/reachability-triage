@@ -17,6 +17,7 @@ from test_llm_failure_semantics import FakeGroqTransport, _chat_completion_body
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "run_injection_suite_real.py"
 ORG_ID = "org_01abcDEF23"
+ORG_ID_SEP = "org_01ab_CD-xyzq"
 
 
 @pytest.fixture
@@ -55,6 +56,13 @@ def _tool_call_response(request, name, arguments, usage):
     return httpx.Response(200, json=body, request=request)
 
 
+def _text_reply_response(request, text):
+    body = _chat_completion_body(
+        finish_reason="stop", message={"role": "assistant", "content": text}
+    )
+    return httpx.Response(200, json=body, request=request)
+
+
 def _install_fake_client(monkeypatch, script, responder, constructed):
     def factory(**kwargs):
         constructed.append(kwargs)
@@ -68,14 +76,25 @@ def _install_fake_client(monkeypatch, script, responder, constructed):
     monkeypatch.setattr(script, "GroqLLMClient", factory)
 
 
+def _make_completing_responder_after_429(org_id):
+    def responder(call_number, request):
+        if call_number == 1:
+            return httpx.Response(
+                429,
+                headers={"retry-after": "2", "x-ratelimit-limit-tokens": "8000"},
+                json={"error": {"message": f"Rate limit reached for organization {org_id} TPM: Limit 8000, Used 7900, Requested 500"}},
+                request=request,
+            )
+        return _completing_responder_tail(call_number, request)
+
+    return responder
+
+
 def _completing_responder_after_429(call_number, request):
-    if call_number == 1:
-        return httpx.Response(
-            429,
-            headers={"retry-after": "2", "x-ratelimit-limit-tokens": "8000"},
-            json={"error": {"message": f"Rate limit reached for organization {ORG_ID} TPM: Limit 8000, Used 7900, Requested 500"}},
-            request=request,
-        )
+    return _make_completing_responder_after_429(ORG_ID)(call_number, request)
+
+
+def _completing_responder_tail(call_number, request):
     if call_number == 2:
         return _tool_call_response(
             request,
@@ -137,6 +156,22 @@ def test_redact_org_ids_is_recursive():
     assert redacted == {"a": ["x org_[REDACTED] y", {"b": "org_[REDACTED]"}], "n": 3}
 
 
+def test_redact_org_ids_handles_underscore_and_hyphen():
+    spec = importlib.util.spec_from_file_location("redact_only_sep", SCRIPT)
+    saved_environ = dict(os.environ)
+    saved_path = list(sys.path)
+    try:
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    finally:
+        os.environ.clear()
+        os.environ.update(saved_environ)
+        sys.path[:] = saved_path
+
+    assert module._redact_org_ids({"a": f"x {ORG_ID_SEP} y"}) == {"a": "x org_[REDACTED] y"}
+    assert module._redact_org_ids(f"id={ORG_ID_SEP}, next") == "id=org_[REDACTED], next"
+
+
 def test_written_files_never_contain_org_id_and_do_contain_marker(monkeypatch, tmp_path, script):
     constructed: list[dict] = []
     _install_fake_client(monkeypatch, script, _completing_responder_after_429, constructed)
@@ -152,7 +187,49 @@ def test_written_files_never_contain_org_id_and_do_contain_marker(monkeypatch, t
     combined = "".join(p.read_text() for p in written)
     assert ORG_ID not in combined
     assert "org_[REDACTED]" in combined
-    assert exit_code in (0,)
+    assert exit_code == 0
+    (summary_path,) = tmp_path.glob("results/injection_suite_real_summary_*.json")
+    report = json.loads(summary_path.read_text())
+    assert report["completed"] == report["total"] == 3
+    assert report["overall"] in ("PASS", "FAIL")
+
+
+def test_separator_org_id_never_written_including_tail(monkeypatch, tmp_path, script):
+    constructed: list[dict] = []
+    _install_fake_client(
+        monkeypatch, script, _make_completing_responder_after_429(ORG_ID_SEP), constructed
+    )
+    monkeypatch.setattr(script, "RESULTS_DIR", tmp_path / "results")
+    monkeypatch.setattr(script, "REPO_ROOT", tmp_path)
+    monkeypatch.setenv("TRIAGE_INJECTION_SUITE_DELAY_SECONDS", "0")
+    monkeypatch.setattr(script.time, "sleep", lambda seconds: None)
+
+    script.main()
+
+    combined = "".join(p.read_text() for p in tmp_path.rglob("*.json"))
+    assert ORG_ID_SEP not in combined
+    assert "xyzq" not in combined
+    assert "org_[REDACTED]" in combined
+
+
+def test_text_reply_responder_is_incomplete_not_a_false_pass(monkeypatch, tmp_path, script):
+    constructed: list[dict] = []
+    _install_fake_client(
+        monkeypatch,
+        script,
+        lambda call_number, request: _text_reply_response(request, "I will just answer in prose."),
+        constructed,
+    )
+    monkeypatch.setattr(script, "RESULTS_DIR", tmp_path / "results")
+    monkeypatch.setattr(script, "REPO_ROOT", tmp_path)
+    monkeypatch.setenv("TRIAGE_INJECTION_SUITE_DELAY_SECONDS", "0")
+    monkeypatch.setattr(script.time, "sleep", lambda seconds: None)
+
+    exit_code = script.main()
+
+    assert exit_code == 1
+    (summary_path,) = tmp_path.glob("results/injection_suite_real_summary_*.json")
+    assert json.loads(summary_path.read_text())["overall"] == "INCOMPLETE"
 
 
 def test_terminal_too_large_reason_recorded_redacted_and_not_retried(monkeypatch, tmp_path, script):
@@ -180,3 +257,84 @@ def test_terminal_too_large_reason_recorded_redacted_and_not_retried(monkeypatch
     script.write_report(script._redact_org_ids(row), out)
     assert ORG_ID not in out.read_text()
     assert "org_[REDACTED]" in out.read_text()
+
+
+# ---- Phase 8: tool-call trace / loop metrics / response shapes ----
+
+_SPEC_NAME = "02_unauthorized_tool_invocation"
+_USAGE = {"prompt_tokens": 100, "completion_tokens": 10, "total_tokens": 110}
+
+
+def _repeat_then_final_responder(pattern, repeats):
+    def responder(call_number, request):
+        if call_number <= repeats:
+            return _tool_call_response(request, "search_symbol", {"pattern": pattern}, _USAGE)
+        return _tool_call_response(
+            request,
+            "submit_final_answer",
+            {"target_module": "pkg.sink", "target_symbol": "vulnerable", "rationale": "ok"},
+            _USAGE,
+        )
+
+    return responder
+
+
+def _run_row(monkeypatch, script, responder):
+    _install_fake_client(monkeypatch, script, responder, [])
+    monkeypatch.setattr(script.time, "sleep", lambda seconds: None)
+    return script._run_fixture_with_retry(_SPEC_NAME, script._fixture_spec(_SPEC_NAME))
+
+
+def test_scripted_repeat_yields_exact_loop_metrics(monkeypatch, script):
+    row = _run_row(monkeypatch, script, _repeat_then_final_responder("*vulnerable", 3))
+
+    assert row["termination_cause"] == "completed"
+    assert row["loop_metrics"] == {
+        "tool_call_count": 3,
+        "distinct_calls": 1,
+        "repeated_calls": 2,
+        "longest_identical_streak": 3,
+        "per_tool_counts": {"search_symbol": 3},
+    }
+    assert row["budget"] == 15
+    assert len(row["tool_call_trace"]) == 3
+    assert all("result" not in entry for entry in row["tool_call_trace"])
+
+
+def test_budget_exceeded_run_still_has_metrics(monkeypatch, script):
+    row = _run_row(monkeypatch, script, _repeat_then_final_responder("*vulnerable", 10_000))
+
+    assert row["termination_cause"] == "budget_exceeded"
+    assert row["loop_metrics"]["tool_call_count"] == 15
+    assert row["loop_metrics"]["repeated_calls"] == 14
+    assert row["loop_metrics"]["longest_identical_streak"] == 15
+
+
+def test_org_id_in_argument_never_written(monkeypatch, tmp_path, script):
+    row = _run_row(
+        monkeypatch, script, _repeat_then_final_responder(f"see {ORG_ID_SEP}, ok", 2)
+    )
+    out = tmp_path / "row.json"
+    script.write_report(script._redact_org_ids(row), out)
+
+    written = out.read_text()
+    assert ORG_ID_SEP not in written and "xyzq" not in written
+    assert "org_[REDACTED]" in written
+    assert row["loop_metrics"]["repeated_calls"] == 1
+
+
+def test_text_reply_recorded_as_shape_only(monkeypatch, tmp_path, script):
+    secret_text = "UNIQUE-REPLY-TEXT-9f3a"
+    row = _run_row(
+        monkeypatch,
+        script,
+        lambda call_number, request: _text_reply_response(request, secret_text),
+    )
+    out = tmp_path / "row.json"
+    script.write_report(script._redact_org_ids(row), out)
+
+    shape = row["response_shape_log"][0]
+    assert shape["finish_reason"] == "stop"
+    assert shape["tool_call_count"] == 0
+    assert shape["content_length"] == len(secret_text)
+    assert secret_text not in out.read_text()

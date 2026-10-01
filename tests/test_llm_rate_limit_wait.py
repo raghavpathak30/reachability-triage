@@ -329,6 +329,72 @@ def test_d4_on_413_signal_carries_status_and_raw_body():
     assert info.value.signal["requested"] == 9500
 
 
+# ---- terminal rate-limit events (Phase 8) ----
+
+
+def test_terminal_event_recorded_when_wait_cap_exceeded():
+    script = Script([rl({"retry-after": "100"})], repeat_last=True)
+    client = script.client([], wait_on_rate_limit=True, rate_limit_max_total_wait_seconds=50)
+
+    _run(client)
+
+    last = client.rate_limit_events[-1]
+    assert last["terminal"] == "wait_cap_exceeded"
+    assert last["retry_after"] == 100
+    assert last["waited"] == 0.0
+    assert client.total_rate_limit_wait_seconds == 0.0
+
+
+def test_terminal_event_recorded_for_oversized_429():
+    script = Script(
+        [rl(body_message="Rate limit reached on tokens per minute (TPM): Limit 8000, Used 0, Requested 9500")],
+        repeat_last=True,
+    )
+    client = script.client([], wait_on_rate_limit=True)
+
+    _run(client)
+
+    (event,) = client.rate_limit_events
+    assert event["terminal"] == "request_too_large"
+    assert event["waited"] == 0.0
+
+
+def test_terminal_event_recorded_for_413():
+    script = Script([too_large_413()], repeat_last=True)
+    client = script.client([], wait_on_rate_limit=True)
+
+    _run(client)
+
+    (event,) = client.rate_limit_events
+    assert event["terminal"] == "request_too_large"
+    assert event["status_code"] == 413
+
+
+def test_waited_then_completed_has_no_terminal_event():
+    script = Script([rl({"retry-after": "7"}), SEARCH, FINAL])
+    client = script.client([], wait_on_rate_limit=True)
+
+    _run(client)
+
+    assert client.rate_limit_events
+    assert all("terminal" not in event for event in client.rate_limit_events)
+
+
+@pytest.mark.parametrize("wait", [False, True])
+def test_max_tokens_is_never_sent(wait):
+    script = Script([SEARCH, FINAL])
+    client = script.client([], wait_on_rate_limit=wait)
+
+    _run(client)
+
+    assert script.bodies
+    for raw in script.bodies:
+        body = json.loads(raw)
+        assert "max_tokens" not in body
+        assert "max_completion_tokens" not in body
+    assert client.max_tokens_sent is None
+
+
 # ---- R7: mixed 429 / timeout ----
 
 

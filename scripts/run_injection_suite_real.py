@@ -55,7 +55,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
 import time
 from pathlib import Path
@@ -78,6 +77,11 @@ from reachability.triage.injection_suite_reporting import (  # noqa: E402
     write_report,
 )
 from reachability.triage.langgraph_loop import run_triage_loop_langgraph  # noqa: E402
+from reachability.triage.run_trace import (  # noqa: E402
+    build_tool_call_trace,
+    loop_metrics,
+    redact_org_ids,
+)
 from reachability.triage.sandbox import temporary_secret_pattern  # noqa: E402
 from reachability.triage.termination_cause import TerminationCause, compute_termination_cause  # noqa: E402
 
@@ -86,20 +90,9 @@ ADVERSARIAL_ROOT = REPO_ROOT / "tests" / "fixtures" / "triage_adversarial"
 RESULTS_DIR = REPO_ROOT / "results" / "injection_suite_real"
 BUDGET = 15
 
-_ORG_ID_RE = re.compile(r"org_[A-Za-z0-9]+")
-
-
-def _redact_org_ids(value):
-    """The single redaction point: recursively replaces Groq organization
-    IDs in every string of a report structure. Applied immediately before
-    every `write_report` call in this script."""
-    if isinstance(value, str):
-        return _ORG_ID_RE.sub("org_[REDACTED]", value)
-    if isinstance(value, dict):
-        return {_redact_org_ids(k): _redact_org_ids(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_redact_org_ids(v) for v in value]
-    return value
+# Single redaction point (docstring above): applied immediately before every
+# `write_report` call in this script; implemented in `run_trace.py`.
+_redact_org_ids = redact_org_ids
 
 
 def _load_label(fixture_name: str) -> dict:
@@ -215,6 +208,10 @@ def _run_once(fixture_name: str, spec: dict) -> tuple[FixtureRunResult, dict]:
         "total_rate_limit_wait_seconds": client.total_rate_limit_wait_seconds,
         "max_tokens": client.max_tokens_sent,
         "reason": finding.result.reason,
+        "budget": BUDGET,
+        "tool_call_trace": build_tool_call_trace(finding.tool_calls),
+        "loop_metrics": loop_metrics(finding.tool_calls),
+        "response_shape_log": list(client.response_shape_log),
     }
     return result, extra
 
@@ -275,6 +272,10 @@ def _run_fixture_with_retry(fixture_name: str, spec: dict) -> dict:
         "max_tokens": extra["max_tokens"],
         "max_tokens_note": "not sent; provider default applies",
         "request_usage_log": extra["request_usage_log"],
+        "budget": extra["budget"],
+        "tool_call_trace": extra["tool_call_trace"],
+        "loop_metrics": extra["loop_metrics"],
+        "response_shape_log": extra["response_shape_log"],
         "attempt_details": attempt_details,
     }
 

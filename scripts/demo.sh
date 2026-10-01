@@ -7,16 +7,25 @@
 # Env: DEMO_PACE (multiplier on every narration pause; default 1, sized for
 # ~2-3 minutes; DEMO_PACE=0 for a fast run), API_PORT (default: a free port),
 # PYTHON (default python3), DEMO_TIMEOUT (per-job poll timeout, default 120s).
+# DEMO_ALLOW_DIRTY=1 skips the clean-tree check (default: refuse on a dirty
+# tree, because the demo builds the working tree). A local .env is ignored
+# (an empty --env-file is passed to compose) so the demo is reproducible.
 # Never sets DOCKER_HOST -- export it yourself if needed.
 set -euo pipefail
 
 ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
+if [ "${DEMO_ALLOW_DIRTY:-0}" != 1 ] && [ -n "$(git -C "$ROOT" status --porcelain)" ]; then
+  echo "FAIL: working tree is dirty; the demo builds the working tree. Commit first or set DEMO_ALLOW_DIRTY=1." >&2
+  exit 2
+fi
 PYTHON="${PYTHON:-python3}"
 DEMO_PACE="${DEMO_PACE:-1}"
 DEMO_TIMEOUT="${DEMO_TIMEOUT:-120}"
 TMP="$(mktemp -d)"
+# Empty env file: stops compose from picking up a developer's local .env.
+: > "$TMP/empty.env"
 PROJECT="reach-demo-$$"
-COMPOSE=(docker compose -p "$PROJECT" -f docker-compose.yml -f docker-compose.smoke.yml)
+COMPOSE=(docker compose --env-file "$TMP/empty.env" -p "$PROJECT" -f docker-compose.yml -f docker-compose.smoke.yml)
 STARTED=0
 
 say() { # say "text" [seconds-at-pace-1]

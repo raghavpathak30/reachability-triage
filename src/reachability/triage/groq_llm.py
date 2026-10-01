@@ -48,6 +48,7 @@ fresh response on a miss. A cache hit never touches
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -309,6 +310,9 @@ class GroqLLMClient:
         self.total_tokens_used = 0
         self.total_cost_accrued = 0.0
         self.request_usage_log: list[dict] = []
+        # Phase 8: shape-only metadata per parsed response (never the text).
+        # Cache hits skip `_parse_response`; the real-run scripts disable the cache.
+        self.response_shape_log: list[dict] = []
 
     def next_action(self, context: list[Message]) -> AgentAction:
         cache_key: str | None = None
@@ -381,16 +385,27 @@ class GroqLLMClient:
             except LLMRateLimitedError as exc:
                 signal = exc.signal or {}
                 if _signal_is_oversized(signal):
+                    self.rate_limit_events.append(
+                        {**signal, "waited": 0.0, "terminal": "request_too_large"}
+                    )
                     raise self._too_large_error(signal, str(exc)) from exc
                 retry_after = signal.get("retry_after")
                 if retry_after is None:
                     retry_after = _RATE_LIMIT_FALLBACK_WAIT_SECONDS
                 wait = max(_RATE_LIMIT_MIN_WAIT_SECONDS, retry_after) + _RATE_LIMIT_WAIT_MARGIN_SECONDS
                 if self._total_rate_limit_wait + wait > self._rate_limit_max_total_wait:
+                    self.rate_limit_events.append(
+                        {**signal, "waited": 0.0, "terminal": "wait_cap_exceeded"}
+                    )
                     raise
                 self.rate_limit_events.append({**signal, "waited": wait})
                 self._sleep(wait)
                 self._total_rate_limit_wait += wait
+            except LLMRequestTooLargeError as exc:
+                self.rate_limit_events.append(
+                    {**(exc.signal or {}), "waited": 0.0, "terminal": "request_too_large"}
+                )
+                raise
             except (LLMTimeoutError, LLMTransportError):
                 if attempt >= _MAX_ATTEMPTS - 1:
                     raise
@@ -462,6 +477,20 @@ class GroqLLMClient:
 
         choice = response.choices[0]
         finish_reason = choice.finish_reason
+
+        content = choice.message.content
+        shape_tool_calls = choice.message.tool_calls or []
+        self.response_shape_log.append(
+            {
+                "finish_reason": finish_reason,
+                "content_length": len(content) if content else 0,
+                "tool_call_count": len(shape_tool_calls),
+                "tool_names": [str(tc.function.name)[:64] for tc in shape_tool_calls[:8]],
+                "content_sha256_12": (
+                    hashlib.sha256(content.encode()).hexdigest()[:12] if content else None
+                ),
+            }
+        )
 
         if finish_reason == "length":
             raise LLMTruncatedError("model response truncated (finish_reason=length)")

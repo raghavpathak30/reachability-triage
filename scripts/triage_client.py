@@ -5,7 +5,9 @@ scripts/demo.sh (no jq/curl dependency).
   run    submit one case from cases.json, poll to a terminal state, print the
          result as one JSON line. Exit 0 only for `completed`.
            1 = job `failed` or unexpected status, 2 = poll timeout,
-           3 = POST did not return HTTP 202 with a UUID id.
+           3 = POST did not return HTTP 202 with a UUID id,
+           4 = polling gave up: HTTP 4xx (other than 408/429) at once, or
+           5 consecutive transport/5xx/bad-JSON errors.
   check  assert a `run` result against the case's label-derived allowed set
          (and llm_mode == stub, and a non-empty path when the label allows
          only `reachable`). Prints `PASS <case> <verdict> llm_mode=<mode>`;
@@ -63,9 +65,34 @@ def run(args: argparse.Namespace) -> int:
 
     deadline = time.monotonic() + args.timeout
     last = payload.get("status")
+    consecutive_errors = 0
     while True:
-        with urllib.request.urlopen(f"{args.base}/v1/triage/{job_id}", timeout=10) as resp:
-            record = json.load(resp)
+        try:
+            with urllib.request.urlopen(f"{args.base}/v1/triage/{job_id}", timeout=10) as resp:
+                record = json.load(resp)
+        except (urllib.error.URLError, TimeoutError, ConnectionError, json.JSONDecodeError) as exc:
+            consecutive_errors += 1
+            fatal = (
+                isinstance(exc, urllib.error.HTTPError)
+                and 400 <= exc.code < 500
+                and exc.code not in (408, 429)
+            )
+            if fatal or consecutive_errors >= 5:
+                print(
+                    f"FAIL {args.case}: polling job {job_id} failed: "
+                    f"{type(exc).__name__}: {exc} ({consecutive_errors} consecutive errors)",
+                    file=sys.stderr,
+                )
+                return 4
+            if time.monotonic() >= deadline:
+                print(
+                    f"FAIL {args.case}: timed out after {args.timeout}s waiting for job {job_id}; last status={last}",
+                    file=sys.stderr,
+                )
+                return 2
+            time.sleep(args.interval)
+            continue
+        consecutive_errors = 0
         last = record["status"]
         if last == "completed":
             break
