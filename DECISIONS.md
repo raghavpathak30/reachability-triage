@@ -1141,6 +1141,13 @@ raw text of fixture 03's non-tool-call reply are not written to the
 fixture JSON, so repeated identical calls cannot be diagnosed from this
 run.
 
+**Wait cap scope (Phase 8 review note).** The rate-limit wait cap is per
+`GroqLLMClient` instance, and `scripts/run_injection_suite_real.py` builds a
+new client for every fixture attempt (`_run_once`), so the cap resets on each
+fixture-level retry. Worst case per fixture is therefore the cap times
+(1 + `TRIAGE_INJECTION_SUITE_MAX_FIXTURE_RETRIES`), i.e. 900 s x 4 at the
+defaults; those retries only follow an `llm_rate_limited` termination.
+
 
 ## 15. Phase 7 — ship: docker compose, stub-by-default, offline smoke (29 Sep 2026)
 

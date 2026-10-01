@@ -17,6 +17,7 @@ from test_llm_failure_semantics import FakeGroqTransport, _chat_completion_body
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "run_injection_suite_real.py"
 ORG_ID = "org_01abcDEF23"
+ORG_ID_SEP = "org_01ab_CD-xyzq"
 
 
 @pytest.fixture
@@ -55,6 +56,13 @@ def _tool_call_response(request, name, arguments, usage):
     return httpx.Response(200, json=body, request=request)
 
 
+def _text_reply_response(request, text):
+    body = _chat_completion_body(
+        finish_reason="stop", message={"role": "assistant", "content": text}
+    )
+    return httpx.Response(200, json=body, request=request)
+
+
 def _install_fake_client(monkeypatch, script, responder, constructed):
     def factory(**kwargs):
         constructed.append(kwargs)
@@ -68,14 +76,25 @@ def _install_fake_client(monkeypatch, script, responder, constructed):
     monkeypatch.setattr(script, "GroqLLMClient", factory)
 
 
+def _make_completing_responder_after_429(org_id):
+    def responder(call_number, request):
+        if call_number == 1:
+            return httpx.Response(
+                429,
+                headers={"retry-after": "2", "x-ratelimit-limit-tokens": "8000"},
+                json={"error": {"message": f"Rate limit reached for organization {org_id} TPM: Limit 8000, Used 7900, Requested 500"}},
+                request=request,
+            )
+        return _completing_responder_tail(call_number, request)
+
+    return responder
+
+
 def _completing_responder_after_429(call_number, request):
-    if call_number == 1:
-        return httpx.Response(
-            429,
-            headers={"retry-after": "2", "x-ratelimit-limit-tokens": "8000"},
-            json={"error": {"message": f"Rate limit reached for organization {ORG_ID} TPM: Limit 8000, Used 7900, Requested 500"}},
-            request=request,
-        )
+    return _make_completing_responder_after_429(ORG_ID)(call_number, request)
+
+
+def _completing_responder_tail(call_number, request):
     if call_number == 2:
         return _tool_call_response(
             request,
@@ -137,6 +156,22 @@ def test_redact_org_ids_is_recursive():
     assert redacted == {"a": ["x org_[REDACTED] y", {"b": "org_[REDACTED]"}], "n": 3}
 
 
+def test_redact_org_ids_handles_underscore_and_hyphen():
+    spec = importlib.util.spec_from_file_location("redact_only_sep", SCRIPT)
+    saved_environ = dict(os.environ)
+    saved_path = list(sys.path)
+    try:
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    finally:
+        os.environ.clear()
+        os.environ.update(saved_environ)
+        sys.path[:] = saved_path
+
+    assert module._redact_org_ids({"a": f"x {ORG_ID_SEP} y"}) == {"a": "x org_[REDACTED] y"}
+    assert module._redact_org_ids(f"id={ORG_ID_SEP}, next") == "id=org_[REDACTED], next"
+
+
 def test_written_files_never_contain_org_id_and_do_contain_marker(monkeypatch, tmp_path, script):
     constructed: list[dict] = []
     _install_fake_client(monkeypatch, script, _completing_responder_after_429, constructed)
@@ -152,7 +187,49 @@ def test_written_files_never_contain_org_id_and_do_contain_marker(monkeypatch, t
     combined = "".join(p.read_text() for p in written)
     assert ORG_ID not in combined
     assert "org_[REDACTED]" in combined
-    assert exit_code in (0,)
+    assert exit_code == 0
+    (summary_path,) = tmp_path.glob("results/injection_suite_real_summary_*.json")
+    report = json.loads(summary_path.read_text())
+    assert report["completed"] == report["total"] == 3
+    assert report["overall"] in ("PASS", "FAIL")
+
+
+def test_separator_org_id_never_written_including_tail(monkeypatch, tmp_path, script):
+    constructed: list[dict] = []
+    _install_fake_client(
+        monkeypatch, script, _make_completing_responder_after_429(ORG_ID_SEP), constructed
+    )
+    monkeypatch.setattr(script, "RESULTS_DIR", tmp_path / "results")
+    monkeypatch.setattr(script, "REPO_ROOT", tmp_path)
+    monkeypatch.setenv("TRIAGE_INJECTION_SUITE_DELAY_SECONDS", "0")
+    monkeypatch.setattr(script.time, "sleep", lambda seconds: None)
+
+    script.main()
+
+    combined = "".join(p.read_text() for p in tmp_path.rglob("*.json"))
+    assert ORG_ID_SEP not in combined
+    assert "xyzq" not in combined
+    assert "org_[REDACTED]" in combined
+
+
+def test_text_reply_responder_is_incomplete_not_a_false_pass(monkeypatch, tmp_path, script):
+    constructed: list[dict] = []
+    _install_fake_client(
+        monkeypatch,
+        script,
+        lambda call_number, request: _text_reply_response(request, "I will just answer in prose."),
+        constructed,
+    )
+    monkeypatch.setattr(script, "RESULTS_DIR", tmp_path / "results")
+    monkeypatch.setattr(script, "REPO_ROOT", tmp_path)
+    monkeypatch.setenv("TRIAGE_INJECTION_SUITE_DELAY_SECONDS", "0")
+    monkeypatch.setattr(script.time, "sleep", lambda seconds: None)
+
+    exit_code = script.main()
+
+    assert exit_code == 1
+    (summary_path,) = tmp_path.glob("results/injection_suite_real_summary_*.json")
+    assert json.loads(summary_path.read_text())["overall"] == "INCOMPLETE"
 
 
 def test_terminal_too_large_reason_recorded_redacted_and_not_retried(monkeypatch, tmp_path, script):

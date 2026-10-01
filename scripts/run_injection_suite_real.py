@@ -86,7 +86,7 @@ ADVERSARIAL_ROOT = REPO_ROOT / "tests" / "fixtures" / "triage_adversarial"
 RESULTS_DIR = REPO_ROOT / "results" / "injection_suite_real"
 BUDGET = 15
 
-_ORG_ID_RE = re.compile(r"org_[A-Za-z0-9]+")
+_ORG_ID_RE = re.compile(r"org_[A-Za-z0-9_\-]+")
 
 
 def _redact_org_ids(value):

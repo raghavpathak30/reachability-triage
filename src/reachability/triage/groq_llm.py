@@ -381,16 +381,27 @@ class GroqLLMClient:
             except LLMRateLimitedError as exc:
                 signal = exc.signal or {}
                 if _signal_is_oversized(signal):
+                    self.rate_limit_events.append(
+                        {**signal, "waited": 0.0, "terminal": "request_too_large"}
+                    )
                     raise self._too_large_error(signal, str(exc)) from exc
                 retry_after = signal.get("retry_after")
                 if retry_after is None:
                     retry_after = _RATE_LIMIT_FALLBACK_WAIT_SECONDS
                 wait = max(_RATE_LIMIT_MIN_WAIT_SECONDS, retry_after) + _RATE_LIMIT_WAIT_MARGIN_SECONDS
                 if self._total_rate_limit_wait + wait > self._rate_limit_max_total_wait:
+                    self.rate_limit_events.append(
+                        {**signal, "waited": 0.0, "terminal": "wait_cap_exceeded"}
+                    )
                     raise
                 self.rate_limit_events.append({**signal, "waited": wait})
                 self._sleep(wait)
                 self._total_rate_limit_wait += wait
+            except LLMRequestTooLargeError as exc:
+                self.rate_limit_events.append(
+                    {**(exc.signal or {}), "waited": 0.0, "terminal": "request_too_large"}
+                )
+                raise
             except (LLMTimeoutError, LLMTransportError):
                 if attempt >= _MAX_ATTEMPTS - 1:
                     raise
