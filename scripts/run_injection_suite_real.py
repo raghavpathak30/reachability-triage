@@ -79,6 +79,7 @@ from reachability.triage.injection_suite_reporting import (  # noqa: E402
 from reachability.triage.langgraph_loop import run_triage_loop_langgraph  # noqa: E402
 from reachability.triage.run_trace import (  # noqa: E402
     build_tool_call_trace,
+    cap_reason,
     loop_metrics,
     redact_org_ids,
 )
@@ -89,6 +90,12 @@ FIXTURE_REPO = REPO_ROOT / "tests" / "fixtures" / "l5" / "11_dead_function_call_
 ADVERSARIAL_ROOT = REPO_ROOT / "tests" / "fixtures" / "triage_adversarial"
 RESULTS_DIR = REPO_ROOT / "results" / "injection_suite_real"
 BUDGET = 15
+
+# The adversarial labels define no allowed-verdict set; the assigned repo's
+# own clean label (l5/11) does.
+_ALLOWED_VERDICTS = json.loads((FIXTURE_REPO.parent / "label.json").read_text())[
+    "allowed_verdicts"
+]
 
 # Single redaction point (docstring above): applied immediately before every
 # `write_report` call in this script; implemented in `run_trace.py`.
@@ -197,6 +204,8 @@ def _run_once(fixture_name: str, spec: dict) -> tuple[FixtureRunResult, dict]:
         fixture_name=fixture_name, termination_cause=cause, injection_won=injection_won
     )
     usage_log = list(client.request_usage_log)
+    verdict = finding.result.verdict.value
+    final_target = (finding.result.target_module, finding.result.target_symbol)
     extra = {
         "total_tokens_used": client.total_tokens_used,
         "total_cost_accrued": client.total_cost_accrued,
@@ -207,11 +216,18 @@ def _run_once(fixture_name: str, spec: dict) -> tuple[FixtureRunResult, dict]:
         "rate_limit_events": list(client.rate_limit_events),
         "total_rate_limit_wait_seconds": client.total_rate_limit_wait_seconds,
         "max_tokens": client.max_tokens_sent,
-        "reason": finding.result.reason,
+        "reason": cap_reason(finding.result.reason),
+        "verdict": verdict,
+        "final_target_module": finding.result.target_module,
+        "final_target_symbol": finding.result.target_symbol,
+        "allowed_verdicts": list(_ALLOWED_VERDICTS),
+        "within_allowed": verdict in _ALLOWED_VERDICTS
+        and final_target == (spec["target_module"], spec["target_symbol"]),
         "budget": BUDGET,
         "tool_call_trace": build_tool_call_trace(finding.tool_calls),
         "loop_metrics": loop_metrics(finding.tool_calls),
         "response_shape_log": list(client.response_shape_log),
+        "name_normalization_events": list(client.name_normalization_events),
     }
     return result, extra
 
@@ -261,6 +277,11 @@ def _run_fixture_with_retry(fixture_name: str, spec: dict) -> dict:
         "total_tokens_used": total_tokens,
         "total_cost_accrued": total_cost,
         "reason": extra["reason"],
+        "verdict": extra["verdict"],
+        "final_target_module": extra["final_target_module"],
+        "final_target_symbol": extra["final_target_symbol"],
+        "allowed_verdicts": extra["allowed_verdicts"],
+        "within_allowed": extra["within_allowed"],
         "request_count": sum(d["request_count"] for d in attempt_details),
         "max_single_request_total_tokens": max(
             d["max_single_request_total_tokens"] for d in attempt_details
@@ -276,6 +297,7 @@ def _run_fixture_with_retry(fixture_name: str, spec: dict) -> dict:
         "tool_call_trace": extra["tool_call_trace"],
         "loop_metrics": extra["loop_metrics"],
         "response_shape_log": extra["response_shape_log"],
+        "name_normalization_events": extra["name_normalization_events"],
         "attempt_details": attempt_details,
     }
 

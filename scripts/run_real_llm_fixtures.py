@@ -62,6 +62,7 @@ from reachability.triage.index_adapter import build_repo_index  # noqa: E402
 from reachability.triage.langgraph_loop import run_triage_loop_langgraph  # noqa: E402
 from reachability.triage.run_trace import (  # noqa: E402
     build_tool_call_trace,
+    cap_reason,
     loop_metrics,
     redact_org_ids,
 )
@@ -120,6 +121,7 @@ def run_one_fixture(fixture_dir: Path) -> dict:
         "loop_metrics": None,
         "request_usage_log": None,
         "response_shape_log": None,
+        "name_normalization_events": None,
         "rate_limit_events": None,
         "total_rate_limit_wait_seconds": None,
     }
@@ -137,7 +139,7 @@ def run_one_fixture(fixture_dir: Path) -> dict:
         )
 
         row["verdict"] = finding.result.verdict.value
-        row["reason"] = finding.result.reason
+        row["reason"] = cap_reason(finding.result.reason)
         row["tool_call_count"] = len(finding.tool_calls)
         row["total_tokens_used"] = client.total_tokens_used
         row["total_cost_accrued"] = client.total_cost_accrued
@@ -147,6 +149,7 @@ def run_one_fixture(fixture_dir: Path) -> dict:
         row["loop_metrics"] = loop_metrics(finding.tool_calls)
         row["request_usage_log"] = list(client.request_usage_log)
         row["response_shape_log"] = list(client.response_shape_log)
+        row["name_normalization_events"] = list(client.name_normalization_events)
         row["rate_limit_events"] = list(client.rate_limit_events)
         row["total_rate_limit_wait_seconds"] = client.total_rate_limit_wait_seconds
     except Exception as exc:  # gate requires zero unhandled exceptions

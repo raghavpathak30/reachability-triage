@@ -5,6 +5,7 @@ from pathlib import Path
 from reachability.triage.agent_models import ToolCallRecord
 from reachability.triage.run_trace import (
     build_tool_call_trace,
+    cap_reason,
     loop_metrics,
     loop_metrics_from_trace,
     normalize_tool_arguments,
@@ -111,3 +112,19 @@ def test_loop_and_dispatch_do_not_import_run_trace():
         "agent/eval_harness.py",
     ):
         assert "run_trace" not in (root / rel).read_text(), rel
+
+
+def test_cap_reason_none_passes_through():
+    assert cap_reason(None) is None
+
+
+def test_cap_reason_short_is_unchanged():
+    assert cap_reason("x" * 300) == "x" * 300
+
+
+def test_cap_reason_long_gets_exact_suffix_and_keeps_prefix():
+    reason = "llm_malformed_response: " + "y" * 1000
+    capped = cap_reason(reason)
+
+    assert capped == reason[:300] + f"...[+{len(reason) - 300} chars]"
+    assert capped.startswith("llm_malformed_response:")

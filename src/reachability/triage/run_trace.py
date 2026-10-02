@@ -42,6 +42,13 @@ def _truncate(text: str) -> str:
     return f"{text[:_MAX_ARG_CHARS]}...[+{len(text) - _MAX_ARG_CHARS} chars]"
 
 
+def cap_reason(reason: str | None, limit: int = 300) -> str | None:
+    """Length-caps a result `reason` for the real-run results rows only."""
+    if reason is None or len(reason) <= limit:
+        return reason
+    return f"{reason[:limit]}...[+{len(reason) - limit} chars]"
+
+
 def _stripped_args(tool_name: str, arguments: dict) -> dict:
     """Only the keys named in the tool's schema, in schema order; string
     values stripped, any other value replaced by its `repr`."""

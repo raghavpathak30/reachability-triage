@@ -157,3 +157,43 @@ def test_resume_skips_completed_and_reruns_rate_limited(monkeypatch, tmp_path, s
     output = capsys.readouterr().out
     assert "fixtures run: 2" in output
     assert "completed=2" in output
+
+
+def test_prefixed_invalid_final_answer_reason_is_capped_and_events_listed(monkeypatch, tmp_path, script):
+    constructed: list[dict] = []
+    long_rationale = "r" * 2000
+
+    def responder(call_number, request):
+        return _tool_call(
+            request,
+            "functions.submit_final_answer",
+            {"target_symbol": "vulnerable", "rationale": long_rationale},
+        )
+
+    _install(monkeypatch, script, responder, constructed, tmp_path, [FIXTURE_11])
+
+    row = script.run_one_fixture(FIXTURE_11)
+
+    assert row["termination_cause"] == "llm_malformed_response"
+    assert row["reason"].startswith("llm_malformed_response")
+    assert len(row["reason"]) <= 300 + len("...[+99999 chars]")
+    assert isinstance(row["name_normalization_events"], list)
+
+
+def test_prefixed_valid_final_answer_row_has_one_event(monkeypatch, tmp_path, script):
+    constructed: list[dict] = []
+
+    def responder(call_number, request):
+        return _tool_call(
+            request,
+            "functions.submit_final_answer",
+            {"target_module": "pkg.sink", "target_symbol": "vulnerable", "rationale": "ok"},
+        )
+
+    _install(monkeypatch, script, responder, constructed, tmp_path, [FIXTURE_11])
+
+    row = script.run_one_fixture(FIXTURE_11)
+
+    assert row["termination_cause"] != "llm_malformed_response"
+    assert len(row["name_normalization_events"]) == 1
+    assert row["name_normalization_events"][0]["to"] == "submit_final_answer"

@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import re
 import time
@@ -75,6 +76,12 @@ from .stub_llm import AgentAction, FinalAnswerAction, ToolCallAction
 from .tool_dispatch import TOOL_SCHEMAS, _is_well_formed_tool_call
 
 _SUBMIT_FINAL_ANSWER_TOOL = "submit_final_answer"
+
+# Phase 9 U1: the model sometimes emits `functions.<tool>`; only this exact
+# prefix, and only when the remainder is a registered tool, is accepted.
+_NAMESPACE_PREFIX = "functions."
+
+_logger = logging.getLogger(__name__)
 
 _MAX_ATTEMPTS = 3
 _RETRY_BACKOFF_SECONDS = [1.0, 2.0]
@@ -313,6 +320,8 @@ class GroqLLMClient:
         # Phase 8: shape-only metadata per parsed response (never the text).
         # Cache hits skip `_parse_response`; the real-run scripts disable the cache.
         self.response_shape_log: list[dict] = []
+        # Phase 9 U1: one entry per stripped `functions.` prefix (tool names only).
+        self.name_normalization_events: list[dict] = []
 
     def next_action(self, context: list[Message]) -> AgentAction:
         cache_key: str | None = None
@@ -480,12 +489,19 @@ class GroqLLMClient:
 
         content = choice.message.content
         shape_tool_calls = choice.message.tool_calls or []
+        first_name = shape_tool_calls[0].function.name if shape_tool_calls else None
+        name_normalized = (
+            isinstance(first_name, str)
+            and first_name.startswith(_NAMESPACE_PREFIX)
+            and first_name[len(_NAMESPACE_PREFIX) :] in TOOL_SCHEMAS
+        )
         self.response_shape_log.append(
             {
                 "finish_reason": finish_reason,
                 "content_length": len(content) if content else 0,
                 "tool_call_count": len(shape_tool_calls),
                 "tool_names": [str(tc.function.name)[:64] for tc in shape_tool_calls[:8]],
+                "name_normalized": name_normalized,
                 "content_sha256_12": (
                     hashlib.sha256(content.encode()).hexdigest()[:12] if content else None
                 ),
@@ -515,7 +531,18 @@ class GroqLLMClient:
             )
 
         call = tool_calls[0]
-        tool_name = call.function.name
+        raw_name = call.function.name
+        tool_name = raw_name
+        if name_normalized:
+            tool_name = raw_name[len(_NAMESPACE_PREFIX) :]
+            self.name_normalization_events.append(
+                {
+                    "sequence": len(self.response_shape_log) - 1,
+                    "from": raw_name,
+                    "to": tool_name,
+                }
+            )
+            _logger.info("tool_name_prefix_stripped from=%s to=%s", raw_name, tool_name)
         try:
             arguments = json.loads(call.function.arguments)
         except json.JSONDecodeError as exc:
@@ -525,7 +552,7 @@ class GroqLLMClient:
 
         if not _is_well_formed_tool_call(tool_name, arguments):
             raise LLMMalformedResponseError(
-                f"tool call failed schema validation: {tool_name!r} {arguments!r}"
+                f"tool call failed schema validation: {raw_name!r} {arguments!r}"
             )
 
         if tool_name == _SUBMIT_FINAL_ANSWER_TOOL:

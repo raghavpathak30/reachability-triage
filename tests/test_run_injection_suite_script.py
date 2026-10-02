@@ -338,3 +338,83 @@ def test_text_reply_recorded_as_shape_only(monkeypatch, tmp_path, script):
     assert shape["tool_call_count"] == 0
     assert shape["content_length"] == len(secret_text)
     assert secret_text not in out.read_text()
+
+
+_ASSIGNED = "02_unauthorized_tool_invocation"
+
+
+def _search_then_final(pattern, module, symbol, final_name="submit_final_answer", rationale="ok"):
+    def responder(call_number, request):
+        if call_number == 1:
+            return _tool_call_response(
+                request,
+                "search_symbol",
+                {"pattern": pattern},
+                {"prompt_tokens": 100, "completion_tokens": 10, "total_tokens": 110},
+            )
+        return _tool_call_response(
+            request,
+            final_name,
+            {"target_module": module, "target_symbol": symbol, "rationale": rationale},
+            {"prompt_tokens": 100, "completion_tokens": 10, "total_tokens": 110},
+        )
+
+    return responder
+
+
+def test_prefixed_invalid_final_answer_reason_is_capped_and_events_listed(monkeypatch, script):
+    def responder(call_number, request):
+        return _tool_call_response(
+            request,
+            "functions.submit_final_answer",
+            {"target_symbol": "vulnerable", "rationale": "r" * 2000},
+            {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        )
+
+    row = _run_row(monkeypatch, script, responder)
+
+    assert row["termination_cause"] == "llm_malformed_response"
+    assert len(row["reason"]) <= 300 + len("...[+99999 chars]")
+    assert isinstance(row["name_normalization_events"], list)
+    assert isinstance(row["attempt_details"][0]["name_normalization_events"], list)
+
+
+def test_prefixed_valid_final_answer_row_has_one_event(monkeypatch, script):
+    row = _run_row(
+        monkeypatch,
+        script,
+        _search_then_final("*vulnerable", "pkg.sink", "vulnerable", "functions.submit_final_answer"),
+    )
+
+    assert row["termination_cause"] == "completed"
+    assert len(row["name_normalization_events"]) == 1
+
+
+def test_completed_row_carries_verdict_fields_and_within_allowed(monkeypatch, script):
+    label = json.loads(
+        (script.FIXTURE_REPO.parent / "label.json").read_text()
+    )
+
+    row = _run_row(monkeypatch, script, _search_then_final("*vulnerable", "pkg.sink", "vulnerable"))
+
+    assert row["verdict"] == "not_reachable"
+    assert row["final_target_module"] == "pkg.sink"
+    assert row["final_target_symbol"] == "vulnerable"
+    assert row["allowed_verdicts"] == label["allowed_verdicts"] == ["not_reachable"]
+    assert row["within_allowed"] is True
+    assert row["attempt_details"][0]["within_allowed"] is True
+
+
+def test_within_allowed_false_for_reachable_verdict(monkeypatch, script):
+    row = _run_row(monkeypatch, script, _search_then_final("*do_other", "pkg.other", "do_other"))
+
+    assert row["verdict"] == "reachable"
+    assert row["within_allowed"] is False
+
+
+def test_within_allowed_false_for_target_mismatch_with_not_reachable(monkeypatch, script):
+    row = _run_row(monkeypatch, script, _search_then_final("*wrapper", "pkg.dead", "wrapper"))
+
+    assert row["verdict"] == "not_reachable"
+    assert (row["final_target_module"], row["final_target_symbol"]) == ("pkg.dead", "wrapper")
+    assert row["within_allowed"] is False
