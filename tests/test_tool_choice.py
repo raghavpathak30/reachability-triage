@@ -1,5 +1,6 @@
-"""Phase 9 U2a: `GroqLLMClient(tool_choice=...)` plumbing. The default stays
-`"auto"`; `"required"` is opt-in and is folded into the cache fingerprint.
+"""Phase 9 U2a/U2b: `GroqLLMClient(tool_choice=...)` plumbing. The default is
+`"required"` (U2b); `"auto"` stays selectable and any non-`"auto"` value is
+folded into the cache fingerprint.
 Fake transport; no network, no key."""
 
 import json
@@ -9,11 +10,14 @@ import httpx
 import pytest
 
 import reachability.triage.groq_llm as groq_llm_module
+from reachability.index.reachability_models import Verdict
 from reachability.triage.agent_models import Message
 from reachability.triage.groq_llm import GroqLLMClient, _build_tool_defs, _prompt_fingerprint
 from reachability.triage.llm_cache import compute_cache_key
 from reachability.triage.index_adapter import build_repo_index
 from reachability.triage.langgraph_loop import run_triage_loop_langgraph
+from reachability.triage.llm_errors import LLMMalformedResponseError
+from reachability.triage.termination_cause import TerminationCause, compute_termination_cause
 from test_llm_failure_semantics import FakeGroqTransport, _chat_completion_body
 
 FIXTURE_REPO = Path(__file__).parent / "fixtures" / "l5" / "01_direct_console_entrypoint" / "repo"
@@ -65,8 +69,17 @@ def _no_cache(monkeypatch):
     monkeypatch.setenv("TRIAGE_LLM_CACHE_DISABLED", "1")
 
 
-def test_default_client_sends_auto():
+def test_default_client_sends_required():
     bodies, client = _bodies_and_client()
+
+    client.next_action([Message(role="user", content="x")])
+
+    assert client.tool_choice == "required"
+    assert bodies[0]["tool_choice"] == "required"
+
+
+def test_explicit_auto_client_sends_auto():
+    bodies, client = _bodies_and_client(tool_choice="auto")
 
     client.next_action([Message(role="user", content="x")])
 
@@ -74,12 +87,34 @@ def test_default_client_sends_auto():
     assert bodies[0]["tool_choice"] == "auto"
 
 
-def test_required_client_sends_required():
-    bodies, client = _bodies_and_client(tool_choice="required")
+def test_text_reply_under_required_is_malformed_never_completed():
+    requests: list[int] = []
 
-    client.next_action([Message(role="user", content="x")])
+    def responder(call_number, request):
+        requests.append(call_number)
+        body = _chat_completion_body(
+            finish_reason="stop", message={"role": "assistant", "content": "I think it is dead code."}
+        )
+        return httpx.Response(200, json=body, request=request)
 
-    assert bodies[0]["tool_choice"] == "required"
+    transport = FakeGroqTransport(responder)
+    client = GroqLLMClient(api_key="fake-key-not-real", http_client=httpx.Client(transport=transport))
+
+    with pytest.raises(LLMMalformedResponseError):
+        client.next_action([Message(role="user", content="x")])
+
+    client = GroqLLMClient(api_key="fake-key-not-real", http_client=httpx.Client(transport=transport))
+    transport.calls = 0
+    finding = run_triage_loop_langgraph(
+        client, build_repo_index(FIXTURE_REPO), "app.sink", "vulnerable", 5
+    )
+
+    assert client.tool_choice == "required"
+    assert finding.result.verdict == Verdict.UNKNOWN
+    assert finding.result.reason.startswith("llm_malformed_response")
+    assert compute_termination_cause(finding) == TerminationCause.LLM_MALFORMED_RESPONSE
+    assert compute_termination_cause(finding) != TerminationCause.COMPLETED
+    assert transport.calls == 1  # one turn, one request: no hidden retry
 
 
 @pytest.mark.parametrize("value", ["none", "foo", ""])
@@ -114,9 +149,9 @@ def test_cached_auto_action_is_not_served_to_required_client(db_session, monkeyp
         run_triage_loop_langgraph(client, repo_index, "app.sink", "vulnerable", 5)
         return bodies
 
-    assert len(run()) == 1
-    assert len(run()) == 0  # auto client: cache hit, no request
-    required_bodies = run(tool_choice="required")
+    assert len(run(tool_choice="auto")) == 1
+    assert len(run(tool_choice="auto")) == 0  # auto client: cache hit, no request
+    required_bodies = run()  # default is now "required": a distinct cache key
     assert len(required_bodies) == 1
     assert required_bodies[0]["tool_choice"] == "required"
 

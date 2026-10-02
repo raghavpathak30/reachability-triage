@@ -204,7 +204,7 @@ def _clear_probe_env(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
-def test_tool_choice_env_unset_passes_no_kwarg_and_row_records_auto(monkeypatch, tmp_path, script):
+def test_tool_choice_env_unset_passes_no_kwarg_and_row_records_default(monkeypatch, tmp_path, script):
     constructed: list[dict] = []
     _install(monkeypatch, script, _repeat_then_final("*vulnerable", 1), constructed, tmp_path, [FIXTURE_11])
     _clear_probe_env(monkeypatch)
@@ -212,7 +212,7 @@ def test_tool_choice_env_unset_passes_no_kwarg_and_row_records_auto(monkeypatch,
     row = script.run_one_fixture(FIXTURE_11)
 
     assert constructed == [{}]
-    assert row["tool_choice"] == "auto"
+    assert row["tool_choice"] == "required"
 
 
 def test_tool_choice_env_required_is_passed_and_recorded(monkeypatch, tmp_path, script):

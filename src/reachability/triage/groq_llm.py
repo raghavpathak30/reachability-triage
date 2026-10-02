@@ -31,6 +31,12 @@ how to interpret that shape. This is a deliberate, documented choice, not
 an oversight -- see `.agent/progress.md`'s Phase 5 section for the
 alternative considered (widening `Message`) and why it was rejected.
 
+**tool_choice (Phase 9 U2b).** The request defaults to `tool_choice="required"`
+so a turn can no longer end in a plain-text reply; `"auto"` stays selectable via
+the constructor kwarg. Adopted on the probe evidence in
+`agent_docs/PHASE9_TOOL_CHOICE_PROBE.md` (R1-R5 all held). A text reply that
+still arrives is a malformed response, never a final answer.
+
 **Retry policy (U2).** `_call_with_retry` retries only the raw HTTP call
 (`_raw_call`) -- `LLMTimeoutError`/`LLMRateLimitedError`/`LLMTransportError`,
 up to 3 attempts total with `[1.0s, 2.0s]` backoff between them.
@@ -303,7 +309,7 @@ class GroqLLMClient:
         wait_on_rate_limit: bool = False,
         rate_limit_max_total_wait_seconds: float = 900.0,
         sleep_fn: Callable[[float], None] | None = None,
-        tool_choice: str = "auto",
+        tool_choice: str = "required",
     ) -> None:
         if tool_choice not in _VALID_TOOL_CHOICES:
             raise ValueError(
@@ -458,6 +464,7 @@ class GroqLLMClient:
                 model=self.model,
                 messages=messages,
                 tools=_build_tool_defs(),
+                # Default "required": see agent_docs/PHASE9_TOOL_CHOICE_PROBE.md.
                 tool_choice=self.tool_choice,
                 timeout=self._timeout,
             )
