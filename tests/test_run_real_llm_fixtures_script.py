@@ -197,3 +197,82 @@ def test_prefixed_valid_final_answer_row_has_one_event(monkeypatch, tmp_path, sc
     assert row["termination_cause"] != "llm_malformed_response"
     assert len(row["name_normalization_events"]) == 1
     assert row["name_normalization_events"][0]["to"] == "submit_final_answer"
+
+
+def _clear_probe_env(monkeypatch):
+    for name in ("TRIAGE_REAL_RUN_TOOL_CHOICE", "TRIAGE_REAL_RUN_FIXTURES", "TRIAGE_REAL_RUN_LABEL"):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_tool_choice_env_unset_passes_no_kwarg_and_row_records_auto(monkeypatch, tmp_path, script):
+    constructed: list[dict] = []
+    _install(monkeypatch, script, _repeat_then_final("*vulnerable", 1), constructed, tmp_path, [FIXTURE_11])
+    _clear_probe_env(monkeypatch)
+
+    row = script.run_one_fixture(FIXTURE_11)
+
+    assert constructed == [{}]
+    assert row["tool_choice"] == "auto"
+
+
+def test_tool_choice_env_required_is_passed_and_recorded(monkeypatch, tmp_path, script):
+    constructed: list[dict] = []
+    _install(monkeypatch, script, _repeat_then_final("*vulnerable", 1), constructed, tmp_path, [FIXTURE_11])
+    _clear_probe_env(monkeypatch)
+    monkeypatch.setenv("TRIAGE_REAL_RUN_TOOL_CHOICE", "required")
+
+    row = script.run_one_fixture(FIXTURE_11)
+
+    assert constructed == [{"tool_choice": "required"}]
+    assert row["tool_choice"] == "required"
+
+
+def test_fixture_filter_matches_first_segment_exactly(monkeypatch, tmp_path, script):
+    constructed: list[dict] = []
+    dirs = [FIXTURES / "06_subclass_method_call", FIXTURES / "16_module_getattr_pep562",
+            FIXTURES / "16b_pep562_no_bare_name", FIXTURE_11]
+    _install(monkeypatch, script, _repeat_then_final("*vulnerable", 1), constructed, tmp_path, dirs)
+    _clear_probe_env(monkeypatch)
+    ran: list[str] = []
+    monkeypatch.setattr(
+        script, "run_one_fixture",
+        lambda d: ran.append(d.name) or {"id": d.name, "error": None, "verdict": "unknown",
+                                          "total_tokens_used": 0, "total_cost_accrued": 0.0},
+    )
+
+    monkeypatch.setenv("TRIAGE_REAL_RUN_FIXTURES", "06,16b")
+    script.main()
+    assert ran == ["06_subclass_method_call", "16b_pep562_no_bare_name"]
+
+    ran.clear()
+    monkeypatch.setenv("TRIAGE_REAL_RUN_FIXTURES", "16")
+    script.main()
+    assert ran == ["16_module_getattr_pep562"]
+
+
+def test_unknown_fixture_token_fails_before_any_run(monkeypatch, tmp_path, script):
+    constructed: list[dict] = []
+    _install(monkeypatch, script, _repeat_then_final("*vulnerable", 1), constructed, tmp_path, [FIXTURE_11])
+    _clear_probe_env(monkeypatch)
+    ran: list[str] = []
+    monkeypatch.setattr(script, "run_one_fixture", lambda d: ran.append(d.name))
+    monkeypatch.setenv("TRIAGE_REAL_RUN_FIXTURES", "11,99")
+
+    with pytest.raises(SystemExit):
+        script.main()
+
+    assert ran == [] and constructed == []
+    assert not (tmp_path / "real_llm").exists()
+
+
+def test_label_env_writes_to_separate_dir_and_never_touches_default(monkeypatch, tmp_path, script):
+    constructed: list[dict] = []
+    _install(monkeypatch, script, _repeat_then_final("*vulnerable", 1), constructed, tmp_path, [FIXTURE_11])
+    _clear_probe_env(monkeypatch)
+    monkeypatch.setattr(script, "REPO_ROOT", tmp_path)
+    monkeypatch.setenv("TRIAGE_REAL_RUN_LABEL", "probe_auto")
+
+    script.main()
+
+    assert (tmp_path / "results" / "real_llm_probe_auto" / "testsha" / "11_dead_function_call_site.json").exists()
+    assert not (tmp_path / "real_llm").exists()

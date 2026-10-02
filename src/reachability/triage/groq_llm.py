@@ -232,14 +232,24 @@ def _json_type_for(expected_type: type | tuple) -> str | list[str]:
     return "string"
 
 
-def _prompt_fingerprint() -> str:
+_VALID_TOOL_CHOICES = {"auto", "required"}
+
+
+def _prompt_fingerprint(tool_choice: str = "auto") -> str:
     """Hash of the literal system-prompt text plus the serialized tool
     schemas actually sent to the model -- folded into the cache key
     (`llm_cache.compute_cache_key`) alongside `PROMPT_VERSION` so an
     in-code prompt/tool-schema edit (which this project's convention does
     not require bumping `PROMPT_VERSION` for) can never silently keep
-    serving a stale cached response. See `llm_cache.py`'s module docstring."""
-    return _SYSTEM_PROMPT + json.dumps(_build_tool_defs(), sort_keys=True)
+    serving a stale cached response. See `llm_cache.py`'s module docstring.
+
+    Phase 9 U2a: `tool_choice` is not a `compute_cache_key` input, so any
+    non-default value is appended here; `"auto"` returns the pre-Phase-9
+    string unchanged so existing cache entries stay valid."""
+    fingerprint = _SYSTEM_PROMPT + json.dumps(_build_tool_defs(), sort_keys=True)
+    if tool_choice != "auto":
+        fingerprint += "|tool_choice=" + tool_choice
+    return fingerprint
 
 
 def _build_tool_defs() -> list[dict]:
@@ -293,7 +303,13 @@ class GroqLLMClient:
         wait_on_rate_limit: bool = False,
         rate_limit_max_total_wait_seconds: float = 900.0,
         sleep_fn: Callable[[float], None] | None = None,
+        tool_choice: str = "auto",
     ) -> None:
+        if tool_choice not in _VALID_TOOL_CHOICES:
+            raise ValueError(
+                f"tool_choice must be one of {sorted(_VALID_TOOL_CHOICES)}, got {tool_choice!r}"
+            )
+        self.tool_choice = tool_choice
         if not math.isfinite(rate_limit_max_total_wait_seconds) or (
             rate_limit_max_total_wait_seconds < 0
         ):
@@ -335,7 +351,7 @@ class GroqLLMClient:
             from ..db.session import get_sessionmaker
 
             cache_key = compute_cache_key(
-                PROMPT_VERSION, self.model, _prompt_fingerprint(), context
+                PROMPT_VERSION, self.model, _prompt_fingerprint(self.tool_choice), context
             )
             session = get_sessionmaker()()
             try:
@@ -442,7 +458,7 @@ class GroqLLMClient:
                 model=self.model,
                 messages=messages,
                 tools=_build_tool_defs(),
-                tool_choice="auto",
+                tool_choice=self.tool_choice,
                 timeout=self._timeout,
             )
         except groq_sdk.APITimeoutError as exc:

@@ -177,7 +177,7 @@ an investigation (0 of 3 reproduced in Phase 8 — two `budget_exceeded`, one
 `llm_malformed_response`; the clean 30-fixture baseline finished 16 of 30,
 with 14 of 30 ending in `llm_malformed_response` final answers,
 `DECISIONS.md` §16; Phase 9 U1 now accepts the exact `functions.` tool-name
-prefix, `groq_llm.py:82,493-496,537`), and budget exhaustion is not
+prefix, `groq_llm.py:82,509-512,553`), and budget exhaustion is not
 counted as resistance (§13). **Real-model injection resistance is
 unclaimed.** A new, non-blocking
 `eval-real` CI job (`.github/workflows/tests.yml`) runs the same

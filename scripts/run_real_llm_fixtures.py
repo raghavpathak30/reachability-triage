@@ -23,7 +23,15 @@ termination cause, a normalized content-free tool-call trace and loop metrics
 (never reply text) and rate-limit events. Opt-in env vars:
 `TRIAGE_REAL_RUN_MAX_TOTAL_WAIT_SECONDS` (wait out a 429 inside an
 investigation, per client; unset keeps the pre-existing no-wait client) and
-`TRIAGE_REAL_RUN_DELAY_SECONDS` (sleep between fixtures, default 0). Re-running
+`TRIAGE_REAL_RUN_DELAY_SECONDS` (sleep between fixtures, default 0).
+Phase 9 U2a probe opt-ins (production code never reads these):
+`TRIAGE_REAL_RUN_TOOL_CHOICE` (`auto`/`required`, passed to the client; unset
+passes nothing), `TRIAGE_REAL_RUN_FIXTURES` (comma-separated tokens matched
+against the first `_`-separated segment of each fixture directory name, e.g.
+`06`, `16b`; an unknown token is a hard error before any API call; unset runs
+all) and `TRIAGE_REAL_RUN_LABEL` (writes to `results/real_llm_<label>/<sha>`
+instead of `results/real_llm/<sha>`, so probes never share the main run's
+resume directory). Re-running
 resumes: a fixture whose existing row has no error and a non-infrastructure
 termination cause is skipped and its row reused. The response cache is
 disabled here, so `response_shape_log` covers every model response.
@@ -79,12 +87,27 @@ _INFRA_CAUSES = {
 
 
 def _make_client() -> GroqLLMClient:
+    kwargs: dict = {}
     max_wait = os.environ.get("TRIAGE_REAL_RUN_MAX_TOTAL_WAIT_SECONDS")
-    if max_wait is None:
-        return GroqLLMClient()
-    return GroqLLMClient(
-        wait_on_rate_limit=True, rate_limit_max_total_wait_seconds=float(max_wait)
-    )
+    if max_wait is not None:
+        kwargs["wait_on_rate_limit"] = True
+        kwargs["rate_limit_max_total_wait_seconds"] = float(max_wait)
+    tool_choice = os.environ.get("TRIAGE_REAL_RUN_TOOL_CHOICE")
+    if tool_choice is not None:
+        kwargs["tool_choice"] = tool_choice
+    return GroqLLMClient(**kwargs)
+
+
+def _filter_fixtures(fixture_dirs: list[Path]) -> list[Path]:
+    raw = os.environ.get("TRIAGE_REAL_RUN_FIXTURES")
+    if raw is None:
+        return fixture_dirs
+    tokens = [t.strip() for t in raw.split(",") if t.strip()]
+    known = {d.name.split("_", 1)[0] for d in fixture_dirs}
+    unknown = [t for t in tokens if t not in known]
+    if unknown:
+        raise SystemExit(f"TRIAGE_REAL_RUN_FIXTURES: unknown fixture token(s): {unknown}")
+    return [d for d in fixture_dirs if d.name.split("_", 1)[0] in tokens]
 
 
 def _load_resumable(path: Path) -> dict | None:
@@ -122,6 +145,7 @@ def run_one_fixture(fixture_dir: Path) -> dict:
         "request_usage_log": None,
         "response_shape_log": None,
         "name_normalization_events": None,
+        "tool_choice": None,
         "rate_limit_events": None,
         "total_rate_limit_wait_seconds": None,
     }
@@ -150,6 +174,7 @@ def run_one_fixture(fixture_dir: Path) -> dict:
         row["request_usage_log"] = list(client.request_usage_log)
         row["response_shape_log"] = list(client.response_shape_log)
         row["name_normalization_events"] = list(client.name_normalization_events)
+        row["tool_choice"] = client.tool_choice
         row["rate_limit_events"] = list(client.rate_limit_events)
         row["total_rate_limit_wait_seconds"] = client.total_rate_limit_wait_seconds
     except Exception as exc:  # gate requires zero unhandled exceptions
@@ -160,8 +185,13 @@ def run_one_fixture(fixture_dir: Path) -> dict:
 
 def main() -> int:
     fixture_dirs = discover_eval_fixtures(EVAL_FIXTURES_ROOTS)
+    fixture_dirs = _filter_fixtures(fixture_dirs)
     sha = git_sha()
-    out_dir = RESULTS_DIR / sha
+    label = os.environ.get("TRIAGE_REAL_RUN_LABEL")
+    if label:
+        out_dir = REPO_ROOT / "results" / f"real_llm_{label}" / sha
+    else:
+        out_dir = RESULTS_DIR / sha
     out_dir.mkdir(parents=True, exist_ok=True)
 
     start = time.monotonic()
