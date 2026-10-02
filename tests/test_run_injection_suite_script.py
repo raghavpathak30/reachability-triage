@@ -418,3 +418,249 @@ def test_within_allowed_false_for_target_mismatch_with_not_reachable(monkeypatch
     assert row["verdict"] == "not_reachable"
     assert (row["final_target_module"], row["final_target_symbol"]) == ("pkg.dead", "wrapper")
     assert row["within_allowed"] is False
+
+
+# ---- Phase 9 U3 tooling: --control, --repeats ----
+
+_FIXTURES = [
+    "01_verdict_manipulation",
+    "02_unauthorized_tool_invocation",
+    "03_unauthorized_context_echo",
+]
+_DENYLIST = [
+    "caller", "call", "symbol", "record", "dead", "unused", "never", "no further",
+    "target_module", "target_symbol", "pkg.other", "do_other", "resolve_import",
+    "submit_final_answer", "ignore", "instruction", "org_",
+]
+_ROW_KEYS = {
+    "fixture", "termination_cause", "injection_won", "attempts", "total_tokens_used",
+    "total_cost_accrued", "reason", "verdict", "final_target_module", "final_target_symbol",
+    "allowed_verdicts", "within_allowed", "request_count", "max_single_request_total_tokens",
+    "rate_limit_events", "total_rate_limit_wait_seconds", "max_tokens", "max_tokens_note",
+    "request_usage_log", "budget", "tool_call_trace", "loop_metrics", "response_shape_log",
+    "name_normalization_events", "attempt_details",
+}
+
+
+def _setup(monkeypatch, tmp_path, script, responder, constructed=None):
+    constructed = [] if constructed is None else constructed
+    _install_fake_client(monkeypatch, script, responder, constructed)
+    monkeypatch.setattr(script, "RESULTS_DIR", tmp_path / "results" / "injection_suite_real")
+    monkeypatch.setattr(
+        script, "CONTROL_RESULTS_DIR", tmp_path / "results" / "injection_suite_real_control"
+    )
+    monkeypatch.setattr(script, "REPO_ROOT", tmp_path)
+    monkeypatch.delenv("TRIAGE_INJECTION_SUITE_DELAY_SECONDS", raising=False)
+    sleeps: list[float] = []
+    monkeypatch.setattr(script.time, "sleep", lambda seconds: sleeps.append(seconds))
+    return constructed, sleeps
+
+
+def _complete(call_number, request):
+    return _search_then_final("*vulnerable", "pkg.sink", "vulnerable")(call_number, request)
+
+
+def _json_text(text):
+    return json.dumps(text)[1:-1]
+
+
+@pytest.mark.parametrize("fixture", _FIXTURES)
+def test_benign_payload_parity_and_neutrality(script, fixture):
+    from reachability.triage.sandbox import sandbox_untrusted_text
+
+    spec = script._fixture_spec(fixture)
+    original = spec["injected_payload"]
+    benign = script._benign_payload(original)
+
+    assert isinstance(benign, str)
+    assert benign.count("\n") == original.count("\n")
+    assert [len(x) for x in benign.split("\n")] == [len(x) for x in original.split("\n")]
+    assert abs(len(benign) - len(original)) <= 0.05 * len(original)
+    lowered = benign.lower()
+    assert not any(word in lowered for word in _DENYLIST)
+    label = script._load_label(fixture)
+    assert not any(secret in benign for secret in label.get("planted_secrets", []))
+    assert sandbox_untrusted_text(benign) == benign
+
+
+def test_control_writes_only_control_paths_and_serves_benign_payload(monkeypatch, tmp_path, script):
+    bodies: list[str] = []
+
+    def responder(call_number, request):
+        bodies.append(request.content.decode())
+        if call_number == 1:
+            return _tool_call_response(
+                request, "search_symbol", {"pattern": "*vulnerable"},
+                {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            )
+        if call_number == 2:
+            return _tool_call_response(
+                request, "find_callers", {"node_id": "pkg.sink:vulnerable"},
+                {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            )
+        return _complete(3, request)
+
+    _setup(monkeypatch, tmp_path, script, responder)
+    monkeypatch.setattr(
+        script, "build_report", lambda results: (_ for _ in ()).throw(AssertionError("build_report"))
+    )
+
+    exit_code = script.main(["--control"])
+
+    assert exit_code == 0
+    assert not (tmp_path / "results" / "injection_suite_real").exists()
+    control_files = sorted(p.name for p in (tmp_path / "results" / "injection_suite_real_control").glob("*.json"))
+    assert control_files == [f"{f}.json" for f in _FIXTURES]
+    assert not list(tmp_path.glob("results/injection_suite_real_summary_*"))
+    (summary_path,) = tmp_path.glob("results/injection_suite_real_control_summary_*.json")
+    summary = json.loads(summary_path.read_text())
+    assert "overall" not in summary and summary["kind"] == "control"
+    assert len(summary["rows"]) == 3
+    assert "repeats" not in summary
+    for row in summary["rows"]:
+        assert row["injection_won"] is None and row["control"] is True
+    joined = "".join(bodies)
+    for fixture in _FIXTURES:
+        spec = script._fixture_spec(fixture)
+        assert _json_text(script._benign_payload(spec["injected_payload"])) in joined
+        assert _json_text(spec["injected_payload"]) not in joined
+
+
+def test_default_run_output_schema_unchanged(monkeypatch, tmp_path, script):
+    _setup(monkeypatch, tmp_path, script, _complete)
+
+    exit_code = script.main([])
+
+    assert exit_code == 0
+    out = tmp_path / "results" / "injection_suite_real"
+    assert sorted(p.name for p in out.glob("*.json")) == [f"{f}.json" for f in _FIXTURES]
+    for path in out.glob("*.json"):
+        row = json.loads(path.read_text())
+        assert set(row) == _ROW_KEYS
+        assert "repeat" not in row and "control" not in row
+    (summary_path,) = tmp_path.glob("results/injection_suite_real_summary_*.json")
+    report = json.loads(summary_path.read_text())
+    assert set(report) == {"total", "completed", "not_run", "overall", "results"}
+    assert report["total"] == report["completed"] == 3 and report["overall"] == "PASS"
+
+
+def test_repeats_writes_per_repeat_files_with_fresh_clients(monkeypatch, tmp_path, script):
+    constructed, _ = _setup(monkeypatch, tmp_path, script, _complete)
+
+    exit_code = script.main(["--repeats", "3"])
+
+    out = tmp_path / "results" / "injection_suite_real"
+    expected = sorted(f"{f}.r{k}.json" for f in _FIXTURES for k in (1, 2, 3))
+    assert sorted(p.name for p in out.glob("*.json")) == expected
+    assert len(constructed) == 9
+    assert all(
+        kwargs == {"wait_on_rate_limit": True, "rate_limit_max_total_wait_seconds": 900.0}
+        for kwargs in constructed
+    )
+    rows = [json.loads(p.read_text()) for p in out.glob("*.json")]
+    assert sorted(r["repeat"] for r in rows) == [1, 1, 1, 2, 2, 2, 3, 3, 3]
+    assert all(r["fixture"] in _FIXTURES for r in rows)
+    (summary_path,) = tmp_path.glob("results/injection_suite_real_summary_*.json")
+    report = json.loads(summary_path.read_text())
+    assert report["total"] == 9 and report["completed"] == 9 and report["repeats"] == 3
+    assert {f: v["runs"] for f, v in report["per_fixture_repeat_counts"].items()} == {f: 3 for f in _FIXTURES}
+    assert report["overall"] == "PASS" and exit_code == 0
+
+
+def test_repeats_incomplete_runs_give_incomplete_and_exit_1(monkeypatch, tmp_path, script):
+    _setup(
+        monkeypatch, tmp_path, script,
+        lambda call_number, request: _text_reply_response(request, "prose"),
+    )
+
+    exit_code = script.main(["--repeats", "3"])
+
+    assert exit_code == 1
+    (summary_path,) = tmp_path.glob("results/injection_suite_real_summary_*.json")
+    report = json.loads(summary_path.read_text())
+    assert report["overall"] == "INCOMPLETE" and report["total"] == 9 and report["completed"] == 0
+
+
+def test_repeats_below_one_is_an_argument_error(script):
+    with pytest.raises(SystemExit):
+        script.main(["--repeats", "0"])
+
+
+def _prewrite(directory, name, **fields):
+    directory.mkdir(parents=True, exist_ok=True)
+    row = {"fixture": "01_verdict_manipulation", "injection_won": None, **fields}
+    (directory / name).write_text(json.dumps(row))
+    return row
+
+
+def test_resume_per_repeat_skips_non_infra_and_reruns_infra(monkeypatch, tmp_path, script):
+    constructed, _ = _setup(monkeypatch, tmp_path, script, _complete)
+    out = tmp_path / "results" / "injection_suite_real"
+    r1 = _prewrite(out, "01_verdict_manipulation.r1.json", termination_cause="budget_exceeded", repeat=1)
+    _prewrite(out, "01_verdict_manipulation.r2.json", termination_cause="llm_rate_limited", repeat=2)
+
+    script.main(["--repeats", "3"])
+
+    assert len(constructed) == 8  # r1 skipped; r2 and r3 and the other 6 ran
+    assert json.loads((out / "01_verdict_manipulation.r1.json").read_text()) == r1
+    assert json.loads((out / "01_verdict_manipulation.r2.json").read_text())["termination_cause"] == "completed"
+
+
+def test_resume_with_single_repeat_keeps_original_rule(monkeypatch, tmp_path, script):
+    constructed, _ = _setup(monkeypatch, tmp_path, script, _complete)
+    out = tmp_path / "results" / "injection_suite_real"
+    _prewrite(out, "01_verdict_manipulation.json", termination_cause="budget_exceeded")
+
+    script.main([])
+
+    assert len(constructed) == 3  # a non-completed row IS re-run when repeats == 1
+
+
+def test_control_with_repeats_is_isolated_from_adversarial_dir(monkeypatch, tmp_path, script):
+    constructed, _ = _setup(monkeypatch, tmp_path, script, _complete)
+    adversarial = tmp_path / "results" / "injection_suite_real"
+    control = tmp_path / "results" / "injection_suite_real_control"
+    kept = _prewrite(adversarial, "01_verdict_manipulation.r1.json", termination_cause="completed", repeat=1)
+
+    script.main(["--control", "--repeats", "3"])
+
+    assert len(constructed) == 9  # the adversarial file was not read by control resume
+    assert json.loads((adversarial / "01_verdict_manipulation.r1.json").read_text()) == kept
+    assert sorted(p.name for p in control.glob("*.json")) == sorted(
+        f"{f}.r{k}.json" for f in _FIXTURES for k in (1, 2, 3)
+    )
+    rows = [json.loads(p.read_text()) for p in control.glob("*.json")]
+    assert all(r["control"] is True and r["injection_won"] is None for r in rows)
+    assert sorted(r["repeat"] for r in rows) == [1, 1, 1, 2, 2, 2, 3, 3, 3]
+    (summary_path,) = tmp_path.glob("results/injection_suite_real_control_summary_*.json")
+    summary = json.loads(summary_path.read_text())
+    assert summary["repeats"] == 3 and len(summary["rows"]) == 9
+    assert "overall" not in summary
+
+    # and the other way round: a control file is not read by adversarial resume
+    constructed.clear()
+    _prewrite(control, "02_unauthorized_tool_invocation.r1.json", termination_cause="completed", repeat=1)
+    for path in adversarial.glob("*.json"):
+        path.unlink()
+    script.main(["--repeats", "3"])
+    assert len(constructed) == 9
+
+
+def test_inter_run_delay_slept_between_runs_and_not_after_resumed_repeat(monkeypatch, tmp_path, script):
+    constructed, sleeps = _setup(monkeypatch, tmp_path, script, _complete)
+
+    script.main(["--repeats", "3"])
+
+    assert sleeps == [90] * 8  # 9 runs, default delay unchanged
+
+    sleeps.clear()
+    constructed.clear()
+    out = tmp_path / "results" / "injection_suite_real"
+    for path in out.glob("*.json"):
+        path.unlink()
+    _prewrite(out, "01_verdict_manipulation.r1.json", termination_cause="completed", repeat=1)
+
+    script.main(["--repeats", "3"])
+
+    assert len(constructed) == 8
+    assert sleeps == [90] * 7  # no sleep after the resumed first repeat

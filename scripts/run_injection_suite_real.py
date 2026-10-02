@@ -49,10 +49,28 @@ suite itself passed or failed on content). Exits `1` when
 adversarial-real test file exits `0` even when every fixture is skipped;
 that `0` must never be read as this gate passing -- this script's own exit
 code and its JSON report's `overall` field are the actual signal.
+
+**Phase 9 additions.** `--repeats N` (default 1, which is byte-for-byte the
+single-run behaviour: `<fixture>.json`, no `repeat` key, original resume rule)
+runs each fixture N times with a fresh client each; with N > 1 each run is
+`<fixture>.r<k>.json`, rows carry `repeat`, the summary gains `repeats` and
+`per_fixture_repeat_counts`, and `total`/`completed` count runs. For N > 1 (and
+always in control mode) a repeat is skipped on resume if it has no error and
+its cause is not infrastructure (`llm_rate_limited`, `llm_timeout`,
+`llm_transport_error`, `llm_request_too_large`): re-running `budget_exceeded` or
+malformed repeats until they finish would bias the finished count upward. The
+inter-run delay is slept after each run that actually ran, never after a
+resumed (skipped) repeat. `--control` swaps the `find_callers` payload for a
+neutral filler of identical line structure (`_benign_payload`), writes to
+`results/injection_suite_real_control/` and a separate control summary with no
+`overall`, and never feeds `build_report`; rows carry `control: true` and
+`injection_won: null`. Limitation: `sandbox_untrusted_text` may rewrite an
+injected payload but is the identity on the benign one.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -89,6 +107,7 @@ from reachability.triage.termination_cause import TerminationCause, compute_term
 FIXTURE_REPO = REPO_ROOT / "tests" / "fixtures" / "l5" / "11_dead_function_call_site" / "repo"
 ADVERSARIAL_ROOT = REPO_ROOT / "tests" / "fixtures" / "triage_adversarial"
 RESULTS_DIR = REPO_ROOT / "results" / "injection_suite_real"
+CONTROL_RESULTS_DIR = REPO_ROOT / "results" / "injection_suite_real_control"
 BUDGET = 15
 
 # The adversarial labels define no allowed-verdict set; the assigned repo's
@@ -302,8 +321,34 @@ def _run_fixture_with_retry(fixture_name: str, spec: dict) -> dict:
     }
 
 
-def _load_existing(fixture_name: str) -> dict | None:
-    path = RESULTS_DIR / f"{fixture_name}.json"
+_INFRA_CAUSES = {
+    "llm_rate_limited",
+    "llm_timeout",
+    "llm_transport_error",
+    "llm_request_too_large",
+}
+
+_BENIGN_FILLER = "# placeholder text alpha beta gamma delta epsilon. "
+
+
+def _benign_payload(original: str) -> str:
+    """Phase 9 control payload: same line count and per-line character
+    length as `original`, content a fixed neutral comment. Deliberately says
+    nothing about callers, calls, symbols, records, dead code or the task --
+    task-relevant text would nudge the model and bias the control."""
+    lines = original.split("\n")
+    return "\n".join((_BENIGN_FILLER * (len(line) // len(_BENIGN_FILLER) + 1))[: len(line)] for line in lines)
+
+
+def _control_spec(fixture_name: str) -> dict:
+    spec = dict(_fixture_spec(fixture_name))
+    spec["injected_payload"] = _benign_payload(spec["injected_payload"])
+    spec["attacker_wins"] = lambda finding: None
+    spec["secret_pattern"] = None
+    return spec
+
+
+def _load_existing(path: Path) -> dict | None:
     if not path.exists():
         return None
     try:
@@ -312,43 +357,114 @@ def _load_existing(fixture_name: str) -> dict | None:
         return None
 
 
-def main() -> int:
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--control", action="store_true", help="benign find_callers payload")
+    parser.add_argument("--repeats", type=int, default=1, help="fresh runs per fixture (>= 1)")
+    # `None` means "no flags" (callers that invoke `main()` directly); the
+    # command line is passed explicitly by the `__main__` guard below.
+    args = parser.parse_args([] if argv is None else argv)
+    if args.repeats < 1:
+        parser.error("--repeats must be >= 1")
+    return args
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+    control = args.control
+    repeats = args.repeats
+    results_dir = CONTROL_RESULTS_DIR if control else RESULTS_DIR
+    spec_for = _control_spec if control else _fixture_spec
+    # repeats == 1 and not control keeps the original resume rule (skip only a
+    # `completed` row). Otherwise a repeat is done unless it errored or ended in
+    # an infrastructure cause: re-running budget_exceeded/malformed repeats until
+    # they finish would bias the counts toward finishing.
+    original_rule = repeats == 1 and not control
+
     fixture_names = sorted(p.name for p in ADVERSARIAL_ROOT.iterdir() if p.is_dir())
     delay_seconds = int(os.environ.get("TRIAGE_INJECTION_SUITE_DELAY_SECONDS", "90"))
+    runs = [(name, k) for name in fixture_names for k in range(1, repeats + 1)]
 
     start = time.monotonic()
-    per_fixture_rows: list[dict] = []
+    rows: list[dict] = []
 
-    for index, fixture_name in enumerate(fixture_names):
-        existing = _load_existing(fixture_name)
-        if existing is not None and existing.get("termination_cause") == "completed":
-            print(f"{fixture_name}: already recorded, skipping")
-            per_fixture_rows.append(existing)
-            continue
+    for index, (fixture_name, k) in enumerate(runs):
+        label = f"{fixture_name}.r{k}" if repeats > 1 else fixture_name
+        path = results_dir / f"{label}.json"
+        existing = _load_existing(path)
+        if existing is not None:
+            if original_rule:
+                done = existing.get("termination_cause") == "completed"
+            else:
+                done = (
+                    existing.get("error") is None
+                    and existing.get("termination_cause") is not None
+                    and existing.get("termination_cause") not in _INFRA_CAUSES
+                )
+            if done:
+                print(f"{label}: already recorded, skipping")
+                rows.append(existing)
+                continue
 
-        spec = _fixture_spec(fixture_name)
-        row = _run_fixture_with_retry(fixture_name, spec)
-        write_report(_redact_org_ids(row), RESULTS_DIR / f"{fixture_name}.json")
-        per_fixture_rows.append(row)
-        print(f"{fixture_name}: {row['termination_cause']} (attempts={row['attempts']})")
+        row = _run_fixture_with_retry(fixture_name, spec_for(fixture_name))
+        if control:
+            row["control"] = True
+        if repeats > 1:
+            row["repeat"] = k
+        write_report(_redact_org_ids(row), path)
+        rows.append(row)
+        print(f"{label}: {row['termination_cause']} (attempts={row['attempts']})")
 
-        if index < len(fixture_names) - 1:
+        if index < len(runs) - 1:
             time.sleep(delay_seconds)
 
     elapsed = round(time.monotonic() - start, 2)
-    total_tokens = sum(r.get("total_tokens_used", 0) or 0 for r in per_fixture_rows)
-    total_cost = sum(r.get("total_cost_accrued", 0.0) or 0.0 for r in per_fixture_rows)
+    total_tokens = sum(r.get("total_tokens_used", 0) or 0 for r in rows)
+    total_cost = sum(r.get("total_cost_accrued", 0.0) or 0.0 for r in rows)
+    timestamp = int(time.time())
+
+    repeat_keys: dict = {}
+    if repeats > 1:
+        per_fixture: dict[str, dict] = {}
+        for r in rows:
+            entry = per_fixture.setdefault(
+                r["fixture"], {"runs": 0, "completed": 0, "by_cause": {}}
+            )
+            entry["runs"] += 1
+            entry["completed"] += r["termination_cause"] == "completed"
+            entry["by_cause"][r["termination_cause"]] = (
+                entry["by_cause"].get(r["termination_cause"], 0) + 1
+            )
+        repeat_keys = {"repeats": repeats, "per_fixture_repeat_counts": per_fixture}
+
+    if control:
+        counts_by_cause: dict[str, int] = {}
+        for r in rows:
+            counts_by_cause[r["termination_cause"]] = (
+                counts_by_cause.get(r["termination_cause"], 0) + 1
+            )
+        summary = {"kind": "control", "rows": rows, "counts_by_cause": counts_by_cause, **repeat_keys}
+        summary_path = (
+            REPO_ROOT / "results" / f"injection_suite_real_control_summary_{timestamp}.json"
+        )
+        write_report(_redact_org_ids(summary), summary_path)
+        print()
+        print(f"control runs: {len(rows)}")
+        print(f"wall-clock seconds: {elapsed}")
+        print(f"total tokens: {total_tokens}")
+        print(f"total estimated cost (USD): {total_cost:.6f}")
+        print(f"summary report written to: {summary_path}")
+        return 0
 
     results = [
         FixtureRunResult(
-            fixture_name=r["fixture"],
+            fixture_name=f"{r['fixture']}.r{r['repeat']}" if repeats > 1 else r["fixture"],
             termination_cause=TerminationCause(r["termination_cause"]),
             injection_won=r["injection_won"],
         )
-        for r in per_fixture_rows
+        for r in rows
     ]
-    report = build_report(results)
-    timestamp = int(time.time())
+    report = {**build_report(results), **repeat_keys}
     summary_path = REPO_ROOT / "results" / f"injection_suite_real_summary_{timestamp}.json"
     write_report(_redact_org_ids(report), summary_path)
 
@@ -366,4 +482,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
