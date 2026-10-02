@@ -86,6 +86,9 @@ _INFRA_CAUSES = {
 }
 
 
+_FINAL_ANSWER_CAUSES = {"completed", "unclassified", "target_not_found"}
+
+
 def _make_client() -> GroqLLMClient:
     kwargs: dict = {}
     max_wait = os.environ.get("TRIAGE_REAL_RUN_MAX_TOTAL_WAIT_SECONDS")
@@ -145,6 +148,9 @@ def run_one_fixture(fixture_dir: Path) -> dict:
         "request_usage_log": None,
         "response_shape_log": None,
         "name_normalization_events": None,
+        "final_target_module": None,
+        "final_target_symbol": None,
+        "named_target_matches_assigned": None,
         "tool_choice": None,
         "rate_limit_events": None,
         "total_rate_limit_wait_seconds": None,
@@ -168,6 +174,15 @@ def run_one_fixture(fixture_dir: Path) -> dict:
         row["total_tokens_used"] = client.total_tokens_used
         row["total_cost_accrued"] = client.total_cost_accrued
         row["termination_cause"] = compute_termination_cause(finding).value
+        row["final_target_module"] = finding.result.target_module
+        row["final_target_symbol"] = finding.result.target_symbol
+        # Only a run that ended through a final answer names a target of its
+        # own; on every other path the result carries the assigned target.
+        if row["termination_cause"] in _FINAL_ANSWER_CAUSES:
+            row["named_target_matches_assigned"] = (
+                finding.result.target_module,
+                finding.result.target_symbol,
+            ) == (target_module, target_symbol)
         row["pass"] = row["verdict"] in label["allowed_verdicts"]
         row["tool_call_trace"] = build_tool_call_trace(finding.tool_calls)
         row["loop_metrics"] = loop_metrics(finding.tool_calls)

@@ -276,3 +276,61 @@ def test_label_env_writes_to_separate_dir_and_never_touches_default(monkeypatch,
 
     assert (tmp_path / "results" / "real_llm_probe_auto" / "testsha" / "11_dead_function_call_site.json").exists()
     assert not (tmp_path / "real_llm").exists()
+
+
+def _search_then_final(pattern, module, symbol):
+    def responder(call_number, request):
+        if call_number == 1:
+            return _tool_call(request, "search_symbol", {"pattern": pattern})
+        return _tool_call(
+            request,
+            "submit_final_answer",
+            {"target_module": module, "target_symbol": symbol, "rationale": "ok"},
+        )
+
+    return responder
+
+
+def test_named_target_matches_assigned_true(monkeypatch, tmp_path, script):
+    _install(monkeypatch, script, _search_then_final("*vulnerable", "pkg.sink", "vulnerable"), [], tmp_path, [FIXTURE_11])
+
+    row = script.run_one_fixture(FIXTURE_11)
+
+    assert row["termination_cause"] == "completed"
+    assert (row["final_target_module"], row["final_target_symbol"]) == ("pkg.sink", "vulnerable")
+    assert row["named_target_matches_assigned"] is True
+
+
+def test_named_target_different_confirmed_symbol_is_false_and_recorded(monkeypatch, tmp_path, script):
+    _install(monkeypatch, script, _search_then_final("*wrapper", "pkg.dead", "wrapper"), [], tmp_path, [FIXTURE_11])
+
+    row = script.run_one_fixture(FIXTURE_11)
+
+    assert row["termination_cause"] == "completed"
+    assert row["verdict"] == "not_reachable"
+    assert (row["final_target_module"], row["final_target_symbol"]) == ("pkg.dead", "wrapper")
+    assert row["named_target_matches_assigned"] is False
+
+
+def test_named_target_none_for_malformed_and_errored_rows(monkeypatch, tmp_path, script):
+    def text_reply(call_number, request):
+        body = _chat_completion_body(finish_reason="stop", message={"role": "assistant", "content": "prose"})
+        return httpx.Response(200, json=body, request=request)
+
+    _install(monkeypatch, script, text_reply, [], tmp_path, [FIXTURE_11])
+    malformed = script.run_one_fixture(FIXTURE_11)
+
+    assert malformed["termination_cause"] == "llm_malformed_response"
+    assert malformed["named_target_matches_assigned"] is None
+    assert (malformed["final_target_module"], malformed["final_target_symbol"]) == ("pkg.sink", "vulnerable")
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(script, "build_repo_index", boom)
+    errored = script.run_one_fixture(FIXTURE_11)
+
+    assert errored["error"] is not None
+    assert errored["final_target_module"] is None
+    assert errored["final_target_symbol"] is None
+    assert errored["named_target_matches_assigned"] is None
