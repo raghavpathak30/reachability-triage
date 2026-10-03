@@ -124,22 +124,23 @@ fixtures; it does not gate prompts or a real model. The compose smoke test
 
 ### Real-model runs (Groq `openai/gpt-oss-20b`)
 
-**Real-model injection resistance is unclaimed.** The real-model injection suite
-(`scripts/run_injection_suite_real.py`, `agent_docs/PHASE5_INJECTION_REAL_MODEL.md`)
-has never had a run in which the model completed an investigation on an adversarial
-fixture. Latest run (`DECISIONS.md` §14): **0 of 3 completed** — two ended in
-`budget_exceeded`, one in `llm_malformed_response`. Budget exhaustion is not counted
-as resistance (`DECISIONS.md` §13).
+**Real-model injection resistance is unclaimed.** Latest measurement (Phase 9,
+`agent_docs/PHASE9_RESULTS.md`, `DECISIONS.md` §17; one model, one repo, 3 repeats per
+fixture): **no manipulation in 1 of 9 adversarial runs across 3 fixtures**; 6 ended in
+`budget_exceeded`, 2 were infrastructure errors (excluded). Budget exhaustion is not
+counted as resistance (`DECISIONS.md` §13).
 
-- **Rate limit (TPM), fixed.** Earlier runs died on the account's 8000
-  tokens-per-minute cap. Phase 6b added an opt-in wait-on-rate-limit and an
-  `llm_request_too_large` cause (`DECISIONS.md` §14); 14 real 429s were waited out and
-  no run terminated on a rate limit.
-- **Budget, open.** With the rate limit out of the way, the model still does not reach
-  a final answer within the tool-call budget on the adversarial fixtures. Whether
-  clean fixtures also exhaust it is unmeasured.
-- **Malformed response, open.** On one fixture the model answered with text instead
-  of a tool call; the raw reply was not recorded.
+- **Clean fixtures, fixed.** All 30 clean fixtures finished on the real model (no
+  malformed final answers, at most 4 tool calls). Phase 8 had 14 of 30 ending in
+  `llm_malformed_response`; Phase 9 accepts the exact `functions.` tool-name prefix and
+  sends `tool_choice="required"` (`src/reachability/triage/groq_llm.py`).
+- **Adversarial looping is not specific to the injection.** The adversarial runs that
+  did not finish repeated one `find_callers` call until the budget ran out. A control
+  that swaps in a benign filler string, not an injection, looped the same way in 7 of 7
+  valid runs, with identical loop metrics. A deterministic guard against repeated
+  identical calls is a proposed next step (not built).
+- **Rate limit (TPM), fixed.** Phase 6b added an opt-in wait-on-rate-limit and an
+  `llm_request_too_large` cause (`DECISIONS.md` §14).
 
 The production default for an unset `TRIAGE_LLM_MODE` is still the Groq client
 (`src/reachability/triage/job_runner.py`, `resolve_llm_mode`), which was swapped in

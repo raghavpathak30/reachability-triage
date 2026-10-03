@@ -37,10 +37,10 @@ each case expects, and it always tears the stack down (`docker compose down -v`)
 
 - Stub mode only. The real-model path exists (`TRIAGE_LLM_MODE=groq`) but is not
   what this demo runs.
-- Real-model injection resistance is **unclaimed**: the real-model injection suite
-  has never completed an investigation on an adversarial fixture (latest run 0 of 3:
-  two `budget_exceeded`, one `llm_malformed_response`). Budget exhaustion is not
-  counted as resistance (`DECISIONS.md` §13, §14).
+- Real-model injection resistance is **unclaimed**: in the latest real-model run
+  (Phase 9, `agent_docs/PHASE9_RESULTS.md`) 1 of 9 adversarial runs finished, with no
+  manipulation, and 6 ended in `budget_exceeded`. Budget exhaustion is not counted as
+  resistance (`DECISIONS.md` §13, §17).
 - The three packages are fixture repos packed as offline wheels
   (`scripts/build_fixture_wheels.py`), chosen from `tests/fixtures/l5/` (02, 09, 13).
   Fixture 13's label allows `unknown` or `reachable`; the stub gives `unknown`.

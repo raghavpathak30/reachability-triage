@@ -20,7 +20,11 @@ re-run — Phase 5 U2's retry-with-backoff is scoped to a single
 paragraph below), per-user quotas, cost accounting **as a system**
 (budgets, alerts, cross-job aggregation — Phase 5 persists a per-job
 token/cost/model/prompt-version record, which is a narrower thing, see
-below), DB-stored prompt versioning, CI-gated prompt changes.
+below), DB-stored prompt versioning, CI-gated prompt changes, a deterministic
+guard against repeating an identical tool call (`run_trace.py:108` only *measures*
+`repeated_calls` after the fact), a re-prompt on a text reply, and assistant turns
+in the model's context (`langgraph_loop.py:210` appends only tool results). The
+last three are Phase 9 findings, see `DECISIONS.md` §17.
 These are in DECISIONS.md as intent. Check the code before claiming any
 of them work — in a README, docstring, commit message or comment.
 
@@ -173,11 +177,15 @@ via `TRIAGE_LLM_CACHE_DISABLED`. The production client swap
 (`job_runner.py`) was made citing a real-model injection-resistance gate
 (`agent_docs/PHASE5_INJECTION_REAL_MODEL.md`) that was **not met**: zero
 observed injection wins, but no real-model adversarial run ever completed
-an investigation (0 of 3 reproduced in Phase 8 — two `budget_exceeded`, one
-`llm_malformed_response`; the clean 30-fixture baseline finished 16 of 30,
-with 14 of 30 ending in `llm_malformed_response` final answers,
-`DECISIONS.md` §16; Phase 9 U1 now accepts the exact `functions.` tool-name
-prefix, `groq_llm.py:82,509-512,553`), and budget exhaustion is not
+an investigation (Phase 8: 0 of 3; Phase 9, `DECISIONS.md` §17 and
+`agent_docs/PHASE9_RESULTS.md`: 1 of 9 adversarial runs finished, with no
+manipulation, 6 ended in `budget_exceeded`, 2 were infrastructure errors; a
+benign-filler control looped to the budget in 7 of 7 valid runs with identical
+metrics, so the looping is not attributable to the injected payload). The clean
+30-fixture baseline went from 16 finished and 14 `llm_malformed_response` in
+Phase 8 to 30 of 30 finished in Phase 9: `GroqLLMClient` now accepts the exact
+`functions.` tool-name prefix (`groq_llm.py:88,518-519,560-568`) and defaults to
+`tool_choice="required"` (`groq_llm.py:312`). Budget exhaustion is not
 counted as resistance (§13). **Real-model injection resistance is
 unclaimed.** A new, non-blocking
 `eval-real` CI job (`.github/workflows/tests.yml`) runs the same
