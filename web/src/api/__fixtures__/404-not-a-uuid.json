@@ -1,0 +1,9 @@
+{
+  "body": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "Triage job 'not-a-uuid' does not exist."
+    }
+  },
+  "status": 404
+}
