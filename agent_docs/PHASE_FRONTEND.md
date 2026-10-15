@@ -12,8 +12,8 @@ existing Docker Compose stack and is the surface the demo GIF is recorded on.
 
 **Non-goals (do not build, do not describe as built):**
 - No backend behaviour change. `main.py`, `src/`, `alembic/` stay untouched
-  except for the one OpenAPI snapshot test in F1. The 216-test baseline must be
-  unchanged in count and result, plus whatever F1 adds.
+  except for the one OpenAPI snapshot test in F1. The test baseline (365 passed, 3 skipped at v0.2.0; 366 / 3 after F1) must be
+  unchanged in count and result, plus whatever later units add.
 - No auth, no users, no deployment. Local only, same as Phase 7.
 - No server-side job list. There is no `GET /v1/triage` list endpoint; the
   "recent jobs" panel is browser-local (`localStorage`) and the UI says so.
