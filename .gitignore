@@ -12,3 +12,8 @@ book/
 # filename in prose (DECISIONS.md, CLAUDE.md) but never committed -- see
 # DECISIONS.md's Phase 5 U4 section for the full rationale.
 results/
+
+# Frontend (web/)
+web/node_modules/
+web/dist/
+*.tsbuildinfo

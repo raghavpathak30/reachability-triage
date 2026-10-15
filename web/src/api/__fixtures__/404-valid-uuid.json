@@ -1,0 +1,9 @@
+{
+  "body": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "Triage job '00000000-0000-0000-0000-000000000000' does not exist."
+    }
+  },
+  "status": 404
+}

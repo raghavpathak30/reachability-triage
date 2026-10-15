@@ -1,0 +1,17 @@
+{
+  "body": {
+    "error": {
+      "code": "VALIDATION_ERROR",
+      "details": [
+        {
+          "loc": [
+            "body"
+          ],
+          "msg": "Value error, Both 'package' and 'version' must be provided together."
+        }
+      ],
+      "message": "Both 'package' and 'version' must be provided together."
+    }
+  },
+  "status": 422
+}

@@ -1,0 +1,465 @@
+{
+  "components": {
+    "schemas": {
+      "CallEdge": {
+        "properties": {
+          "callee_id": {
+            "title": "Callee Id",
+            "type": "string"
+          },
+          "caller_id": {
+            "title": "Caller Id",
+            "type": "string"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/Confidence"
+          },
+          "file": {
+            "format": "path",
+            "title": "File",
+            "type": "string"
+          },
+          "lineno": {
+            "title": "Lineno",
+            "type": "integer"
+          },
+          "resolution_rule": {
+            "$ref": "#/components/schemas/ResolutionRule"
+          }
+        },
+        "required": [
+          "caller_id",
+          "callee_id",
+          "confidence",
+          "file",
+          "lineno",
+          "resolution_rule"
+        ],
+        "title": "CallEdge",
+        "type": "object"
+      },
+      "Confidence": {
+        "enum": [
+          "high",
+          "medium",
+          "low"
+        ],
+        "title": "Confidence",
+        "type": "string"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "ReachabilityResult": {
+        "properties": {
+          "path": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CallEdge"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "target_module": {
+            "title": "Target Module",
+            "type": "string"
+          },
+          "target_symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Symbol"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/Verdict"
+          }
+        },
+        "required": [
+          "target_module",
+          "target_symbol",
+          "verdict",
+          "path",
+          "reason"
+        ],
+        "title": "ReachabilityResult",
+        "type": "object"
+      },
+      "ResolutionRule": {
+        "enum": [
+          "local_scope",
+          "enclosing_scope",
+          "module_scope",
+          "import_alias",
+          "module_attribute",
+          "builtin",
+          "self_mro",
+          "self_unresolved",
+          "unresolved_attribute",
+          "unresolved_name",
+          "dynamic_dispatch"
+        ],
+        "title": "ResolutionRule",
+        "type": "string"
+      },
+      "ToolCallRecord": {
+        "description": "One sequenced entry in a `TriageFinding`'s tool-call audit trail.\n\nField names (`sequence`, `tool_name`, `arguments`, `result`) are this\nplan's own choice -- the spec (\"tool name, args, result\",\n`agent_docs/PHASE2_TRIAGE_AGENT.md:56`) does not pin exact field names\n(see `.agent/plan.md`'s Risks section). `result` is always the\n*sanitized* string -- i.e. always post-`sandbox_untrusted_text` -- never\nthe raw tool return value; nothing in this package stores the raw\nresult on a `ToolCallRecord`.",
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          },
+          "result": {
+            "title": "Result",
+            "type": "string"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "tool_name": {
+            "title": "Tool Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sequence",
+          "tool_name",
+          "arguments",
+          "result"
+        ],
+        "title": "ToolCallRecord",
+        "type": "object"
+      },
+      "TriageFinding": {
+        "description": "The triage agent loop's final output for one job.\n\n`result` is the `ReachabilityResult` produced by `compute_reachability`\n-- the sole source of the verdict. `rationale` is the agent's own\nfree-text explanation of its reasoning; it is commentary only and is\nnever read back to derive, corroborate, or override `result.verdict`.\n`tool_calls` is the full sequenced trace of every tool invocation made\nwhile producing this finding, in execution order.",
+        "properties": {
+          "rationale": {
+            "title": "Rationale",
+            "type": "string"
+          },
+          "result": {
+            "$ref": "#/components/schemas/ReachabilityResult"
+          },
+          "tool_calls": {
+            "items": {
+              "$ref": "#/components/schemas/ToolCallRecord"
+            },
+            "title": "Tool Calls",
+            "type": "array"
+          }
+        },
+        "required": [
+          "result",
+          "rationale"
+        ],
+        "title": "TriageFinding",
+        "type": "object"
+      },
+      "TriageOut": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "finding": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TriageFinding"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "llm_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "LLM client mode that produced the verdict: 'stub' (deterministic policy client, not a real model) or 'groq'. Null until the job is finalized. On a job that fails before the client is built it is still the resolved mode if TRIAGE_LLM_MODE resolved, else null.",
+            "title": "Llm Mode"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TriageStatus"
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ],
+        "title": "TriageOut",
+        "type": "object"
+      },
+      "TriageRequest": {
+        "properties": {
+          "package": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Package"
+          },
+          "repo_url": {
+            "anyOf": [
+              {
+                "format": "uri",
+                "maxLength": 2083,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo Url"
+          },
+          "target_module": {
+            "minLength": 1,
+            "title": "Target Module",
+            "type": "string"
+          },
+          "target_symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Symbol"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "required": [
+          "target_module"
+        ],
+        "title": "TriageRequest",
+        "type": "object"
+      },
+      "TriageStatus": {
+        "enum": [
+          "queued",
+          "running",
+          "completed",
+          "failed"
+        ],
+        "title": "TriageStatus",
+        "type": "string"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "Verdict": {
+        "enum": [
+          "reachable",
+          "reachable_only_from_tests",
+          "not_reachable",
+          "unknown"
+        ],
+        "title": "Verdict",
+        "type": "string"
+      }
+    }
+  },
+  "info": {
+    "title": "Reachability Triage Service",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/healthz": {
+      "get": {
+        "operationId": "healthz_healthz_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Healthz"
+      }
+    },
+    "/v1/triage": {
+      "post": {
+        "operationId": "create_triage_v1_triage_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TriageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TriageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Triage"
+      }
+    },
+    "/v1/triage/{triage_id}": {
+      "get": {
+        "operationId": "get_triage_v1_triage__triage_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "triage_id",
+            "required": true,
+            "schema": {
+              "title": "Triage Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TriageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Triage"
+      }
+    }
+  }
+}

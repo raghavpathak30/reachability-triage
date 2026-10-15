@@ -1,0 +1,18 @@
+{
+  "body": {
+    "error": {
+      "code": "VALIDATION_ERROR",
+      "details": [
+        {
+          "loc": [
+            "body",
+            "target_module"
+          ],
+          "msg": "Field required"
+        }
+      ],
+      "message": "Field required"
+    }
+  },
+  "status": 422
+}
