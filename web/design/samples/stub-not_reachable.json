@@ -1,0 +1,34 @@
+{
+ "id": "a87c4e50-6ab8-4271-91d3-3c71f45a8cc1",
+ "status": "completed",
+ "finding": {
+  "result": {
+   "target_module": "pkg.sink",
+   "target_symbol": "vulnerable",
+   "verdict": "not_reachable",
+   "path": null,
+   "reason": "no call path found from any entrypoint to pkg.sink:vulnerable"
+  },
+  "rationale": "confirmed_node_id='pkg.sink:vulnerable'; walked 1 caller node id(s) via backward BFS",
+  "tool_calls": [
+   {
+    "sequence": 0,
+    "tool_name": "search_symbol",
+    "arguments": {
+     "pattern": "*vulnerable"
+    },
+    "result": "[SymbolNode(node_id='pkg.sink:vulnerable', dotted_module='pkg.sink', qualname='vulnerable', kind=<NodeKind.FUNCTION: 'function'>, file=PosixPath('[REDACTED: instruction-like text]'), lineno=1, is_async=False, decorators=[], bases=[], target_id=None, conditional=False, type_checking_only=False)]"
+   },
+   {
+    "sequence": 1,
+    "tool_name": "find_callers",
+    "arguments": {
+     "node_id": "pkg.sink:vulnerable"
+    },
+    "result": "[]"
+   }
+  ]
+ },
+ "error": null,
+ "llm_mode": "stub"
+}

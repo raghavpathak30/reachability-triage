@@ -1,0 +1,51 @@
+{
+ "id": "01227548-eb12-478b-8398-30298f174aaa",
+ "status": "completed",
+ "finding": {
+  "result": {
+   "target_module": "pkg.sink",
+   "target_symbol": "vulnerable",
+   "verdict": "unknown",
+   "path": [
+    {
+     "caller_id": "pkg.entry",
+     "callee_id": "pkg.entry:dispatch",
+     "confidence": "high",
+     "file": "/tmp/reachability-triage-xamygun_/extracted/pkg/entry.py",
+     "lineno": 9,
+     "resolution_rule": "module_scope"
+    },
+    {
+     "caller_id": "pkg.entry:dispatch",
+     "callee_id": "?:<dynamic>",
+     "confidence": "low",
+     "file": "/tmp/reachability-triage-xamygun_/extracted/pkg/entry.py",
+     "lineno": 5,
+     "resolution_rule": "dynamic_dispatch"
+    }
+   ],
+   "reason": "a reachable opaque call (?:<dynamic>) at /tmp/reachability-triage-xamygun_/extracted/pkg/entry.py:5 carries no literal target name, so a not_reachable verdict cannot be trusted"
+  },
+  "rationale": "confirmed_node_id='pkg.sink:vulnerable'; walked 1 caller node id(s) via backward BFS",
+  "tool_calls": [
+   {
+    "sequence": 0,
+    "tool_name": "search_symbol",
+    "arguments": {
+     "pattern": "*vulnerable"
+    },
+    "result": "[SymbolNode(node_id='pkg.sink:vulnerable', dotted_module='pkg.sink', qualname='vulnerable', kind=<NodeKind.FUNCTION: 'function'>, file=PosixPath('[REDACTED: instruction-like text]'), lineno=1, is_async=False, decorators=[], bases=[], target_id=None, conditional=False, type_checking_only=False)]"
+   },
+   {
+    "sequence": 1,
+    "tool_name": "find_callers",
+    "arguments": {
+     "node_id": "pkg.sink:vulnerable"
+    },
+    "result": "[]"
+   }
+  ]
+ },
+ "error": null,
+ "llm_mode": "stub"
+}

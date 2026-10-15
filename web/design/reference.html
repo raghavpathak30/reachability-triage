@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>reachability-triage: design reference</title>
+<style>
+/* Reference only. The React build reuses these tokens and rules verbatim
+   (web/src/styles/tokens.css). Data below is real stub-mode output from
+   fixtures 02, 09 and 13 at v0.2.0. */
+
+:root {
+  --bg: #ffffff;
+  --text: #1f1f1f;
+  --muted: #5d5d5a;
+  --rule: #cfcfcb;
+  --rule-strong: #1f1f1f;
+  --band: #eeeeec;
+  --code-bg: #f4f4f2;
+  --link: #1d4e89;
+  --link-hover: #0f2f57;
+  --primary: #1d4e89;
+  --primary-text: #ffffff;
+  --danger: #a3261b;
+  --caution: #7a5600;
+  --caution-bg: #fbf4e4;
+  --focus: #ffdd00;
+  --focus-text: #0b0c0c;
+
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161616;
+    --text: #e6e6e3;
+    --muted: #a3a39e;
+    --rule: #3a3a38;
+    --rule-strong: #e6e6e3;
+    --band: #222221;
+    --code-bg: #1f1f1e;
+    --link: #8fb4e3;
+    --link-hover: #c3d7f1;
+    --primary: #8fb4e3;
+    --primary-text: #0b0c0c;
+    --danger: #f08a7e;
+    --caution: #e3b85c;
+    --caution-bg: #2a2416;
+  }
+}
+
+* { box-sizing: border-box; }
+html { font-size: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 1rem/1.5 var(--sans);
+  -webkit-text-size-adjust: 100%;
+}
+a { color: var(--link); text-underline-offset: 2px; }
+a:hover { color: var(--link-hover); }
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 0;
+  box-shadow: 0 0 0 5px var(--focus-text);
+}
+code, .mono { font-family: var(--mono); font-size: 0.875rem; }
+
+/* top bar: subdued, grey, links to tools only */
+.bar { background: var(--band); border-bottom: 1px solid var(--rule); }
+.bar .wrap { display: flex; gap: 1.5rem; align-items: baseline; padding-block: 0.6rem; flex-wrap: wrap; }
+.bar .name { font-family: var(--mono); font-weight: 600; color: var(--text); text-decoration: none; }
+.bar nav { display: flex; gap: 1.25rem; font-size: 0.9375rem; }
+.bar .env { margin-left: auto; font-size: 0.8125rem; color: var(--muted); }
+
+.wrap { max-width: 62rem; padding-inline: 1rem; margin: 0; }
+@media (min-width: 48rem) { .wrap { padding-inline: 2rem; } }
+main { padding-block: 1.75rem 3rem; }
+
+h1 { font-size: 1.5rem; line-height: 1.25; font-weight: 650; margin: 0 0 0.25rem; }
+h1.mono { font-family: var(--mono); font-size: 1.375rem; overflow-wrap: anywhere; }
+h2 { font-size: 1.0625rem; font-weight: 650; margin: 2.25rem 0 0.6rem; }
+.lede { color: var(--muted); margin: 0 0 1.5rem; max-width: 40rem; }
+.muted { color: var(--muted); }
+.small { font-size: 0.875rem; }
+
+/* key/value facts, not cards */
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.3rem 1.5rem; margin: 1rem 0 0; font-size: 0.9375rem; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+
+/* verdict: words carry it, colour only where action is needed */
+.verdict { border-top: 2px solid var(--rule-strong); padding-top: 0.75rem; margin-top: 1.75rem; }
+.verdict .label { font-size: 0.8125rem; color: var(--muted); }
+.verdict .value { font-size: 1.25rem; font-weight: 700; margin: 0.1rem 0 0.25rem; }
+.verdict .value.reachable { color: var(--danger); }
+.verdict .value.tests-only { color: var(--caution); }
+.verdict p { margin: 0.25rem 0 0; max-width: 44rem; }
+.reason { margin-top: 0.75rem; padding: 0.75rem 1rem; background: var(--code-bg); border: 1px solid var(--rule); font-size: 0.9375rem; max-width: 46rem; }
+.reason b { font-weight: 650; }
+
+/* tables for structured evidence */
+.table-scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 0.875rem; }
+th, td { text-align: left; padding: 0.45rem 0.75rem 0.45rem 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-weight: 600; color: var(--muted); border-bottom-color: var(--rule-strong); white-space: nowrap; }
+td.num { color: var(--muted); width: 2rem; }
+td code { font-size: 0.8125rem; overflow-wrap: anywhere; }
+tr.low td { background: var(--caution-bg); }
+.conf-low { color: var(--caution); font-weight: 650; }
+
+.note { font-size: 0.875rem; color: var(--muted); margin: 0.25rem 0 0.6rem; }
+blockquote.commentary { margin: 0; padding: 0.6rem 0 0.6rem 1rem; border-left: 1px solid var(--rule); font-family: var(--mono); font-size: 0.8125rem; overflow-wrap: anywhere; }
+
+details { margin-top: 0.5rem; border-top: 1px solid var(--rule); }
+summary { cursor: pointer; padding: 0.6rem 0; font-weight: 600; }
+.call { border-bottom: 1px solid var(--rule); padding: 0.6rem 0; }
+.call-head { display: flex; gap: 0.75rem; align-items: baseline; flex-wrap: wrap; font-size: 0.875rem; }
+.call pre { margin: 0.4rem 0 0; padding: 0.6rem 0.75rem; background: var(--code-bg); font: 0.8125rem/1.45 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 12rem; overflow: auto; }
+.redacted { color: var(--muted); font-style: italic; }
+.repeat { font-size: 0.8125rem; color: var(--caution); }
+
+/* forms: GOV.UK-style weight, labels above */
+.field { margin-bottom: 1.25rem; max-width: 30rem; }
+label { display: block; font-weight: 600; margin-bottom: 0.15rem; }
+.hint { display: block; color: var(--muted); font-size: 0.875rem; margin-bottom: 0.35rem; }
+input[type=text] {
+  width: 100%; font: 1rem/1.4 var(--mono); padding: 0.4rem 0.5rem;
+  color: var(--text); background: var(--bg);
+  border: 2px solid var(--rule-strong); border-radius: 0;
+}
+.field.error input { border-color: var(--danger); }
+.field-error { display: block; color: var(--danger); font-weight: 600; font-size: 0.9375rem; margin-bottom: 0.25rem; }
+.row2 { display: grid; gap: 0 1rem; grid-template-columns: 1fr; max-width: 30rem; }
+@media (min-width: 36rem) { .row2 { grid-template-columns: 2fr 1fr; } }
+.row2 .field { max-width: none; }
+button.primary {
+  font: 600 1rem/1 var(--sans); padding: 0.7rem 1.1rem;
+  background: var(--primary); color: var(--primary-text);
+  border: 0; border-radius: 2px; box-shadow: 0 2px 0 var(--link-hover); cursor: pointer;
+}
+button.link { font: inherit; background: none; border: 0; padding: 0; color: var(--link); text-decoration: underline; cursor: pointer; }
+
+.error-summary { border: 3px solid var(--danger); padding: 0.9rem 1.1rem; margin-bottom: 1.75rem; max-width: 34rem; }
+.error-summary h2 { margin: 0 0 0.4rem; font-size: 1.0625rem; }
+.error-summary ul { margin: 0; padding-left: 1.1rem; }
+.error-summary a { color: var(--danger); font-weight: 600; }
+
+.status-line { font-size: 0.9375rem; margin: 1rem 0 0; }
+
+footer { border-top: 1px solid var(--rule); color: var(--muted); font-size: 0.8125rem; padding-block: 1rem 2rem; }
+
+/* reference-only scaffolding, not part of the design */
+.ref-label { font: 600 0.75rem/1 var(--mono); color: #fff; background: #555; padding: 0.35rem 0.6rem; display: inline-block; margin: 2.5rem 0 0 1rem; }
+.screen { border-top: 4px solid #555; }
+</style>
+</head>
+<body>
+
+<!-- ============ SCREEN 1: / (new job, after a 422) ============ -->
+<span class="ref-label">SCREEN 1 · / · after a 422 from the API</span>
+<div class="screen">
+<header class="bar"><div class="wrap">
+  <a class="name" href="#">reachability-triage</a>
+  <nav><a href="#">New job</a><a href="#">Source on GitHub</a></nav>
+  <span class="env">local instance · no auth</span>
+</div></header>
+
+<main class="wrap">
+  <div class="error-summary" role="alert" tabindex="-1">
+    <h2>There is a problem</h2>
+    <ul><li><a href="#version">Both package and version must be provided together.</a></li></ul>
+  </div>
+
+  <h1>New triage job</h1>
+  <p class="lede">Downloads the package wheel, builds a call graph, and checks whether the target symbol can be reached from an entrypoint.</p>
+
+  <form>
+    <div class="row2">
+      <div class="field">
+        <label for="package">Package</label>
+        <span class="hint">As published on PyPI</span>
+        <input type="text" id="package" value="reach-fx-02" spellcheck="false" autocomplete="off">
+      </div>
+      <div class="field error">
+        <label for="version">Version</label>
+        <span class="hint">Exact, e.g. 1.0</span>
+        <span class="field-error">Enter a version</span>
+        <input type="text" id="version" value="" spellcheck="false" autocomplete="off">
+      </div>
+    </div>
+    <div class="field">
+      <label for="module">Target module</label>
+      <span class="hint">Dotted path of the module with the vulnerable code</span>
+      <input type="text" id="module" value="pkg.sink" spellcheck="false" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="symbol">Target symbol <span class="muted" style="font-weight:400">(optional)</span></label>
+      <span class="hint">Function or method name. Leave empty to check the whole module.</span>
+      <input type="text" id="symbol" value="vulnerable" spellcheck="false" autocomplete="off">
+    </div>
+    <p class="small muted" style="max-width:30rem">Repository URLs are not supported yet. Only published packages can be checked.</p>
+    <button class="primary" type="button">Start triage</button>
+  </form>
+
+  <h2>Recent jobs <span class="muted small" style="font-weight:400">· stored in this browser only</span></h2>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Target</th><th>Package</th><th>Submitted</th><th>Last seen</th></tr></thead>
+    <tbody>
+      <tr><td><a href="#"><code>pkg.sink:vulnerable</code></a></td><td><code>reach-fx-13==1.0</code></td><td>01:42</td><td>completed</td></tr>
+      <tr><td><a href="#"><code>pkg.sink:vulnerable</code></a></td><td><code>reach-fx-09==1.0</code></td><td>01:41</td><td>completed</td></tr>
+      <tr><td><a href="#"><code>pkg.sink:vulnerable</code></a></td><td><code>reach-fx-02==1.0</code></td><td>01:40</td><td>completed</td></tr>
+    </tbody>
+  </table></div>
+</main>
+</div>
+
+<!-- ============ SCREEN 2: /jobs/:id, reachable ============ -->
+<span class="ref-label">SCREEN 2 · /jobs/057692ae… · completed, reachable (fixture 02)</span>
+<div class="screen">
+<header class="bar"><div class="wrap">
+  <a class="name" href="#">reachability-triage</a>
+  <nav><a href="#">New job</a><a href="#">Source on GitHub</a></nav>
+  <span class="env">local instance · no auth</span>
+</div></header>
+
+<main class="wrap">
+  <p class="small" style="margin:0 0 0.5rem"><a href="#">Jobs</a> / 057692ae</p>
+  <h1 class="mono">pkg.sink:vulnerable</h1>
+  <dl class="facts">
+    <dt>Package</dt><dd><code>reach-fx-02==1.0</code></dd>
+    <dt>Status</dt><dd>Completed</dd>
+    <dt>LLM mode</dt><dd>stub (deterministic policy, not a real model)</dd>
+    <dt>Job ID</dt><dd><code>057692ae-ca68-4ae7-b6a7-551dda6e3db5</code></dd>
+  </dl>
+
+  <section class="verdict" aria-labelledby="v2">
+    <div class="label" id="v2">Verdict</div>
+    <div class="value reachable">Reachable</div>
+    <p>A call path exists from an entrypoint to the target. This dependency likely needs patching.</p>
+  </section>
+
+  <h2>Call path <span class="muted small" style="font-weight:400">· 3 edges, 0 low confidence</span></h2>
+  <div class="table-scroll"><table>
+    <thead><tr><th>#</th><th>Caller</th><th>Callee</th><th>Location</th><th>Confidence</th><th>Rule</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td><code>pkg.entry</code></td><td><code>pkg.layer_a:step_a</code></td><td><code>pkg/entry.py:4</code></td><td>high</td><td><code>import_alias</code></td></tr>
+      <tr><td class="num">2</td><td><code>pkg.layer_a:step_a</code></td><td><code>pkg.layer_b:step_b</code></td><td><code>pkg/layer_a.py:5</code></td><td>high</td><td><code>import_alias</code></td></tr>
+      <tr><td class="num">3</td><td><code>pkg.layer_b:step_b</code></td><td><code>pkg.sink:vulnerable</code></td><td><code>pkg/layer_b.py:5</code></td><td>high</td><td><code>import_alias</code></td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>Agent commentary</h2>
+  <p class="note">Written by the agent to explain its steps. Not used to derive the verdict.</p>
+  <blockquote class="commentary">confirmed_node_id='pkg.sink:vulnerable'; walked 4 caller node id(s) via backward BFS</blockquote>
+
+  <details>
+    <summary>Tool calls (5)</summary>
+    <div class="call">
+      <div class="call-head"><span class="muted">0</span><code>search_symbol</code><code class="muted">{"pattern": "*vulnerable"}</code></div>
+      <pre>[SymbolNode(node_id='pkg.sink:vulnerable', dotted_module='pkg.sink', qualname='vulnerable', kind=&lt;NodeKind.FUNCTION: 'function'&gt;, file=PosixPath('<span class="redacted" title="Removed by the injection sandbox. Absolute paths are always redacted.">[REDACTED: instruction-like text]</span>'), lineno=1, is_async=False, decorators=[], bases=[], target_id=None, conditional=False, type_checking_only=False)]</pre>
+    </div>
+    <div class="call">
+      <div class="call-head"><span class="muted">1</span><code>find_callers</code><code class="muted">{"node_id": "pkg.sink:vulnerable"}</code></div>
+      <pre>[CallEdge(caller_id='pkg.layer_b:step_b', callee_id='pkg.sink:vulnerable', confidence=&lt;Confidence.HIGH: 'high'&gt;, file=PosixPath('<span class="redacted">[REDACTED: instruction-like text]</span>'), lineno=5, resolution_rule=&lt;ResolutionRule.IMPORT_ALIAS: 'import_alias'&gt;)]</pre>
+    </div>
+    <div class="call">
+      <div class="call-head"><span class="muted">2–4</span><code>find_callers</code><span class="muted small">3 more calls on step_b, step_a, pkg.entry</span></div>
+    </div>
+  </details>
+</main>
+</div>
+
+<!-- ============ SCREEN 3: /jobs/:id, unknown with low-confidence edge ============ -->
+<span class="ref-label">SCREEN 3 · completed, unknown (fixture 13) · plus running state</span>
+<div class="screen">
+<header class="bar"><div class="wrap">
+  <a class="name" href="#">reachability-triage</a>
+  <nav><a href="#">New job</a><a href="#">Source on GitHub</a></nav>
+  <span class="env">local instance · no auth</span>
+</div></header>
+
+<main class="wrap">
+  <p class="small" style="margin:0 0 0.5rem"><a href="#">Jobs</a> / 3b1e09c4</p>
+  <h1 class="mono">pkg.sink:vulnerable</h1>
+  <dl class="facts">
+    <dt>Package</dt><dd><code>reach-fx-13==1.0</code></dd>
+    <dt>Status</dt><dd>Completed</dd>
+    <dt>LLM mode</dt><dd>stub (deterministic policy, not a real model)</dd>
+  </dl>
+
+  <section class="verdict" aria-labelledby="v3">
+    <div class="label" id="v3">Verdict</div>
+    <div class="value">Unknown</div>
+    <p>The analysis could not decide. Treat this as unresolved, not as safe.</p>
+    <div class="reason"><b>Reason.</b> A reachable opaque call (<code>?:&lt;dynamic&gt;</code>) at <code>pkg/entry.py:5</code> carries no literal target name, so a not_reachable verdict cannot be trusted.</div>
+  </section>
+
+  <h2>Partial path <span class="muted small" style="font-weight:400">· 2 edges, 1 low confidence</span></h2>
+  <div class="table-scroll"><table>
+    <thead><tr><th>#</th><th>Caller</th><th>Callee</th><th>Location</th><th>Confidence</th><th>Rule</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td><code>pkg.entry</code></td><td><code>pkg.entry:dispatch</code></td><td><code>pkg/entry.py:9</code></td><td>high</td><td><code>module_scope</code></td></tr>
+      <tr class="low"><td class="num">2</td><td><code>pkg.entry:dispatch</code></td><td><code>?:&lt;dynamic&gt;</code></td><td><code>pkg/entry.py:5</code></td><td class="conf-low">low</td><td><code>dynamic_dispatch</code></td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>Example: tool-call repeats, grouped</h2>
+  <div class="call">
+    <div class="call-head"><span class="muted">3–15</span><code>find_callers</code><code class="muted">{"node_id": "pkg.handlers:route"}</code><span class="repeat">same call 13 times in a row</span></div>
+  </div>
+
+  <h2>Example: while running</h2>
+  <p class="status-line">Running. Last checked 2 seconds ago.</p>
+  <p class="status-line muted small">Stopped checking after 10 minutes. <button class="link" type="button">Resume checking</button></p>
+</main>
+<footer><div class="wrap">reachability-triage v0.3.0 · local instance · verdicts come from static analysis; the agent only chooses which queries to run</div></footer>
+</div>
+
+</body>
+</html>
