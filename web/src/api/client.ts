@@ -50,13 +50,25 @@ function isDetail(value: unknown): value is ErrorDetail {
   )
 }
 
-async function toApiError(response: Response): Promise<ApiError> {
-  let parsed: unknown
+function isAbortError(error: unknown): error is DOMException {
+  return error instanceof DOMException && error.name === 'AbortError'
+}
+
+// Reads a JSON body. An abort while reading propagates as AbortError; any other
+// failure (empty or non-JSON body) resolves to undefined for the caller to classify.
+async function readJson(response: Response): Promise<unknown> {
   try {
-    parsed = await response.json()
-  } catch {
-    parsed = undefined
+    return await response.json()
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error
+    }
+    return undefined
   }
+}
+
+async function toApiError(response: Response): Promise<ApiError> {
+  const parsed = await readJson(response)
   if (isRecord(parsed) && isRecord(parsed.error)) {
     const { code, message, details } = parsed.error
     if (typeof code === 'string' && typeof message === 'string') {
@@ -77,7 +89,7 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
   try {
     response = await fetch(path, init)
   } catch (cause) {
-    if (cause instanceof DOMException && cause.name === 'AbortError') {
+    if (isAbortError(cause)) {
       throw cause
     }
     throw new NetworkError('Network request failed', { cause })
@@ -85,7 +97,15 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
   if (!response.ok) {
     throw await toApiError(response)
   }
-  return (await response.json()) as T
+  const parsed = await readJson(response)
+  if (parsed === undefined) {
+    throw new ApiError(
+      response.status,
+      'UNPARSEABLE_RESPONSE',
+      `Success response was not valid JSON (HTTP ${response.status})`,
+    )
+  }
+  return parsed as T
 }
 
 export function getHealth(signal?: AbortSignal): Promise<{ status: string }> {

@@ -186,4 +186,41 @@ describe('failures outside the error envelope', () => {
     expect(error).toBeInstanceOf(DOMException)
     expect((error as DOMException).name).toBe('AbortError')
   })
+
+  test('a 2xx response with a non-JSON body gives ApiError, not a bare SyntaxError', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>ok</html>', { status: 200 })))
+    const error = await catchError(getTriage('x'))
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error).not.toBeInstanceOf(SyntaxError)
+    expect((error as ApiError).code).toBe('UNPARSEABLE_RESPONSE')
+    expect((error as ApiError).status).toBe(200)
+  })
+
+  test('an abort while the error body is being read rejects with AbortError', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const signal = init?.signal
+        if (signal === undefined || signal === null) {
+          throw new Error('signal was not passed to fetch')
+        }
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            signal.addEventListener('abort', () =>
+              controller.error(new DOMException('Aborted', 'AbortError')),
+            )
+          },
+        })
+        return new Response(stream, { status: 500 })
+      }),
+    )
+    const controller = new AbortController()
+    const pending = catchError(getTriage('x', controller.signal))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    controller.abort()
+    const error = await pending
+    expect(error).toBeInstanceOf(DOMException)
+    expect((error as DOMException).name).toBe('AbortError')
+    expect(error).not.toBeInstanceOf(ApiError)
+  })
 })
