@@ -20,7 +20,7 @@ export default function Layout() {
       </main>
       <footer>
         <div className="wrap">
-          reachability-triage v0.3.0 · local instance · verdicts come from static analysis; the agent only
+          reachability-triage · local instance · verdicts come from static analysis; the agent only
           chooses which queries to run
         </div>
       </footer>
