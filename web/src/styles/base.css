@@ -1,0 +1,83 @@
+/* Rules copied verbatim from design/reference.html, plus the three classes at the end
+   that replace its inline style attributes. */
+
+* { box-sizing: border-box; }
+html { font-size: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 1rem/1.5 var(--sans);
+  -webkit-text-size-adjust: 100%;
+}
+a { color: var(--link); text-underline-offset: 2px; }
+a:hover { color: var(--link-hover); }
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 0;
+  box-shadow: 0 0 0 5px var(--focus-text);
+}
+code, .mono { font-family: var(--mono); font-size: 0.875rem; }
+
+/* top bar: subdued, grey, links to tools only */
+.bar { background: var(--band); border-bottom: 1px solid var(--rule); }
+.bar .wrap { display: flex; gap: 1.5rem; align-items: baseline; padding-block: 0.6rem; flex-wrap: wrap; }
+.bar .name { font-family: var(--mono); font-weight: 600; color: var(--text); text-decoration: none; }
+.bar nav { display: flex; gap: 1.25rem; font-size: 0.9375rem; }
+.bar .env { margin-left: auto; font-size: 0.8125rem; color: var(--muted); }
+
+.wrap { max-width: 62rem; padding-inline: 1rem; margin: 0; }
+@media (min-width: 48rem) { .wrap { padding-inline: 2rem; } }
+main { padding-block: 1.75rem 3rem; }
+
+h1 { font-size: 1.5rem; line-height: 1.25; font-weight: 650; margin: 0 0 0.25rem; }
+h1.mono { font-family: var(--mono); font-size: 1.375rem; overflow-wrap: anywhere; }
+h2 { font-size: 1.0625rem; font-weight: 650; margin: 2.25rem 0 0.6rem; }
+.lede { color: var(--muted); margin: 0 0 1.5rem; max-width: 40rem; }
+.muted { color: var(--muted); }
+.small { font-size: 0.875rem; }
+
+/* tables for structured evidence */
+.table-scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 0.875rem; }
+th, td { text-align: left; padding: 0.45rem 0.75rem 0.45rem 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-weight: 600; color: var(--muted); border-bottom-color: var(--rule-strong); white-space: nowrap; }
+td.num { color: var(--muted); width: 2rem; }
+td code { font-size: 0.8125rem; overflow-wrap: anywhere; }
+tr.low td { background: var(--caution-bg); }
+.conf-low { color: var(--caution); font-weight: 650; }
+
+/* forms: GOV.UK-style weight, labels above */
+.field { margin-bottom: 1.25rem; max-width: 30rem; }
+label { display: block; font-weight: 600; margin-bottom: 0.15rem; }
+.hint { display: block; color: var(--muted); font-size: 0.875rem; margin-bottom: 0.35rem; }
+input[type=text] {
+  width: 100%; font: 1rem/1.4 var(--mono); padding: 0.4rem 0.5rem;
+  color: var(--text); background: var(--bg);
+  border: 2px solid var(--rule-strong); border-radius: 0;
+}
+.field.error input { border-color: var(--danger); }
+.field-error { display: block; color: var(--danger); font-weight: 600; font-size: 0.9375rem; margin-bottom: 0.25rem; }
+.row2 { display: grid; gap: 0 1rem; grid-template-columns: 1fr; max-width: 30rem; }
+@media (min-width: 36rem) { .row2 { grid-template-columns: 2fr 1fr; } }
+.row2 .field { max-width: none; }
+button.primary {
+  font: 600 1rem/1 var(--sans); padding: 0.7rem 1.1rem;
+  background: var(--primary); color: var(--primary-text);
+  border: 0; border-radius: 2px; box-shadow: 0 2px 0 var(--link-hover); cursor: pointer;
+}
+button.link { font: inherit; background: none; border: 0; padding: 0; color: var(--link); text-decoration: underline; cursor: pointer; }
+
+.error-summary { border: 3px solid var(--danger); padding: 0.9rem 1.1rem; margin-bottom: 1.75rem; max-width: 34rem; }
+.error-summary h2 { margin: 0 0 0.4rem; font-size: 1.0625rem; }
+.error-summary ul { margin: 0; padding-left: 1.1rem; }
+.error-summary a { color: var(--danger); font-weight: 600; }
+
+.status-line { font-size: 0.9375rem; margin: 1rem 0 0; }
+
+footer { border-top: 1px solid var(--rule); color: var(--muted); font-size: 0.8125rem; padding-block: 1rem 2rem; }
+
+/* replace inline style attributes in the reference markup */
+.optional { font-weight: 400; }
+.form-note { max-width: 30rem; }
+.panel-note { font-weight: 400; }

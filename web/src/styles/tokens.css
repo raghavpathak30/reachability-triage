@@ -1,0 +1,41 @@
+/* Design tokens, copied verbatim from design/reference.html. */
+
+:root {
+  --bg: #ffffff;
+  --text: #1f1f1f;
+  --muted: #5d5d5a;
+  --rule: #cfcfcb;
+  --rule-strong: #1f1f1f;
+  --band: #eeeeec;
+  --code-bg: #f4f4f2;
+  --link: #1d4e89;
+  --link-hover: #0f2f57;
+  --primary: #1d4e89;
+  --primary-text: #ffffff;
+  --danger: #a3261b;
+  --caution: #7a5600;
+  --caution-bg: #fbf4e4;
+  --focus: #ffdd00;
+  --focus-text: #0b0c0c;
+
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161616;
+    --text: #e6e6e3;
+    --muted: #a3a39e;
+    --rule: #3a3a38;
+    --rule-strong: #e6e6e3;
+    --band: #222221;
+    --code-bg: #1f1f1e;
+    --link: #8fb4e3;
+    --link-hover: #c3d7f1;
+    --primary: #8fb4e3;
+    --primary-text: #0b0c0c;
+    --danger: #f08a7e;
+    --caution: #e3b85c;
+    --caution-bg: #2a2416;
+  }
+}
