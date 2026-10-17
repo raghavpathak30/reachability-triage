@@ -76,7 +76,7 @@ export function usePollTriage(id: string): UsePollTriage {
       stopped = true
       clearTimeout(pollTimer)
       controller.abort()
-      update({ state: 'capped' })
+      update({ state: 'capped', error: null })
     }, CAP_MS)
 
     const scheduleNext = () => {

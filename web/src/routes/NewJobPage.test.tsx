@@ -117,3 +117,62 @@ test('mentions that repository URLs are not supported', () => {
   renderPage()
   expect(screen.getByText(/Repository URLs are not supported yet/)).toBeInTheDocument()
 })
+
+// A fetch that stays pending until its signal aborts, so in-flight behaviour can be observed.
+function stubPendingFetch() {
+  const signals: AbortSignal[] = []
+  const fetchMock = vi.fn((_input: unknown, init?: RequestInit) => {
+    const signal = init?.signal
+    if (signal === undefined || signal === null) throw new Error('fetch called without a signal')
+    signals.push(signal)
+    return new Promise<Response>((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+    })
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return { fetchMock, signals }
+}
+
+test('the submit button is disabled while the request is in flight and a second click sends nothing', async () => {
+  const { fetchMock } = stubPendingFetch()
+  renderPage()
+  fillAll()
+  const button = screen.getByRole('button', { name: 'Start triage' })
+  expect(button).toBeEnabled()
+  fireEvent.click(button)
+  await waitFor(() => expect(button).toBeDisabled())
+  expect(fetchMock).toHaveBeenCalledTimes(1)
+  fireEvent.submit(button.closest('form') as HTMLFormElement)
+  expect(fetchMock).toHaveBeenCalledTimes(1)
+})
+
+test('unmounting while the request is in flight aborts it and shows no error', async () => {
+  const { signals } = stubPendingFetch()
+  const { unmount } = renderPage()
+  fillAll()
+  fireEvent.click(screen.getByRole('button', { name: 'Start triage' }))
+  await waitFor(() => expect(signals).toHaveLength(1))
+  expect(signals[0]?.aborted).toBe(false)
+  unmount()
+  expect(signals[0]?.aborted).toBe(true)
+  await Promise.resolve()
+  expect(document.querySelector('[role="alert"]')).toBeNull()
+})
+
+test('target_symbol is omitted from the request body when empty and values are trimmed', async () => {
+  const fetchMock = stubFetch(202, { id: ID })
+  renderPage()
+  fill('Package', ' reach-fx-02 ')
+  fill('Version', ' 1.0 ')
+  fill('Target module', ' pkg.sink ')
+  fill(/Target symbol/, '   ')
+  fireEvent.click(screen.getByRole('button', { name: 'Start triage' }))
+  await screen.findByText('placeholder for job')
+  expect(fetchMock).toHaveBeenCalledTimes(1)
+  const init = (fetchMock.mock.calls[0] as unknown as [unknown, RequestInit])[1]
+  expect(JSON.parse(String(init.body))).toEqual({
+    package: 'reach-fx-02',
+    version: '1.0',
+    target_module: 'pkg.sink',
+  })
+})

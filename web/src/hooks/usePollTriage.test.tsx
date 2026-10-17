@@ -11,6 +11,7 @@ type Outcome =
   | { kind: 'network' }
   | { kind: 'unparseable' }
   | { kind: 'hang' }
+  | { kind: 'late'; afterMs: number; body: unknown }
 
 const running: Outcome = { kind: 'body', status: 200, body: { id: ID, status: 'running' } }
 const completed: Outcome = { kind: 'body', status: 200, body: { id: ID, status: 'completed' } }
@@ -54,6 +55,12 @@ function installFetch(script: Outcome[]) {
         return Promise.reject(new TypeError('offline'))
       case 'unparseable':
         return Promise.resolve(new Response('<html>', { status: 200 }))
+      case 'late':
+        // Ignores the abort signal and resolves after afterMs, like a fetch that
+        // does not honour cancellation.
+        return new Promise<Response>((resolve) => {
+          setTimeout(() => resolve(Response.json(outcome.body, { status: 200 })), outcome.afterMs)
+        })
       case 'hang':
         return new Promise<Response>((_resolve, reject) => {
           signal.addEventListener('abort', () => reject(abortError()))
@@ -196,20 +203,71 @@ test.each([
   expect(calls).toHaveLength(4)
 
   act(() => result.current.retry())
-  await advance(0)
-  expect(calls).toHaveLength(5)
-  expect(result.current.state).toBe('polling')
+  // Immediately after retry(), before the new request resolves: state is reset
+  // and the restarted loop has issued its first request at once.
   expect(result.current.failureCount).toBe(0)
   expect(result.current.error).toBeNull()
+  expect(result.current.state).toBe('polling')
   expect(result.current.data?.status).toBe('running')
+  expect(calls).toHaveLength(5)
+  const retryAt = calls[4]?.at ?? -1
+  await advance(0)
+  expect(result.current.state).toBe('polling')
+  expect(result.current.failureCount).toBe(0)
+  await advance(999)
+  expect(calls).toHaveLength(5)
+  await advance(1)
+  expect(calls).toHaveLength(6)
+  expect((calls[5]?.at ?? 0) - retryAt).toBe(1000)
 })
 
 test('a success between failures resets the consecutive count', async () => {
   installFetch([network, network, running, network, network, running])
   const { result } = renderHook(() => usePollTriage(ID))
-  await advance(20000)
+  await advance(1000)
+  expect(calls.map((c) => c.at)).toEqual([0, 1000])
+  expect(result.current.failureCount).toBe(2)
+  await advance(1500)
+  expect(calls.map((c) => c.at)).toEqual([0, 1000, 2500])
+  expect(result.current.failureCount).toBe(0)
   expect(result.current.state).toBe('polling')
-  expect(calls.length).toBeGreaterThan(5)
+  await advance(2250)
+  expect(calls.map((c) => c.at)).toEqual([0, 1000, 2500, 4750])
+  expect(result.current.failureCount).toBe(1)
+  await advance(3375)
+  expect(calls.map((c) => c.at)).toEqual([0, 1000, 2500, 4750, 8125])
+  expect(result.current.failureCount).toBe(2)
+  expect(result.current.state).toBe('polling')
+  await advance(5000)
+  expect(calls.map((c) => c.at)).toEqual([0, 1000, 2500, 4750, 8125, 13125])
+  expect(result.current.failureCount).toBe(0)
+  expect(result.current.state).toBe('polling')
+})
+
+test('a response that ignores the abort signal and lands after the deadline is discarded', async () => {
+  installFetch([running, { kind: 'late', afterMs: 700000, body: { id: ID, status: 'completed' } }])
+  const { result } = renderHook(() => usePollTriage(ID))
+  await advance(1000)
+  expect(calls).toHaveLength(2)
+  await advance(599000)
+  expect(result.current.state).toBe('capped')
+  expect(calls[1]?.signal.aborted).toBe(true)
+  await advance(200000)
+  expect(result.current.state).toBe('capped')
+  expect(result.current.data?.status).toBe('running')
+  expect(calls).toHaveLength(2)
+})
+
+test('capped clears an error left by earlier transient failures', async () => {
+  installFetch([running, network, { kind: 'hang' }])
+  const { result } = renderHook(() => usePollTriage(ID))
+  await advance(1000)
+  expect(result.current.error).not.toBeNull()
+  expect(result.current.failureCount).toBe(1)
+  await advance(600000)
+  expect(result.current.state).toBe('capped')
+  expect(result.current.error).toBeNull()
+  expect(result.current.data?.status).toBe('running')
 })
 
 test('retry restarts the cap clock', async () => {
