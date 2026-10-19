@@ -63,6 +63,14 @@ existing Docker Compose stack and is the surface the demo GIF is recorded on.
    start at 1 s, back off ×1.5 to a 5 s ceiling, stop on `completed`/`failed`,
    stop after 10 minutes with a visible "still running — resume polling"
    control. Unmount aborts in-flight requests.
+   *Status (F2, shipped; the rules above are otherwise unchanged):* a 404 or any
+   other 4xx stops polling at once. Network errors, 5xx and unparseable
+   responses keep the normal backoff schedule and stop only after 3 consecutive
+   failures, keeping the last good data; any success resets the count. The
+   10-minute cap runs from the first poll, and `retry()`/`resume()` (the same
+   function) restart the cap and the failure count. The visible control is not
+   built yet (F3); its planned copy is
+   "Resume checking". `web/src/hooks/usePollTriage.ts`.
 6. **Untrusted text.** Tool results, rationale, reasons, file paths and error
    strings are repo- or advisory-derived. Render them as React text only.
    `dangerouslySetInnerHTML` is banned via ESLint (`react/no-danger: error`).
