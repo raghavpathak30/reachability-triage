@@ -1,0 +1,17 @@
+{
+ "id": "22222222-3333-4444-8555-666666666666",
+ "status": "completed",
+ "finding": {
+  "result": {
+   "target_module": "pkg.sink",
+   "target_symbol": "vulnerable",
+   "verdict": "unknown",
+   "path": null,
+   "reason": null
+  },
+  "rationale": "",
+  "tool_calls": []
+ },
+ "error": null,
+ "llm_mode": "stub"
+}
