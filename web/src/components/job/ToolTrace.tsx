@@ -1,5 +1,5 @@
 import type { components } from '../../api/schema'
-import { displayArguments, displayPath, groupToolCalls } from '../../lib/displayText'
+import { groupToolCalls } from '../../lib/displayText'
 import RedactedText from './RedactedText'
 
 type ToolCallRecord = components['schemas']['ToolCallRecord']
@@ -21,9 +21,9 @@ export default function ToolTrace({ calls }: { calls: ToolCallRecord[] | null | 
               <code>{g.first.tool_name}</code>
               {g.count > 1 && <span className="repeat">same call {g.count} times in a row</span>}
             </div>
-            <pre className="args">{displayArguments(g.first.arguments)}</pre>
+            <pre className="args">{JSON.stringify(g.first.arguments, null, 2)}</pre>
             <pre>
-              <RedactedText text={displayPath(g.first.result)} />
+              <RedactedText text={g.first.result} />
             </pre>
           </div>
         )

@@ -14,20 +14,6 @@ export function displayPath(s: string): string {
   return s.replace(EXTRACTED_PATH, '')
 }
 
-function mapStrings(value: unknown): unknown {
-  if (typeof value === 'string') return displayPath(value)
-  if (Array.isArray(value)) return value.map(mapStrings)
-  if (typeof value === 'object' && value !== null) {
-    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, mapStrings(v)]))
-  }
-  return value
-}
-
-// Trims string values structurally, then serialises; never trims serialised text.
-export function displayArguments(args: unknown): string {
-  return JSON.stringify(mapStrings(args), null, 2) ?? 'null'
-}
-
 export interface TextPart {
   text: string
   redacted: boolean

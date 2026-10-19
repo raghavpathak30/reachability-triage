@@ -352,19 +352,35 @@ test('tampered localStorage never changes the verdict, target fact or path table
   expect(screen.getByText('Reachable')).toBeInTheDocument()
 })
 
-test('R6 arguments render as pretty JSON with every string value kept and only the extracted path trimmed', async () => {
+test('R6 arguments render as raw pretty JSON with no path trimming', async () => {
   const withArgs: { id: string; finding: { tool_calls: unknown } } = structuredClone(repeated)
-  withArgs.finding.tool_calls = [
-    {
-      sequence: 0,
-      tool_name: 'read_file',
-      arguments: { a: '/x', file: '/tmp/q/extracted/a.py', other: '/home/u/keep.py' },
-      result: '[]',
-    },
-  ]
+  const raw = { a: '/x', file: '/tmp/q/extracted/a.py', other: '/home/u/keep.py' }
+  withArgs.finding.tool_calls = [{ sequence: 0, tool_name: 'read_file', arguments: raw, result: '[]' }]
   const { container } = await renderJob([body(withArgs)], withArgs.id)
-  const args = container.querySelector('pre.args')
-  expect(args?.textContent).toBe(
-    JSON.stringify({ a: '/x', file: 'a.py', other: '/home/u/keep.py' }, null, 2),
-  )
+  expect(container.querySelector('pre.args')?.textContent).toBe(JSON.stringify(raw, null, 2))
+})
+
+test('R9 shows a tool result containing /extracted/ exactly as received', async () => {
+  const withResult: { id: string; finding: { tool_calls: unknown } } = structuredClone(repeated)
+  const raw = "opened /tmp/q/extracted/pkg/a.py and PosixPath('[REDACTED: instruction-like text]')"
+  withResult.finding.tool_calls = [{ sequence: 0, tool_name: 'read_file', arguments: {}, result: raw }]
+  const { container } = await renderJob([body(withResult)], withResult.id)
+  const pre = container.querySelector('.call pre:not(.args)')
+  expect(pre?.textContent).toBe(raw)
+  expect(pre?.querySelector('.redacted')).toHaveAttribute('title')
+})
+
+test('R9 shows a failed error string containing /extracted/ exactly as received', async () => {
+  const raw = 'AcquisitionError: bad wheel at /tmp/q/extracted/pkg/a.py [REDACTED: instruction-like text]'
+  const { container } = await renderJob([body({ ...failed, error: raw })], failed.id)
+  const summary = container.querySelector('.error-summary p')
+  expect(summary?.textContent).toBe(raw)
+  expect(summary?.querySelector('.redacted')).toHaveAttribute('title')
+})
+
+test('R9 shows commentary exactly as received', async () => {
+  const withNote = structuredClone(reachable)
+  withNote.finding.rationale = 'looked at /tmp/q/extracted/pkg/a.py'
+  const { container } = await renderJob([body(withNote)], withNote.id)
+  expect(container.querySelector('blockquote.commentary')?.textContent).toBe('looked at /tmp/q/extracted/pkg/a.py')
 })

@@ -7,7 +7,7 @@ import RedactedText from '../components/job/RedactedText'
 import ToolTrace from '../components/job/ToolTrace'
 import VerdictSection from '../components/job/VerdictSection'
 import { usePollTriage } from '../hooks/usePollTriage'
-import { displayPath, llmModeLabel } from '../lib/displayText'
+import { llmModeLabel } from '../lib/displayText'
 import { loadRecent } from '../lib/recentJobs'
 
 type TriageOut = components['schemas']['TriageOut']
@@ -132,7 +132,7 @@ function JobView({ id }: { id: string }) {
       <StatusLine
         data={data}
         state={state}
-        errorMessage={error === null ? null : displayPath(error.message)}
+        errorMessage={error === null ? null : error.message}
         seconds={seconds}
         onResume={resume}
         onRetry={retry}
@@ -142,7 +142,7 @@ function JobView({ id }: { id: string }) {
         <div className="error-summary" role="alert">
           <h2>Job failed</h2>
           <p>
-            <RedactedText text={displayPath(data.error ?? 'No error message was recorded.')} />
+            <RedactedText text={data.error ?? 'No error message was recorded.'} />
           </p>
         </div>
       )}
