@@ -56,3 +56,18 @@ services:
       interval: 2s
       timeout: 5s
       retries: 30
+
+  web:
+    build: ./web
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8080}:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    # Proves nginx serves /, not that the api proxy works
+    # (scripts/smoke_compose.sh does).
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
