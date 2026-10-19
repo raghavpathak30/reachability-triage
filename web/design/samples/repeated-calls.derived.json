@@ -1,0 +1,66 @@
+{
+ "id": "11111111-2222-4333-8444-555555555555",
+ "status": "completed",
+ "finding": {
+  "result": {
+   "target_module": "pkg.sink",
+   "target_symbol": "vulnerable",
+   "verdict": "unknown",
+   "path": null,
+   "reason": "the agent stopped before reaching an entrypoint"
+  },
+  "rationale": "budget exhausted",
+  "tool_calls": [
+   {
+    "sequence": 0,
+    "tool_name": "search_symbol",
+    "arguments": {
+     "pattern": "*vulnerable"
+    },
+    "result": "[]"
+   },
+   {
+    "sequence": 1,
+    "tool_name": "find_callers",
+    "arguments": {
+     "node_id": "pkg.sink:vulnerable"
+    },
+    "result": "[CallEdge(caller_id='pkg.a', callee_id='pkg.b', file=PosixPath('[REDACTED: instruction-like text]'), lineno=3)]"
+   },
+   {
+    "sequence": 2,
+    "tool_name": "find_callers",
+    "arguments": {
+     "node_id": "pkg.handlers:route"
+    },
+    "result": "[CallEdge(caller_id='pkg.a', callee_id='pkg.b', file=PosixPath('[REDACTED: instruction-like text]'), lineno=3)]"
+   },
+   {
+    "sequence": 3,
+    "tool_name": "find_callers",
+    "arguments": {
+     "node_id": "pkg.handlers:route"
+    },
+    "result": "[]"
+   },
+   {
+    "sequence": 4,
+    "tool_name": "find_callers",
+    "arguments": {
+     "node_id": "pkg.handlers:route"
+    },
+    "result": "[]"
+   },
+   {
+    "sequence": 5,
+    "tool_name": "find_callers",
+    "arguments": {
+     "node_id": "pkg.other"
+    },
+    "result": "[]"
+   }
+  ]
+ },
+ "error": null,
+ "llm_mode": "stub"
+}

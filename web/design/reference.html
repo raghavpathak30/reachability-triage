@@ -266,7 +266,16 @@ footer { border-top: 1px solid var(--rule); color: var(--muted); font-size: 0.81
       <pre>[CallEdge(caller_id='pkg.layer_b:step_b', callee_id='pkg.sink:vulnerable', confidence=&lt;Confidence.HIGH: 'high'&gt;, file=PosixPath('<span class="redacted">[REDACTED: instruction-like text]</span>'), lineno=5, resolution_rule=&lt;ResolutionRule.IMPORT_ALIAS: 'import_alias'&gt;)]</pre>
     </div>
     <div class="call">
-      <div class="call-head"><span class="muted">2–4</span><code>find_callers</code><span class="muted small">3 more calls on step_b, step_a, pkg.entry</span></div>
+      <div class="call-head"><span class="muted">2</span><code>find_callers</code><code class="muted">{"node_id": "pkg.layer_b:step_b"}</code></div>
+      <pre>[CallEdge(caller_id='pkg.layer_a:step_a', callee_id='pkg.layer_b:step_b', confidence=&lt;Confidence.HIGH: 'high'&gt;, file=PosixPath('<span class="redacted" title="Removed by the injection sandbox. Absolute paths are always redacted.">[REDACTED: instruction-like text]</span>'), lineno=5, resolution_rule=&lt;ResolutionRule.IMPORT_ALIAS: 'import_alias'&gt;)]</pre>
+    </div>
+    <div class="call">
+      <div class="call-head"><span class="muted">3</span><code>find_callers</code><code class="muted">{"node_id": "pkg.layer_a:step_a"}</code></div>
+      <pre>[CallEdge(caller_id='pkg.entry', callee_id='pkg.layer_a:step_a', confidence=&lt;Confidence.HIGH: 'high'&gt;, file=PosixPath('<span class="redacted" title="Removed by the injection sandbox. Absolute paths are always redacted.">[REDACTED: instruction-like text]</span>'), lineno=4, resolution_rule=&lt;ResolutionRule.IMPORT_ALIAS: 'import_alias'&gt;)]</pre>
+    </div>
+    <div class="call">
+      <div class="call-head"><span class="muted">4</span><code>find_callers</code><code class="muted">{"node_id": "pkg.entry"}</code></div>
+      <pre>[]</pre>
     </div>
   </details>
 </main>

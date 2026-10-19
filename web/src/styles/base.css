@@ -81,3 +81,33 @@ footer { border-top: 1px solid var(--rule); color: var(--muted); font-size: 0.81
 .optional { font-weight: 400; }
 .form-note { max-width: 30rem; }
 .panel-note { font-weight: 400; }
+
+/* job view (F3), copied from reference.html */
+.crumb { margin: 0 0 0.5rem; }
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.3rem 1.5rem; margin: 1rem 0 0; font-size: 0.9375rem; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+
+.verdict { border-top: 2px solid var(--rule-strong); padding-top: 0.75rem; margin-top: 1.75rem; }
+.verdict .label { font-size: 0.8125rem; color: var(--muted); }
+.verdict .value { font-size: 1.25rem; font-weight: 700; margin: 0.1rem 0 0.25rem; }
+.verdict .value.reachable { color: var(--danger); }
+.verdict .value.tests-only { color: var(--caution); }
+.verdict p { margin: 0.25rem 0 0; max-width: 44rem; }
+.reason { margin-top: 0.75rem; padding: 0.75rem 1rem; background: var(--code-bg); border: 1px solid var(--rule); font-size: 0.9375rem; max-width: 46rem; }
+.reason b { font-weight: 650; }
+
+.note { font-size: 0.875rem; color: var(--muted); margin: 0.25rem 0 0.6rem; }
+blockquote.commentary { margin: 0; padding: 0.6rem 0 0.6rem 1rem; border-left: 1px solid var(--rule); font-family: var(--mono); font-size: 0.8125rem; overflow-wrap: anywhere; }
+
+details { margin-top: 0.5rem; border-top: 1px solid var(--rule); }
+summary { cursor: pointer; padding: 0.6rem 0; font-weight: 600; }
+.call { border-bottom: 1px solid var(--rule); padding: 0.6rem 0; }
+.call-head { display: flex; gap: 0.75rem; align-items: baseline; flex-wrap: wrap; font-size: 0.875rem; }
+.call pre { margin: 0.4rem 0 0; padding: 0.6rem 0.75rem; background: var(--code-bg); font: 0.8125rem/1.45 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 12rem; overflow: auto; }
+.redacted { color: var(--muted); font-style: italic; }
+.repeat { font-size: 0.8125rem; color: var(--caution); }
+
+/* failed panel: align with the content column and separate from the facts */
+.facts + .error-summary { margin-top: 1.75rem; max-width: none; }
+.status-line + .error-summary { margin-top: 1.75rem; max-width: none; }
