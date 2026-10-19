@@ -21,7 +21,9 @@ export default function ToolTrace({ calls }: { calls: ToolCallRecord[] | null | 
               <code>{g.first.tool_name}</code>
               {g.count > 1 && <span className="repeat">same call {g.count} times in a row</span>}
             </div>
-            <pre className="args">{JSON.stringify(g.first.arguments, null, 2)}</pre>
+            <pre className="args">
+              <RedactedText text={JSON.stringify(g.first.arguments, null, 2)} />
+            </pre>
             <pre>
               <RedactedText text={g.first.result} />
             </pre>

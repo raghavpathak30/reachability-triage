@@ -4,7 +4,10 @@ import { afterEach, expect, test, vi } from 'vitest'
 import notFound from './api/__fixtures__/404-valid-uuid.json'
 import App from './App'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 test('renders the new job form at /', () => {
   render(

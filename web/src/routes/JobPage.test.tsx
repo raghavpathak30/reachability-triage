@@ -384,3 +384,16 @@ test('R9 shows commentary exactly as received', async () => {
   const { container } = await renderJob([body(withNote)], withNote.id)
   expect(container.querySelector('blockquote.commentary')?.textContent).toBe('looked at /tmp/q/extracted/pkg/a.py')
 })
+
+test('R9 renders a redaction marker inside tool arguments muted with the sandbox title', async () => {
+  const withArgs: { id: string; finding: { tool_calls: unknown } } = structuredClone(repeated)
+  const raw = { path: '[REDACTED: instruction-like text]', keep: '/tmp/q/extracted/a.py' }
+  withArgs.finding.tool_calls = [{ sequence: 0, tool_name: 'read_file', arguments: raw, result: '[]' }]
+  const { container } = await renderJob([body(withArgs)], withArgs.id)
+  const args = container.querySelector('pre.args')
+  expect(args?.textContent).toBe(JSON.stringify(raw, null, 2))
+  expect(args?.querySelector('.redacted')).toHaveAttribute(
+    'title',
+    'Removed by the injection sandbox. Absolute paths are always redacted.',
+  )
+})
