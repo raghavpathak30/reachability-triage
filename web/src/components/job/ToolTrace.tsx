@@ -1,5 +1,5 @@
 import type { components } from '../../api/schema'
-import { displayPath, groupToolCalls } from '../../lib/displayText'
+import { displayArguments, displayPath, groupToolCalls } from '../../lib/displayText'
 import RedactedText from './RedactedText'
 
 type ToolCallRecord = components['schemas']['ToolCallRecord']
@@ -11,17 +11,17 @@ export default function ToolTrace({ calls }: { calls: ToolCallRecord[] | null | 
   return (
     <details>
       <summary>Tool calls ({total})</summary>
-      {groups.map((g) => {
+      {groups.map((g, i) => {
         const range =
           g.count === 1 ? `${g.first.sequence}` : `${g.first.sequence}–${g.last.sequence}`
         return (
-          <div className="call" key={g.first.sequence}>
+          <div className="call" key={`${g.first.sequence}-${i}`}>
             <div className="call-head">
               <span className="muted">{range}</span>
               <code>{g.first.tool_name}</code>
-              <code className="muted">{displayPath(JSON.stringify(g.first.arguments))}</code>
               {g.count > 1 && <span className="repeat">same call {g.count} times in a row</span>}
             </div>
+            <pre className="args">{displayArguments(g.first.arguments)}</pre>
             <pre>
               <RedactedText text={displayPath(g.first.result)} />
             </pre>

@@ -107,3 +107,7 @@ summary { cursor: pointer; padding: 0.6rem 0; font-weight: 600; }
 .call pre { margin: 0.4rem 0 0; padding: 0.6rem 0.75rem; background: var(--code-bg); font: 0.8125rem/1.45 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 12rem; overflow: auto; }
 .redacted { color: var(--muted); font-style: italic; }
 .repeat { font-size: 0.8125rem; color: var(--caution); }
+
+/* failed panel: align with the content column and separate from the facts */
+.facts + .error-summary { margin-top: 1.75rem; max-width: none; }
+.status-line + .error-summary { margin-top: 1.75rem; max-width: none; }

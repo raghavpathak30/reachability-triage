@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import type { components } from '../api/schema'
-import { displayPath, groupToolCalls, llmModeLabel, lowConfidenceCount, splitRedactions } from './displayText'
+import { displayArguments, displayPath, groupToolCalls, llmModeLabel, lowConfidenceCount, splitRedactions } from './displayText'
 
 type Call = components['schemas']['ToolCallRecord']
 
@@ -111,4 +111,10 @@ test('counts low confidence edges and labels llm mode', () => {
   expect(llmModeLabel('groq')).toBe('groq')
   expect(llmModeLabel(null)).toBe('not recorded')
   expect(llmModeLabel(undefined)).toBe('not recorded')
+})
+
+test('R9 displayArguments trims string values structurally and keeps every key', () => {
+  const out = displayArguments({ a: '/x', file: '/tmp/q/extracted/a.py', list: ['/home/u/x', '/tmp/q/extracted/b.py'] })
+  expect(JSON.parse(out)).toEqual({ a: '/x', file: 'a.py', list: ['/home/u/x', 'b.py'] })
+  expect(out).toContain('\n')
 })

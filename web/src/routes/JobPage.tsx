@@ -23,12 +23,13 @@ function statusWord(status: string): string {
   return STATUS_WORDS[status] ?? status
 }
 
-function useSecondsSince(epochMs: number | null): number | null {
+function useSecondsSince(epochMs: number | null, active: boolean): number | null {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
+    if (!active) return undefined
     const timer = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(timer)
-  }, [])
+  }, [active])
   if (epochMs === null) return null
   return Math.max(0, Math.floor((now - epochMs) / 1000))
 }
@@ -86,7 +87,7 @@ function StatusLine({
 
 function JobView({ id }: { id: string }) {
   const { data, state, error, lastCheckedAt, resume, retry } = usePollTriage(id)
-  const seconds = useSecondsSince(lastCheckedAt)
+  const seconds = useSecondsSince(lastCheckedAt, state === 'polling' && lastCheckedAt !== null)
   const [recentTarget] = useState(() => loadRecent().find((j) => j.id === id)?.target ?? null)
 
   if (state === 'not_found') {
@@ -131,7 +132,7 @@ function JobView({ id }: { id: string }) {
       <StatusLine
         data={data}
         state={state}
-        errorMessage={error === null ? null : error.message}
+        errorMessage={error === null ? null : displayPath(error.message)}
         seconds={seconds}
         onResume={resume}
         onRetry={retry}

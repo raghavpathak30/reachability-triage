@@ -234,10 +234,22 @@ test('R7 404 shows job not found with the id', async () => {
 
 test('R7 network failure keeps the last good status and id and shows retry', async () => {
   const running = { id: REACHABLE_ID, status: 'running', finding: null, error: null, llm_mode: null }
-  await renderJob([body(running), { kind: 'network' }], REACHABLE_ID)
+  const fetchMock = installFetch([body(running), { kind: 'network' }])
+  render(
+    <MemoryRouter initialEntries={[`/jobs/${REACHABLE_ID}`]}>
+      <Routes>
+        <Route path="/jobs/:id" element={<JobPage />} />
+      </Routes>
+    </MemoryRouter>,
+  )
+  await advance(0)
   expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
   await advance(1000)
   expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+  const before = fetchMock.mock.calls.length
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+  await advance(0)
+  expect(fetchMock.mock.calls.length).toBe(before + 1)
   expect(screen.getByText('Running', { selector: 'dd' })).toBeInTheDocument()
   expect(screen.getByText(REACHABLE_ID)).toBeInTheDocument()
 })
@@ -338,4 +350,21 @@ test('tampered localStorage never changes the verdict, target fact or path table
   expect(done.container.textContent).not.toContain(evil)
   expect(done.container.querySelectorAll('tbody tr')).toHaveLength(3)
   expect(screen.getByText('Reachable')).toBeInTheDocument()
+})
+
+test('R6 arguments render as pretty JSON with every string value kept and only the extracted path trimmed', async () => {
+  const withArgs: { id: string; finding: { tool_calls: unknown } } = structuredClone(repeated)
+  withArgs.finding.tool_calls = [
+    {
+      sequence: 0,
+      tool_name: 'read_file',
+      arguments: { a: '/x', file: '/tmp/q/extracted/a.py', other: '/home/u/keep.py' },
+      result: '[]',
+    },
+  ]
+  const { container } = await renderJob([body(withArgs)], withArgs.id)
+  const args = container.querySelector('pre.args')
+  expect(args?.textContent).toBe(
+    JSON.stringify({ a: '/x', file: 'a.py', other: '/home/u/keep.py' }, null, 2),
+  )
 })
