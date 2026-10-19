@@ -62,6 +62,13 @@ if [ -z "${API_PORT:-}" ]; then
   API_PORT="$("$PYTHON" -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
 fi
 export API_PORT
+if [ -z "${WEB_PORT:-}" ]; then
+  WEB_PORT="$API_PORT"
+  while [ "$WEB_PORT" = "$API_PORT" ]; do
+    WEB_PORT="$("$PYTHON" -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
+  done
+fi
+export WEB_PORT
 BASE="http://127.0.0.1:${API_PORT}"
 
 STARTED=1
