@@ -120,6 +120,8 @@ status, h, body = fetch("/")
 if status != 200 or '<div id="root">' not in body:
     fail(f"(h) GET / status {status} or missing root div")
 headers_ok("(i) /", h)
+if "no-cache" not in (h.get("Cache-Control") or ""):
+    fail(f"(i) / Cache-Control is {h.get('Cache-Control')!r}, want no-cache")
 for m in re.finditer(r"<script\b([^>]*)>(.*?)</script>", body, re.S | re.I):
     if "src=" not in m.group(1) or m.group(2).strip():
         fail("(i) inline <script> in served /")
@@ -130,6 +132,8 @@ status, h, _ = fetch("/assets/does-not-exist.js")
 if status != 404:
     fail(f"(j) /assets/does-not-exist.js status {status}, want 404")
 headers_ok("(j) /assets 404", h)
+if "immutable" in (h.get("Cache-Control") or ""):
+    fail(f"(j) /assets 404 Cache-Control is {h.get('Cache-Control')!r}, must not be immutable")
 
 status, h, body = fetch("/v1/triage/not-a-uuid")
 if status != 404:
