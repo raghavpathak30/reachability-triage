@@ -26,10 +26,13 @@ guard against repeating an identical tool call (`run_trace.py:108` only *measure
 in the model's context (`langgraph_loop.py:210` appends only tool results). The
 last three are Phase 9 findings, see `DECISIONS.md` §17.
 Frontend (`web/`, `agent_docs/PHASE_FRONTEND.md`): F1 (scaffold, typed
-client) and F2 (`/` submit form, `usePollTriage`, recent-jobs panel) are
-merged. Not built yet: the `/jobs/:id` job view (`web/src/routes/JobPage.tsx`
-is a placeholder showing only the id), so `usePollTriage` is not wired into
-any route (F3), and the nginx/CSP/compose frontend container (F4).
+client), F2 (`/` submit form, `usePollTriage`, recent-jobs panel) and F3
+(`/jobs/:id` job view: `web/src/routes/JobPage.tsx:89` wires `usePollTriage`;
+verdict/path/commentary/trace/failed/404/capped states, R9 trim only on
+`CallEdge.file` and `reason`) are merged. Not built yet: the nginx/CSP/compose
+frontend container (F4), and the job page cannot show Package or Target for
+queued/running/failed jobs because `GET /v1/triage/{id}` does not return the
+submitted target (see `DECISIONS.md` §18; plan `agent_docs/plans/F3_PLAN.md`).
 These are in DECISIONS.md as intent. Check the code before claiming any
 of them work — in a README, docstring, commit message or comment.
 

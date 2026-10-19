@@ -1338,3 +1338,12 @@ GATE U2-BRANCH (orchestrator, after the human returns; no code written before th
 - **Injection resistance remains unclaimed** (§13: budget exhaustion is not resistance).
 
 **Open items.** (1) Phase 10 candidate: a deterministic guard against repeating an identical tool call, evaluated on the clean 30 first, then adversarial + control reruns (resume or re-run the 4 infra rows) for a resistance claim under criterion B. (2) Follow-up control: the sanitized injection's shape with the non-marker text replaced by filler (amendment 2). (3) Assistant turns are still not recorded in the model's context (Phase 8 §8), a plausible loop mechanism, untested. (4) `README.md`/`agent_docs/DEMO.md` stale lines flagged in the critique (verify in the docs step). (5) Authenticated worker healthcheck via psycopg (Phase 8 open item, unchanged). (6) `run_eval_suite.py`'s 10 s per-fixture SIGALRM still prevents the CI `eval-real` lane from completing real-model investigations (`eval_harness.py:44-45,148-149`).
+
+## 18. Frontend F3 — job view, open items (19 Oct 2026)
+
+Status note only; no earlier decision changed. F3 shipped `/jobs/:id` (plan: `agent_docs/plans/F3_PLAN.md`).
+
+**Open items for F5.**
+1. `GET /v1/triage/{id}` does not return the submitted target (package, version, target_module, target_symbol), so the job page cannot show Package for queued, running or failed jobs, and shows Target only from `finding.result` on completed jobs. The h1 may use the localStorage `RecentJob` while `finding` is null (rendered as text; it never feeds the verdict, path or facts). Backend fix: include target in `TriageOut`.
+2. R9 trim limits (applied only to `CallEdge.file` and `reason`): a `file=`-prefixed token is not trimmed; repeated `/extracted/` segments trim to after the first match (`/tmp/a/extracted/b/extracted/c.py` becomes `b/extracted/c.py`); paths with spaces are not handled. Tool results, arguments, rationale and error strings render as received and can show worker temp paths.
+3. Caller and Callee are separate table columns (matches `reference.html`), not R3's "caller → callee" form.

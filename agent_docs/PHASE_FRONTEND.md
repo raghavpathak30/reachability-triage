@@ -68,9 +68,8 @@ existing Docker Compose stack and is the surface the demo GIF is recorded on.
    responses keep the normal backoff schedule and stop only after 3 consecutive
    failures, keeping the last good data; any success resets the count. The
    10-minute cap runs from the first poll, and `retry()`/`resume()` (the same
-   function) restart the cap and the failure count. The visible control is not
-   built yet (F3); its planned copy is
-   "Resume checking". `web/src/hooks/usePollTriage.ts`.
+   function) restart the cap and the failure count. The visible "Resume checking"
+   control is built (F3, `web/src/routes/JobPage.tsx`). `web/src/hooks/usePollTriage.ts`.
 6. **Untrusted text.** Tool results, rationale, reasons, file paths and error
    strings are repo- or advisory-derived. Render them as React text only.
    `dangerouslySetInnerHTML` is banned via ESLint (`react/no-danger: error`).
