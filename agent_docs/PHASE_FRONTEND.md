@@ -1,6 +1,7 @@
 # Phase Frontend — React + TypeScript web UI
 
-Status: spec, not built. Baseline: `main` at `3d5c633` (tag `v0.2.0`).
+Status: F1 to F5 built, F6 (verification and tag) pending. Baseline: `main` at `3d5c633` (tag `v0.2.0`).
+F4 status: merged (web container, compose `web` service, CI `web` job, smoke checks h to k; plan `agent_docs/plans/F4_PLAN.md`, notes in `DECISIONS.md` §19).
 Target tag on completion: `v0.3.0`.
 
 ## 0. Goal and non-goals
@@ -268,3 +269,8 @@ Sources consulted: impeccable.style/slop (catalogue of generated-UI tells),
 The Fountain Institute, "7 Signs a UI Has Been Vibe Coded", Drew DeVault,
 "Sourcehut's spartan approach to web design" (2019), GOV.UK Design System
 colour, error summary and validation pages.
+
+## 7. Open items from F4 review
+
+- `proxy_set_header Host $host` drops the non-default port (`web/nginx.conf:25` and `:31`; the preceding lines 24 and 30 are `proxy_pass`).
+- Smoke check (k) POSTs a job it never polls (`scripts/smoke_compose.sh:151-164`); a second job is then submitted by `triage_client.py run`.
