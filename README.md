@@ -106,6 +106,56 @@ Podman is supported: `scripts/smoke_compose.sh` passes against rootless podman's
 To use the real model instead, set `TRIAGE_LLM_MODE=groq` and `GROQ_API_KEY` in
 `.env`. See the results below before relying on it.
 
+## Web UI
+
+A local web UI sits over the same HTTP API. `docker compose up -d --wait` (see
+Quickstart) also starts the `web` service (nginx serving the built app and proxying
+`/v1/` and `/healthz` to `api`). Open `http://127.0.0.1:8080`; set `WEB_PORT` to change
+the host port. It is bound to 127.0.0.1 (`docker-compose.yml:63`). The footer shows no
+version.
+
+Development without the web container: `cd web && npm ci && npm run dev` (Node
+>=22.22.2, `web/package.json:7`). The dev server proxies `/v1` and `/healthz` to
+`API_PROXY_TARGET`, default `http://127.0.0.1:8000` (`web/vite.config.ts:4-6`). Jobs run
+only in the worker (`docker-compose.yml:44-50`), so the dev server still needs
+Postgres, the `migrate` step, the API and a worker, or every job stays `queued`.
+
+For a walkthrough with offline fixture packages (no network, no key) see
+`agent_docs/DEMO.md`.
+
+What the job page shows for a finished job:
+
+- The verdict and its reason, never a bare verdict (`VerdictSection.tsx`).
+- The call path as a table, with a header such as "3 edges, 0 low confidence" and
+  low-confidence rows marked (`PathTable.tsx:14`).
+- The agent commentary, labelled "Not used to derive the verdict" (`Commentary.tsx:7`).
+- The tool calls, in a collapsed list (`ToolTrace.tsx:13`).
+- Which LLM mode produced the verdict; `stub` reads "stub (deterministic policy, not a
+  real model)" (`displayText.ts:73`).
+
+![Job page with a grouped tool trace](agent_docs/screenshots/app-trace-grouped-light-1280.png)
+![Job page after polling was capped](agent_docs/screenshots/app-capped-light-1280.png)
+
+Limits of the UI, stated plainly:
+
+- Local only, no authentication (the header reads "local instance · no auth",
+  `Layout.tsx:15`). No TLS.
+- The recent-jobs list lives in this browser's localStorage, at most 20 entries
+  (`recentJobs.ts:9`). There is no server-side job list.
+- The form takes `package` + `version` only. Repository URLs are not supported
+  (`NewJobPage.tsx:209`).
+- The compose default is stub mode, not a real model. Real-model injection resistance
+  is unclaimed (see Results).
+- `GET /v1/triage/{id}` does not return the submitted target (`main.py:121-134`,
+  `DECISIONS.md` §18). The job page therefore never shows Package, and shows Target as
+  "not recorded" for queued, running and failed jobs (`JobPage.tsx:121`).
+- Display trimming of worker temp paths (everything up to `/extracted/`) applies only
+  to the path table's `file` column and to the verdict `reason` (`PathTable.tsx:41`,
+  `VerdictSection.tsx:61`). Tool trace, commentary and error text show paths as
+  received.
+- nginx resolves `api` once at startup (`web/nginx.conf:21-22`). After recreating
+  `api`, run `docker compose restart web`.
+
 ## Results
 
 Stub-lane and real-model results are different things. They are kept apart on
@@ -162,6 +212,8 @@ the model's behaviour under injection is not established.
 - A failed job is not automatically re-run (only a single LLM API call is retried).
 - The worker has no mid-execution heartbeat; a hung single worker is not recovered.
 - Real-model injection resistance is unclaimed (see Results).
+- Web UI limits (no auth, browser-only recent jobs, package + version only, target not
+  shown for unfinished jobs) are listed under [Web UI](#web-ui).
 
 ## Repo
 
@@ -193,6 +245,8 @@ the model's behaviour under injection is not established.
   Postgres table), job-level capped retries-with-backoff, a worker heartbeat.
 - `Dockerfile`, `docker-compose.yml`, `docker-compose.smoke.yml`, `.env.example` —
   the local stack (`db`, one-shot `migrate`, `api`, `worker`).
+- `web/` - the web UI (React, TypeScript, Vite) and its nginx container; see
+  [Web UI](#web-ui) and `agent_docs/PHASE_FRONTEND.md`.
 - `DECISIONS.md` — dated design decisions and their reasoning
 
 ## L5 measurement
