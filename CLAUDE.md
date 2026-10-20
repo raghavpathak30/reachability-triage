@@ -29,10 +29,17 @@ Frontend (`web/`, `agent_docs/PHASE_FRONTEND.md`): F1 (scaffold, typed
 client), F2 (`/` submit form, `usePollTriage`, recent-jobs panel) and F3
 (`/jobs/:id` job view: `web/src/routes/JobPage.tsx:89` wires `usePollTriage`;
 verdict/path/commentary/trace/failed/404/capped states, R9 trim only on
-`CallEdge.file` and `reason`) are merged. Not built yet: the nginx/CSP/compose
-frontend container (F4), and the job page cannot show Package or Target for
-queued/running/failed jobs because `GET /v1/triage/{id}` does not return the
-submitted target (see `DECISIONS.md` §18; plan `agent_docs/plans/F3_PLAN.md`).
+`CallEdge.file` and `reason`) and F4 (frontend container: `web/Dockerfile:3,10`
+pinned bases, `web/nginx.conf` + `web/nginx/security-headers.conf:1-3` CSP/nosniff/
+no-referrer headers, `web` service at `docker-compose.yml:60`, CI `web` job at
+`.github/workflows/tests.yml:116`, smoke checks (h)-(k) in `scripts/smoke_compose.sh`;
+local only, no TLS or auth; plan `agent_docs/plans/F4_PLAN.md`) are merged. Not built
+yet: F5 (README "Web UI" section, DEMO walkthrough), and the job page cannot show
+Package or Target for queued/running/failed jobs because `GET /v1/triage/{id}` does
+not return the submitted target (see `DECISIONS.md` §18; plan
+`agent_docs/plans/F3_PLAN.md`). The web container resolves `api` once at nginx
+startup, so restart `web` after recreating `api`; the CI `web` job has not yet run
+on GitHub.
 These are in DECISIONS.md as intent. Check the code before claiming any
 of them work — in a README, docstring, commit message or comment.
 

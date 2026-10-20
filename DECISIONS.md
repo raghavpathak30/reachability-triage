@@ -1347,3 +1347,14 @@ Status note only; no earlier decision changed. F3 shipped `/jobs/:id` (plan: `ag
 1. `GET /v1/triage/{id}` does not return the submitted target (package, version, target_module, target_symbol), so the job page cannot show Package for queued, running or failed jobs, and shows Target only from `finding.result` on completed jobs. The h1 may use the localStorage `RecentJob` while `finding` is null (rendered as text; it never feeds the verdict, path or facts). Backend fix: include target in `TriageOut`.
 2. R9 trim limits (applied only to `CallEdge.file` and `reason`): a `file=`-prefixed token is not trimmed; repeated `/extracted/` segments trim to after the first match (`/tmp/a/extracted/b/extracted/c.py` becomes `b/extracted/c.py`); paths with spaces are not handled. Tool results, arguments, rationale and error strings render as received and can show worker temp paths.
 3. Caller and Callee are separate table columns (matches `reference.html`), not R3's "caller → callee" form.
+
+## 19. Frontend F4 — web container, status note (19 Oct 2026)
+
+Status note only; no earlier decision changed. F4 shipped the `web` container (plan: `agent_docs/plans/F4_PLAN.md`, review: `.agent/review.md`, 0 critical).
+
+- Bases pinned by tag + digest, looked up 19 Oct 2026: `node:22.23.3-bookworm-slim` (build; satisfies `engines >=22.22.2`, `web/.nvmrc` is now `22.22.2`) and `nginxinc/nginx-unprivileged:1.31.7-alpine` (runtime, uid 101, port 8080).
+- Build runs `npm run build` (tsc -b + vite build); `web/.dockerignore` excludes only `node_modules` and `dist`, so `design/samples` stays in the context for tsc but is not bundled into `dist` (test-only imports).
+- Decision 6 headers (CSP with `frame-ancestors 'none'`, nosniff, no-referrer) live in one file, `web/nginx/security-headers.conf`, included in the server block, `/assets/` and `/index.html` (nginx `add_header` is not inherited by a location that sets its own). No X-Frame-Options.
+- Caching: `/assets/` is `immutable` on 200s only (no `always`, so a 404 is not cached); `/index.html` is `no-cache`. Smoke asserts both.
+- Known limits: `api` is resolved once at nginx startup; `proxy_set_header Host $host` drops the port (reviewer Medium, latent); `curl -I` (HEAD) on `/v1/triage/{id}` returns 405 because the API route is GET-only; the CI `web` job and `compose-smoke` cold wall time have not been observed on GitHub (warm local smoke: ~30 s, timeout left at 15 min).
+
