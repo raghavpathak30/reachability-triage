@@ -1358,3 +1358,22 @@ Status note only; no earlier decision changed. F4 shipped the `web` container (p
 - Caching: `/assets/` is `immutable` on 200s only (no `always`, so a 404 is not cached); `/index.html` is `no-cache`. Smoke asserts both.
 - Known limits: `api` is resolved once at nginx startup; `proxy_set_header Host $host` drops the port (reviewer Medium, latent); `curl -I` (HEAD) on `/v1/triage/{id}` returns 405 because the API route is GET-only; the CI `web` job and `compose-smoke` cold wall time have not been observed on GitHub (warm local smoke: ~30 s, timeout left at 15 min).
 
+
+## 20. Frontend decisions (20 Oct 2026)
+
+Records the fixed decisions of `agent_docs/PHASE_FRONTEND.md` §2 (numbering as in that file) and the F5 documentation status. Earlier status notes are linked, not restated: §18 (F3 open items) and §19 (F4 container notes).
+
+1. **Location and tooling.** Everything lives in `web/`: Vite, React, TypeScript (`strict`, `noUncheckedIndexedAccess`), npm with a committed `package-lock.json`, `npm ci` in CI and Docker. Every dependency is pinned to an exact version, with no `^` or `~`. Reason: the project's "pin everything" convention extends to JavaScript.
+2. **Same origin, no CORS.** Dev uses a Vite `server.proxy` for `/v1` and `/healthz`. Compose uses an nginx container that serves the built app and proxies `/v1/` and `/healthz` to `api:8000`. The API gets no CORS middleware. Reason: no cross-origin surface to configure or get wrong.
+3. **Types come from the API.** `web/openapi.json` is a committed snapshot of `app.openapi()`, TypeScript types are generated from it with `openapi-typescript`, and a pytest test fails when the snapshot differs. Reason: backend drift breaks CI instead of the browser, and hand-written types are guesses.
+4. **Routing.** Two routes, `/` and `/jobs/:id`, with `react-router`; nginx falls back to `/index.html`. Reason: the UI has two screens.
+5. **Data fetching.** Plain `fetch` in one typed client module, no global state library. Polling is a custom hook with `AbortController`: 1 s start, x1.5 backoff, 5 s ceiling, stop on `completed` or `failed`, stop after 10 minutes with a resume control, abort on unmount. F2 refinements: 4xx stops polling at once; network errors, 5xx and unparseable responses stop only after 3 consecutive failures. Reason: small surface, no stale background requests.
+6. **Untrusted text.** Tool results, rationale, reasons, paths and error strings are rendered as React text only, `dangerouslySetInnerHTML` is banned by ESLint (`react/no-danger`), and rationale is not rendered as markdown. nginx sends a CSP, `nosniff` and `no-referrer`. Reason: all of that text is repo- or advisory-derived.
+7. **localStorage** holds only recent job IDs, a target summary and the submit time, at most 20, with every access guarded so the UI works without storage. Reason: it avoids needing a server-side list endpoint, which the API does not have. Consequence: the list is per browser.
+8. **Visual style: match `web/design/reference.html`.** Its tokens and rules move into `web/src/styles/` and components follow its markup. Deviations need a written reason.
+
+Additions that are not numbered decisions in §2: evidence-first rendering is the acceptance rule set in `PHASE_FRONTEND.md` §3 (R1 to R9), and the design rationale (sourcehut and GOV.UK as models) is `PHASE_FRONTEND.md` §6.
+
+**F5 status.** F5 is documentation only: README "Web UI" section, DEMO.md browser walkthrough, CLAUDE.md and this section. The package version in `web/package.json` and `web/package-lock.json` is set to 0.3.0; the footer (`web/src/components/Layout.tsx:21-26`) shows no version, and `web/vite.config.ts` injects none. The demo GIF is not recorded. The CI `web` job has passed on GitHub; §19's note that it had not been observed is superseded on that point only.
+
+**Still open.** The §18 items (target not returned by `GET /v1/triage/{id}`, R9 trim limits, separate Caller and Callee columns) and the §19 limits (`api` resolved once at nginx startup; `Host $host` drops the non-default port, `web/nginx.conf:25,31`). Smoke check (k) POSTs a job it never polls (`scripts/smoke_compose.sh:151-164`), judged harmless. Not built: server-side job list, auth on the web UI, `repo_url` acquisition; real-model injection resistance is unclaimed (§17).
