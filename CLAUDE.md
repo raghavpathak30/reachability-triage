@@ -3,10 +3,10 @@
 ## STABLE — do not edit mid-session (cache-critical)
 Edits here do nothing until `/clear`, `/compact`, or restart.
 
-- Stack as SHIPPED: Python, FastAPI, uvicorn, pydantic. Single `main.py`.
+- Stack as SHIPPED: Python, FastAPI, uvicorn, pydantic. Single `main.py`. Web UI in `web/`: React 19, TypeScript, Vite, react-router, npm, served by nginx.
 - Package manager: pip + venv (`requirements.txt`) — always this, never switch
 - Test command: `pytest` (bare, full run)
-- Lint/typecheck command: none configured
+- Lint/typecheck command: none configured for Python; `web/` has `npm run typecheck` and `npm run lint` (`web/package.json:12-13`)
 - Run command: `uvicorn main:app --reload`
 - Build command: `docker compose build`
 - Do not touch: `.agent/`, `.venv/`, `__pycache__/`
@@ -25,6 +25,11 @@ guard against repeating an identical tool call (`run_trace.py:108` only *measure
 `repeated_calls` after the fact), a re-prompt on a text reply, and assistant turns
 in the model's context (`langgraph_loop.py:210` appends only tool results). The
 last three are Phase 9 findings, see `DECISIONS.md` §17.
+Also not built (web UI): a server-side job list (recent jobs live in browser
+localStorage, max 20), auth on the web UI, the submitted target in `TriageOut`
+(so the job page cannot show Package, and shows Target as "not recorded" for
+queued/running/failed jobs; see `DECISIONS.md` §18), `repo_url` acquisition, and
+the demo GIF (`agent_docs/screenshots/demo.gif` does not exist).
 Frontend (`web/`, `agent_docs/PHASE_FRONTEND.md`): F1 (scaffold, typed
 client), F2 (`/` submit form, `usePollTriage`, recent-jobs panel) and F3
 (`/jobs/:id` job view: `web/src/routes/JobPage.tsx:89` wires `usePollTriage`;
@@ -33,13 +38,12 @@ verdict/path/commentary/trace/failed/404/capped states, R9 trim only on
 pinned bases, `web/nginx.conf` + `web/nginx/security-headers.conf:1-3` CSP/nosniff/
 no-referrer headers, `web` service at `docker-compose.yml:60`, CI `web` job at
 `.github/workflows/tests.yml:116`, smoke checks (h)-(k) in `scripts/smoke_compose.sh`;
-local only, no TLS or auth; plan `agent_docs/plans/F4_PLAN.md`) are merged. Not built
-yet: F5 (README "Web UI" section, DEMO walkthrough), and the job page cannot show
-Package or Target for queued/running/failed jobs because `GET /v1/triage/{id}` does
-not return the submitted target (see `DECISIONS.md` §18; plan
-`agent_docs/plans/F3_PLAN.md`). The web container resolves `api` once at nginx
-startup, so restart `web` after recreating `api`; the CI `web` job has not yet run
-on GitHub.
+local only, no TLS or auth; plan `agent_docs/plans/F4_PLAN.md`) are merged. F5 is docs only (README "Web UI"
+section, DEMO.md browser walkthrough, `DECISIONS.md` §20; plan
+`agent_docs/plans/F5_PLAN.md`). The footer shows no version. What the web UI does
+not do is listed in the web UI bullet of NOT BUILT above. The web container
+resolves `api` once at nginx startup, so restart `web` after recreating `api`. The CI
+`web` job has run and passed on GitHub.
 These are in DECISIONS.md as intent. Check the code before claiming any
 of them work — in a README, docstring, commit message or comment.
 
