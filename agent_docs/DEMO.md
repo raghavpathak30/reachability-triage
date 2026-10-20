@@ -26,7 +26,7 @@ each case expects, and it always tears the stack down (`docker compose down -v`)
 | time | segment | what to say |
 |---|---|---|
 | 0:00 | intro | the question: is the vulnerable function reachable from the package's entrypoints? Stub mode, what is real |
-| 0:40 | stack up | Postgres, migrations, API, worker under compose; offline fixture wheels, no network. Allow 20-60 s for the image build and start |
+| 0:40 | stack up | Postgres, migrations, API, worker, web under compose; offline fixture wheels, no network. Allow 20-60 s for the image build and start |
 | 1:10 | case 1, reachable | fixture 02: entrypoint to sink in three hops. The verdict carries the call path as evidence |
 | 1:35 | case 2, not_reachable | fixture 09: the module is never imported. The reason is "no call path"; this is the noise a version scanner cannot filter |
 | 2:00 | case 3, unknown | fixture 13: `getattr` with no literal name. The analysis cannot rule the function out, so it says `unknown` |
@@ -47,3 +47,35 @@ each case expects, and it always tears the stack down (`docker compose down -v`)
 - Local only: no authentication, no deployment, no hosted endpoint.
 - The worker healthcheck proves database connectivity only; job-processing
   liveness is proven by `scripts/smoke_compose.sh`.
+
+## UI walkthrough (browser)
+
+`scripts/demo.sh` is the non-browser equivalent of the same three cases. For the
+browser, use the same offline fixture wheels (they are not on PyPI):
+
+```
+python3 scripts/build_fixture_wheels.py --out <DIR>
+FIXTURE_WHEELS_DIR=<DIR> docker compose -f docker-compose.yml -f docker-compose.smoke.yml up -d --build --wait
+```
+
+Open `http://127.0.0.1:8080` (`WEB_PORT` changes it). In the form, enter Version `1.0`,
+Target module `pkg.sink`, Target symbol `vulnerable`, and one Package per case:
+
+| Package | Expected on the job page (stub mode) |
+|---|---|
+| `reach-fx-02` | Reachable, a 3-edge call path |
+| `reach-fx-09` | No path found, with the reason "no call path found from any entrypoint to ..." (`src/reachability/index/reachability.py:229`) |
+| `reach-fx-13` | Unknown; the last path edge is a low-confidence `dynamic_dispatch` edge |
+
+Every job shows the LLM mode "stub (deterministic policy, not a real model)". Fixture
+13's label allows `unknown` or `reachable` (`tests/fixtures/l5/13_getattr_dynamic_dispatch/label.json`);
+the demo and smoke scripts check for exactly `unknown`, so treat `reachable` as a
+mismatch with the expected stub result.
+
+While a job is queued or running, the Target row reads "not recorded", even though you
+just submitted it: `GET /v1/triage/{id}` does not return the target
+(`web/src/routes/JobPage.tsx:121`, `DECISIONS.md` §18). It is not a bug in the run.
+
+Tear down with `docker compose -f docker-compose.yml -f docker-compose.smoke.yml down -v`.
+
+`agent_docs/screenshots/demo.gif` - to be recorded. The file does not exist yet.
