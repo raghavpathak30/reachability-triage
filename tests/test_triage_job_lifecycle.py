@@ -186,6 +186,54 @@ def test_full_lifecycle_failed_via_monkeypatched_acquisition_error(monkeypatch, 
     assert isinstance(body["error"], str)
 
 
+def test_get_completed_job_returns_target(monkeypatch, db_session):
+    target_module, target_symbol = _resolve_fixture_target()
+    monkeypatch.setattr(
+        job_runner, "acquire_source", lambda request, workdir: FIXTURE_REPO
+    )
+    monkeypatch.setattr(
+        job_runner,
+        "GroqLLMClient",
+        lambda *a, **kw: DeterministicPolicyStubLLMClient(target_module, target_symbol),
+    )
+    posted = {
+        "package": "unused",
+        "version": "0.0.0",
+        "target_module": target_module,
+        "target_symbol": target_symbol,
+    }
+    triage_id = client.post("/v1/triage", json=posted).json()["id"]
+
+    assert run_worker_once(_session_factory_for(db_session), "test-worker", DEFAULT_TOOL_CALL_BUDGET)
+
+    body = client.get(f"/v1/triage/{triage_id}").json()
+    assert body["status"] == "completed"
+    assert body["llm_mode"] == "groq"
+    assert body["finding"] is not None
+    assert body["target"] == {**posted, "repo_url": None}
+
+
+def test_get_failed_job_returns_target(monkeypatch, db_session):
+    def _boom(request, workdir):
+        raise AcquisitionError("simulated acquisition failure")
+
+    monkeypatch.setattr(job_runner, "acquire_source", _boom)
+    posted = {
+        "package": "somepkg",
+        "version": "1.0.0",
+        "target_module": "somepkg",
+        "target_symbol": None,
+    }
+    triage_id = client.post("/v1/triage", json=posted).json()["id"]
+
+    assert run_worker_once(_session_factory_for(db_session), "test-worker", DEFAULT_TOOL_CALL_BUDGET)
+
+    body = client.get(f"/v1/triage/{triage_id}").json()
+    assert body["status"] == "failed"
+    assert body["error"]
+    assert body["target"] == {**posted, "repo_url": None}
+
+
 @pytest.mark.network
 def test_resolvable_package_reaches_completed(db_session, monkeypatch):
     # This test's own point is the real acquire_source/build_repo_index

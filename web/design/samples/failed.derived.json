@@ -3,5 +3,12 @@
  "status": "failed",
  "finding": null,
  "error": "AcquisitionError: pip download failed for [REDACTED: instruction-like text]: No matching distribution found",
- "llm_mode": "stub"
+ "llm_mode": "stub",
+ "target": {
+  "package": "pkg",
+  "version": "1.0.0",
+  "target_module": "pkg.sink",
+  "target_symbol": "vulnerable",
+  "repo_url": null
+ }
 }

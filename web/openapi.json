@@ -230,11 +230,15 @@
           },
           "status": {
             "$ref": "#/components/schemas/TriageStatus"
+          },
+          "target": {
+            "$ref": "#/components/schemas/TriageTarget"
           }
         },
         "required": [
           "id",
-          "status"
+          "status",
+          "target"
         ],
         "title": "TriageOut",
         "type": "object"
@@ -310,6 +314,68 @@
         "title": "TriageStatus",
         "type": "string"
       },
+      "TriageTarget": {
+        "description": "Read model for the stored submitted target. Deliberately tolerant:\nevery field is optional, because the worker guards against malformed\nstored targets (tests/test_worker.py).",
+        "properties": {
+          "package": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Package"
+          },
+          "repo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo Url"
+          },
+          "target_module": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Module"
+          },
+          "target_symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Symbol"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "title": "TriageTarget",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -364,7 +430,7 @@
   },
   "info": {
     "title": "Reachability Triage Service",
-    "version": "0.1.0"
+    "version": "0.3.1"
   },
   "openapi": "3.1.0",
   "paths": {

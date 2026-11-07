@@ -160,6 +160,7 @@ export interface components {
              */
             llm_mode?: string | null;
             status: components["schemas"]["TriageStatus"];
+            target: components["schemas"]["TriageTarget"];
         };
         /** TriageRequest */
         TriageRequest: {
@@ -179,6 +180,24 @@ export interface components {
          * @enum {string}
          */
         TriageStatus: "queued" | "running" | "completed" | "failed";
+        /**
+         * TriageTarget
+         * @description Read model for the stored submitted target. Deliberately tolerant:
+         *     every field is optional, because the worker guards against malformed
+         *     stored targets (tests/test_worker.py).
+         */
+        TriageTarget: {
+            /** Package */
+            package?: string | null;
+            /** Repo Url */
+            repo_url?: string | null;
+            /** Target Module */
+            target_module?: string | null;
+            /** Target Symbol */
+            target_symbol?: string | null;
+            /** Version */
+            version?: string | null;
+        };
         /** ValidationError */
         ValidationError: {
             /** Context */

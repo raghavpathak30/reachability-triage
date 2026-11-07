@@ -72,9 +72,10 @@ Every job shows the LLM mode "stub (deterministic policy, not a real model)". Fi
 the demo and smoke scripts check for exactly `unknown`, so treat `reachable` as a
 mismatch with the expected stub result.
 
-While a job is queued or running, the Target row reads "not recorded", even though you
-just submitted it: `GET /v1/triage/{id}` does not return the target
-(`web/src/routes/JobPage.tsx:121`, `DECISIONS.md` §18). It is not a bug in the run.
+While a job is queued or running, the heading, the Package row (`package==version`) and the
+Target row show what you submitted, taken from the `target` field of
+`GET /v1/triage/{id}` (`web/src/routes/JobPage.tsx:126-141`, `DECISIONS.md` §21). Before
+the first response arrives they read "Checking".
 
 Tear down with `docker compose -f docker-compose.yml -f docker-compose.smoke.yml down -v`.
 

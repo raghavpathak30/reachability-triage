@@ -1,7 +1,9 @@
 from enum import Enum
+import logging
 import sys
 import uuid
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 # `reachability.*` lives under src/, not on sys.path by default outside of
 # pytest (conftest.py does this same insertion for the test suite) -- this
@@ -13,14 +15,17 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, HttpUrl, model_validator
+from pydantic import BaseModel, Field, HttpUrl, ValidationError, field_validator, model_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from reachability.db.repository import create_job, get_job
+from reachability.db.models import TriageJob
 from reachability.db.session import get_sessionmaker
 from reachability.triage.agent_models import TriageFinding
 
-app = FastAPI(title="Reachability Triage Service")
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="Reachability Triage Service", version="0.3.1")
 
 
 # --- Exception Handlers (Uniform Error Shape) ---
@@ -98,6 +103,14 @@ class TriageRequest(BaseModel):
     target_module: str = Field(min_length=1)
     target_symbol: str | None = None
 
+    @field_validator("repo_url")
+    @classmethod
+    def _reject_repo_url_userinfo(cls, value: HttpUrl | None) -> HttpUrl | None:
+        # Credentials in a URL would be stored in triage_jobs.target as-is.
+        if value is not None and (value.username or value.password):
+            raise ValueError("'repo_url' must not contain credentials (user:password@).")
+        return value
+
     @model_validator(mode="after")
     def _validate_exactly_one_target(self) -> "TriageRequest":
         has_pkg = self.package is not None
@@ -118,11 +131,51 @@ class TriageRequest(BaseModel):
         return self
 
 
+class TriageTarget(BaseModel):
+    """Read model for the stored submitted target. Deliberately tolerant:
+    every field is optional, because the worker guards against malformed
+    stored targets (tests/test_worker.py)."""
+
+    package: str | None = None
+    version: str | None = None
+    repo_url: str | None = None
+    target_module: str | None = None
+    target_symbol: str | None = None
+
+    @field_validator("package", "version", "repo_url", "target_module", mode="before")
+    @classmethod
+    def _empty_string_is_null(cls, value: object) -> object:
+        return None if value == "" else value
+
+    @field_validator("repo_url")
+    @classmethod
+    def _redact_repo_url_userinfo(cls, value: str | None) -> str | None:
+        # Never echo stored credentials; the stored value is left unchanged.
+        if value is None:
+            return None
+        try:
+            parts = urlsplit(value)
+            _ = parts.port  # raises ValueError on a malformed port
+        except ValueError:
+            return None
+        host = parts.netloc.rpartition("@")[2]
+        return urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment))
+
+
+def _target_out(raw) -> TriageTarget:
+    try:
+        return TriageTarget.model_validate(raw)
+    except ValidationError:
+        logger.warning("Stored triage target has an unexpected shape; returning an empty target")
+        return TriageTarget()
+
+
 class TriageOut(BaseModel):
     id: uuid.UUID
     status: TriageStatus
     finding: TriageFinding | None = None
     error: str | None = None
+    target: TriageTarget
     llm_mode: str | None = Field(
         default=None,
         description=(
@@ -171,7 +224,7 @@ def create_triage(payload: TriageRequest, response: Response):
         session.close()
 
     response.headers["Location"] = f"/v1/triage/{triage_id}"
-    return record
+    return {**record, "target": _target_out(target)}
 
 
 @app.get("/v1/triage/{triage_id}", response_model=TriageOut)
@@ -187,6 +240,12 @@ def get_triage(triage_id: str):
         session = get_sessionmaker()()
         try:
             record = get_job(session, parsed_id)
+            if record is not None:
+                row = session.get(TriageJob, parsed_id)
+                if row is None:
+                    record = None
+                else:
+                    record = {**record, "target": _target_out(row.target)}
         finally:
             session.close()
 

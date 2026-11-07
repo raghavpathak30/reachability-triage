@@ -79,5 +79,12 @@
   ]
  },
  "error": null,
- "llm_mode": null
+ "llm_mode": null,
+ "target": {
+  "package": "pkg",
+  "version": "1.0.0",
+  "target_module": "pkg.sink",
+  "target_symbol": "vulnerable",
+  "repo_url": null
+ }
 }
