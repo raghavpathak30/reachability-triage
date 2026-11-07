@@ -259,6 +259,19 @@ def test_get_stored_wrong_typed_target_module_returns_all_null_and_warns(db_sess
     assert len(warnings) == 1
 
 
+@pytest.mark.parametrize("stored", [[], "x", 42])
+def test_get_stored_non_object_target_returns_all_null_and_warns(db_session, caplog, stored):
+    job_id = _insert_job(db_session, stored)
+    with caplog.at_level("WARNING", logger="main"):
+        response = client.get(f"/v1/triage/{job_id}")
+    assert response.status_code == 200
+    target = response.json()["target"]
+    assert set(target) == {"package", "version", "repo_url", "target_module", "target_symbol"}
+    assert set(target.values()) == {None}
+    warnings = [r for r in caplog.records if r.levelname == "WARNING" and r.name == "main"]
+    assert len(warnings) == 1
+
+
 def test_get_returns_404_when_row_vanishes_after_get_job(monkeypatch):
     import main
 
