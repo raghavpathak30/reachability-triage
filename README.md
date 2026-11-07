@@ -146,9 +146,10 @@ Limits of the UI, stated plainly:
   (`NewJobPage.tsx:209`).
 - The compose default is stub mode, not a real model. Real-model injection resistance
   is unclaimed (see Results).
-- `GET /v1/triage/{id}` does not return the submitted target (`main.py:121-134`,
-  `DECISIONS.md` §18). The job page therefore never shows Package, and shows Target as
-  "not recorded" for queued, running and failed jobs (`JobPage.tsx:121`).
+- `GET /v1/triage/{id}` and `POST /v1/triage` return the submitted target (`main.py:125-150`,
+  `DECISIONS.md` §21). The job page shows Package (`package==version`) and Target for
+  every status from that field (`JobPage.tsx:126-141`), and shows `none stored` when the
+  stored target lacks the value. Evidence is still rendered only from `finding`.
 - Display trimming of worker temp paths (everything up to `/extracted/`) applies only
   to the path table's `file` column and to the verdict `reason` (`PathTable.tsx:41`,
   `VerdictSection.tsx:61`). Tool trace, commentary and error text show paths as

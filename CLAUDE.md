@@ -26,13 +26,11 @@ guard against repeating an identical tool call (`run_trace.py:108` only *measure
 in the model's context (`langgraph_loop.py:210` appends only tool results). The
 last three are Phase 9 findings, see `DECISIONS.md` §17.
 Also not built (web UI): a server-side job list (recent jobs live in browser
-localStorage, max 20), auth on the web UI, the submitted target in `TriageOut`
-(so the job page cannot show Package, and shows Target as "not recorded" for
-queued/running/failed jobs; see `DECISIONS.md` §18), `repo_url` acquisition, and
+localStorage, max 20), auth on the web UI, `repo_url` acquisition, and
 the demo GIF (`agent_docs/screenshots/demo.gif` does not exist).
 Frontend (`web/`, `agent_docs/PHASE_FRONTEND.md`): F1 (scaffold, typed
 client), F2 (`/` submit form, `usePollTriage`, recent-jobs panel) and F3
-(`/jobs/:id` job view: `web/src/routes/JobPage.tsx:89` wires `usePollTriage`;
+(`/jobs/:id` job view: `web/src/routes/JobPage.tsx:94` wires `usePollTriage`;
 verdict/path/commentary/trace/failed/404/capped states, R9 trim only on
 `CallEdge.file` and `reason`) and F4 (frontend container: `web/Dockerfile:3,10`
 pinned bases, `web/nginx.conf` + `web/nginx/security-headers.conf:1-3` CSP/nosniff/
