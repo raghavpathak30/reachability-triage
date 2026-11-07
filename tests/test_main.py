@@ -124,7 +124,7 @@ def test_create_triage_response_model_fields_package_shape():
         json={"package": "requests", "version": "2.31.0", "target_module": "placeholder"},
     )
     body = response.json()
-    assert set(body.keys()) == {"id", "status", "finding", "error", "llm_mode"}
+    assert set(body.keys()) == {"id", "status", "finding", "error", "llm_mode", "target"}
 
 
 def test_create_triage_response_model_fields_repo_shape():
@@ -133,7 +133,7 @@ def test_create_triage_response_model_fields_repo_shape():
         json={"repo_url": "https://github.com/org/repo", "target_module": "placeholder"},
     )
     body = response.json()
-    assert set(body.keys()) == {"id", "status", "finding", "error", "llm_mode"}
+    assert set(body.keys()) == {"id", "status", "finding", "error", "llm_mode", "target"}
 
 
 def test_validation_error_envelope_shape():
@@ -174,3 +174,20 @@ def test_create_triage_persists_as_queued_with_no_worker_running():
     assert get_response.status_code == 200
     body = get_response.json()
     assert body["status"] == "queued"
+
+
+def test_post_and_get_queued_job_return_posted_target():
+    posted = {
+        "package": "requests",
+        "version": "2.31.0",
+        "target_module": "requests.api",
+        "target_symbol": "get",
+    }
+    post = client.post("/v1/triage", json=posted)
+    assert post.status_code == 202
+    expected = {**posted, "repo_url": None}
+    assert post.json()["target"] == expected
+
+    got = client.get(f"/v1/triage/{post.json()['id']}")
+    assert got.status_code == 200
+    assert got.json()["target"] == expected
