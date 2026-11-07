@@ -13,6 +13,7 @@ import derivedTarget from '../../design/samples/target.derived.json'
 import notReachableRaw from '../../design/samples/stub-not_reachable.json'
 import reachableRaw from '../../design/samples/stub-reachable.json'
 import unknownRaw from '../../design/samples/stub-unknown.json'
+import { RECENT_JOBS_KEY } from '../lib/recentJobs'
 import JobPage from './JobPage'
 
 function withTarget<T extends object>(sample: T, target: object = derivedTarget) {
@@ -360,6 +361,63 @@ test('network error before any response never shows "not recorded" for Target', 
   expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(`Job ${REACHABLE_ID.slice(0, 8)}`)
   expect(screen.getByText('Target').nextElementSibling).not.toHaveTextContent('not recorded')
   expect(container.textContent).not.toContain('Target not recorded')
+})
+
+test('repo-shape target shows Repository row and no Package row', async () => {
+  const repo = withTarget(queued, {
+    package: null,
+    version: null,
+    repo_url: 'https://github.com/org/repo',
+    target_module: 'pkg.sink',
+    target_symbol: null,
+  })
+  await renderJob([body(repo)], repo.id)
+  expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('pkg.sink')
+  expect(screen.getByText('Repository').nextElementSibling).toHaveTextContent('https://github.com/org/repo')
+  expect(screen.queryByText('Package')).toBeNull()
+})
+
+test('null target_module falls back to Job <id8> and renders without error', async () => {
+  const empty = withTarget(queued, {
+    package: null,
+    version: null,
+    repo_url: null,
+    target_module: null,
+    target_symbol: null,
+  })
+  await renderJob([body(empty)], empty.id)
+  expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(`Job ${empty.id.slice(0, 8)}`)
+  expect(screen.getByText('Target').nextElementSibling).toHaveTextContent('none stored')
+  expect(screen.getByText('Package').nextElementSibling).toHaveTextContent('none stored')
+})
+
+test('server-supplied hostile target renders as literal text and localStorage cannot affect heading or facts', async () => {
+  const evil = '<img src=x onerror=alert(1)>'
+  window.localStorage.setItem(
+    RECENT_JOBS_KEY,
+    JSON.stringify([{ id: REACHABLE_ID, target: 'tampered:local', pkg: 'tampered==9', submittedAt: '2026-01-01T00:00:00Z' }]),
+  )
+  const hostile = withTarget(queued, {
+    package: evil,
+    version: '1',
+    repo_url: null,
+    target_module: evil,
+    target_symbol: '<b>sym</b>',
+  })
+  const first = await renderJob([body({ ...hostile, id: REACHABLE_ID })], REACHABLE_ID)
+  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(`${evil}:<b>sym</b>`)
+  expect(screen.getByText('Package').nextElementSibling?.textContent).toBe(`${evil}==1`)
+  expect(first.container.querySelector('img')).toBeNull()
+  expect(first.container.querySelector('b')).toBeNull()
+  expect(first.container.textContent).not.toContain('tampered')
+  cleanup()
+
+  const done = await renderJob([body(reachable)], REACHABLE_ID)
+  expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('pkg.sink:vulnerable')
+  expect(screen.getByText('Target').nextElementSibling).toHaveTextContent('pkg.sink:vulnerable')
+  expect(done.container.textContent).not.toContain('tampered')
+  expect(done.container.querySelectorAll('tbody tr')).toHaveLength(3)
+  expect(screen.getByText('Reachable')).toBeInTheDocument()
 })
 
 test('R6 arguments render as raw pretty JSON with no path trimming', async () => {
