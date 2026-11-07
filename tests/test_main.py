@@ -191,3 +191,89 @@ def test_post_and_get_queued_job_return_posted_target():
     got = client.get(f"/v1/triage/{post.json()['id']}")
     assert got.status_code == 200
     assert got.json()["target"] == expected
+
+
+def _insert_job(db_session, target):
+    from reachability.db.models import TriageJob
+
+    job_id = uuid.uuid4()
+    db_session.add(TriageJob(id=job_id, status="queued", target=target, finding=None, error=None))
+    db_session.commit()
+    return job_id
+
+
+def test_get_running_job_returns_target(db_session):
+    from reachability.triage.worker import claim_next_queued_job
+
+    posted = {
+        "package": "requests",
+        "version": "2.31.0",
+        "target_module": "requests.api",
+        "target_symbol": "get",
+    }
+    triage_id = client.post("/v1/triage", json=posted).json()["id"]
+    assert claim_next_queued_job(db_session, "test-worker") is not None
+
+    body = client.get(f"/v1/triage/{triage_id}").json()
+    assert body["status"] == "running"
+    assert body["target"] == {**posted, "repo_url": None}
+
+
+def test_repo_shape_target_has_no_package(db_session):
+    job_id = _insert_job(
+        db_session,
+        {"repo_url": "https://github.com/org/repo", "target_module": "m", "target_symbol": None},
+    )
+    response = client.get(f"/v1/triage/{job_id}")
+    assert response.status_code == 200
+    target = response.json()["target"]
+    assert target["package"] is None
+    assert target["version"] is None
+    assert target["repo_url"] == "https://github.com/org/repo"
+    assert target["target_module"] == "m"
+
+
+def test_get_stored_target_without_target_module_returns_null_module(db_session):
+    job_id = _insert_job(db_session, {"package": "p", "version": "1"})
+    response = client.get(f"/v1/triage/{job_id}")
+    assert response.status_code == 200
+    target = response.json()["target"]
+    assert target["target_module"] is None
+    assert target["package"] == "p"
+
+
+def test_get_stored_empty_target_returns_all_null(db_session):
+    job_id = _insert_job(db_session, {})
+    response = client.get(f"/v1/triage/{job_id}")
+    assert response.status_code == 200
+    assert set(response.json()["target"].values()) == {None}
+
+
+def test_get_stored_wrong_typed_target_module_returns_all_null_and_warns(db_session, caplog):
+    job_id = _insert_job(db_session, {"package": "p", "version": "1", "target_module": 5})
+    with caplog.at_level("WARNING", logger="main"):
+        response = client.get(f"/v1/triage/{job_id}")
+    assert response.status_code == 200
+    assert set(response.json()["target"].values()) == {None}
+    warnings = [r for r in caplog.records if r.levelname == "WARNING" and r.name == "main"]
+    assert len(warnings) == 1
+
+
+def test_get_returns_404_when_row_vanishes_after_get_job(monkeypatch):
+    import main
+
+    ghost = uuid.uuid4()
+    monkeypatch.setattr(
+        main,
+        "get_job",
+        lambda session, job_id: {
+            "id": job_id,
+            "status": "queued",
+            "finding": None,
+            "error": None,
+            "llm_mode": None,
+        },
+    )
+    response = client.get(f"/v1/triage/{ghost}")
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "NOT_FOUND"
