@@ -1344,7 +1344,7 @@ GATE U2-BRANCH (orchestrator, after the human returns; no code written before th
 Status note only; no earlier decision changed. F3 shipped `/jobs/:id` (plan: `agent_docs/plans/F3_PLAN.md`).
 
 **Open items for F5.**
-1. **Closed by §21.** `GET /v1/triage/{id}` did not return the submitted target (package, version, target_module, target_symbol), so the job page cannot show Package for queued, running or failed jobs, and shows Target only from `finding.result` on completed jobs. The h1 may use the localStorage `RecentJob` while `finding` is null (rendered as text; it never feeds the verdict, path or facts). Backend fix: include target in `TriageOut`.
+1. **Closed by §21 (v0.3.1).** As of F3, `GET /v1/triage/{id}` did not return the submitted target (package, version, target_module, target_symbol), so the job page could not show Package for queued, running or failed jobs, and showed Target only from `finding.result` on completed jobs. The h1 could use the localStorage `RecentJob` while `finding` was null (rendered as text; it never fed the verdict, path or facts). Fix shipped in §21: `target` is now in `TriageOut`, and JobPage no longer reads localStorage.
 2. R9 trim limits (applied only to `CallEdge.file` and `reason`): a `file=`-prefixed token is not trimmed; repeated `/extracted/` segments trim to after the first match (`/tmp/a/extracted/b/extracted/c.py` becomes `b/extracted/c.py`); paths with spaces are not handled. Tool results, arguments, rationale and error strings render as received and can show worker temp paths.
 3. Caller and Callee are separate table columns (matches `reference.html`), not R3's "caller → callee" form.
 
