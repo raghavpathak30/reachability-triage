@@ -8,7 +8,6 @@ import ToolTrace from '../components/job/ToolTrace'
 import VerdictSection from '../components/job/VerdictSection'
 import { usePollTriage } from '../hooks/usePollTriage'
 import { llmModeLabel } from '../lib/displayText'
-import { loadRecent } from '../lib/recentJobs'
 
 type TriageOut = components['schemas']['TriageOut']
 
@@ -34,10 +33,16 @@ function useSecondsSince(epochMs: number | null, active: boolean): number | null
   return Math.max(0, Math.floor((now - epochMs) / 1000))
 }
 
-function targetOf(data: TriageOut | null): string | null {
-  const result = data?.finding?.result
-  if (result === undefined) return null
-  return result.target_symbol ? `${result.target_module}:${result.target_symbol}` : result.target_module
+function targetText(target: TriageOut['target']): string | null {
+  if (target.target_module === null || target.target_module === undefined) return null
+  return target.target_symbol ? `${target.target_module}:${target.target_symbol}` : target.target_module
+}
+
+function packageText(target: TriageOut['target']): string | null {
+  if (target.package === null || target.package === undefined) return null
+  return target.version === null || target.version === undefined
+    ? target.package
+    : `${target.package}==${target.version}`
 }
 
 function StatusLine({
@@ -88,7 +93,6 @@ function StatusLine({
 function JobView({ id }: { id: string }) {
   const { data, state, error, lastCheckedAt, resume, retry } = usePollTriage(id)
   const seconds = useSecondsSince(lastCheckedAt, state === 'polling' && lastCheckedAt !== null)
-  const [recentTarget] = useState(() => loadRecent().find((j) => j.id === id)?.target ?? null)
 
   if (state === 'not_found') {
     return (
@@ -105,8 +109,10 @@ function JobView({ id }: { id: string }) {
   }
 
   const finding = data?.finding ?? null
-  const target = targetOf(data)
-  const heading = finding !== null && target !== null ? target : (recentTarget ?? `Job ${id.slice(0, 8)}`)
+  const target = data === null ? null : targetText(data.target)
+  const heading = target ?? `Job ${id.slice(0, 8)}`
+  const packageLabel = data === null ? null : packageText(data.target)
+  const repoUrl = data?.target.repo_url ?? null
   const result = finding?.result ?? null
   const hasPath = result !== null && result.path !== null && result.path !== undefined && result.path.length > 0
 
@@ -118,7 +124,22 @@ function JobView({ id }: { id: string }) {
       <h1 className="mono">{heading}</h1>
       <dl className="facts">
         <dt>Target</dt>
-        <dd>{target !== null ? <code>{target}</code> : 'not recorded'}</dd>
+        <dd>{data === null ? 'Checking' : target !== null ? <code>{target}</code> : 'none stored'}</dd>
+        {data !== null && packageLabel === null && repoUrl !== null ? (
+          <>
+            <dt>Repository</dt>
+            <dd>
+              <code>{repoUrl}</code>
+            </dd>
+          </>
+        ) : (
+          <>
+            <dt>Package</dt>
+            <dd>
+              {data === null ? 'Checking' : packageLabel !== null ? <code>{packageLabel}</code> : 'none stored'}
+            </dd>
+          </>
+        )}
         <dt>Status</dt>
         <dd>{data === null ? 'Checking' : statusWord(data.status)}</dd>
         <dt>LLM mode</dt>

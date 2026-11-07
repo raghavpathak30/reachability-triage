@@ -7,11 +7,19 @@ import groqMode from '../../design/samples/groq-mode.derived.json'
 import noEvidence from '../../design/samples/no-evidence.derived.json'
 import nullMode from '../../design/samples/null-mode.derived.json'
 import repeated from '../../design/samples/repeated-calls.derived.json'
-import notReachable from '../../design/samples/stub-not_reachable.json'
-import reachable from '../../design/samples/stub-reachable.json'
-import unknown from '../../design/samples/stub-unknown.json'
-import { RECENT_JOBS_KEY } from '../lib/recentJobs'
+import derivedTarget from '../../design/samples/target.derived.json'
+import notReachableRaw from '../../design/samples/stub-not_reachable.json'
+import reachableRaw from '../../design/samples/stub-reachable.json'
+import unknownRaw from '../../design/samples/stub-unknown.json'
 import JobPage from './JobPage'
+
+function withTarget<T extends object>(sample: T, target: object = derivedTarget) {
+  return { ...structuredClone(sample), target: structuredClone(target) }
+}
+
+const reachable = withTarget(reachableRaw)
+const notReachable = withTarget(notReachableRaw)
+const unknown = withTarget(unknownRaw)
 
 type Outcome = { kind: 'body'; status: number; body: unknown } | { kind: 'network' } | { kind: 'hang' }
 
@@ -104,7 +112,7 @@ test('R1 an unrecognised verdict renders neutral Unknown with the raw value as t
 })
 
 test('R1 completed with no finding shows an explicit no result warning', async () => {
-  await renderJob([body({ id: REACHABLE_ID, status: 'completed', finding: null })], REACHABLE_ID)
+  await renderJob([body({ id: REACHABLE_ID, status: 'completed', finding: null, target: derivedTarget })], REACHABLE_ID)
   expect(screen.getByRole('alert')).toHaveTextContent('No result returned')
 })
 
@@ -233,7 +241,7 @@ test('R7 404 shows job not found with the id', async () => {
 })
 
 test('R7 network failure keeps the last good status and id and shows retry', async () => {
-  const running = { id: REACHABLE_ID, status: 'running', finding: null, error: null, llm_mode: null }
+  const running = { id: REACHABLE_ID, status: 'running', finding: null, error: null, llm_mode: null, target: derivedTarget }
   const fetchMock = installFetch([body(running), { kind: 'network' }])
   render(
     <MemoryRouter initialEntries={[`/jobs/${REACHABLE_ID}`]}>
@@ -255,7 +263,7 @@ test('R7 network failure keeps the last good status and id and shows retry', asy
 })
 
 test('R7 running state reads Running. Last checked N seconds ago.', async () => {
-  const running = { id: REACHABLE_ID, status: 'running', finding: null, error: null, llm_mode: null }
+  const running = { id: REACHABLE_ID, status: 'running', finding: null, error: null, llm_mode: null, target: derivedTarget }
   await renderJob([body(running), { kind: 'hang' }], REACHABLE_ID)
   expect(screen.getByText('Running. Last checked 0 seconds ago.')).toBeInTheDocument()
   await advance(3000)
@@ -263,14 +271,14 @@ test('R7 running state reads Running. Last checked N seconds ago.', async () => 
 })
 
 test('R7 queued state reads Queued.', async () => {
-  const queued = { id: REACHABLE_ID, status: 'queued', finding: null, error: null, llm_mode: null }
+  const queued = { id: REACHABLE_ID, status: 'queued', finding: null, error: null, llm_mode: null, target: derivedTarget }
   await renderJob([body(queued)], REACHABLE_ID)
   expect(screen.getByText('Queued.')).toBeInTheDocument()
   expect(screen.queryByText(/Running\. Last checked/)).toBeNull()
 })
 
 test('R7 capped state reads Stopped checking after 10 minutes. with Resume checking and restarts polling', async () => {
-  const running = { id: REACHABLE_ID, status: 'running', finding: null, error: null, llm_mode: null }
+  const running = { id: REACHABLE_ID, status: 'running', finding: null, error: null, llm_mode: null, target: derivedTarget }
   const fetchMock = installFetch([body(running)])
   render(
     <MemoryRouter initialEntries={[`/jobs/${REACHABLE_ID}`]}>
@@ -317,39 +325,19 @@ test('R9 renders the redaction marker inside a failed error string', async () =>
   expect(container.querySelector('.error-summary .redacted')).toHaveAttribute('title')
 })
 
-test('target falls back to RecentJob then to the id while there is no finding', async () => {
-  const queued = { id: REACHABLE_ID, status: 'queued', finding: null, error: null, llm_mode: null }
-  await renderJob([body(queued)], REACHABLE_ID)
-  expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(`Job ${REACHABLE_ID.slice(0, 8)}`)
-  cleanup()
-
-  window.localStorage.setItem(
-    RECENT_JOBS_KEY,
-    JSON.stringify([{ id: REACHABLE_ID, target: 'pkg.sink:vulnerable', pkg: 'x==1', submittedAt: '2026-01-01T00:00:00Z' }]),
-  )
-  await renderJob([body(queued)], REACHABLE_ID)
-  expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('pkg.sink:vulnerable')
-  expect(screen.getByText('Target').nextElementSibling).toHaveTextContent('not recorded')
-})
-
-test('tampered localStorage never changes the verdict, target fact or path table and the h1 shows it as text only', async () => {
-  const evil = '<img src=x onerror=alert(1)>'
-  window.localStorage.setItem(
-    RECENT_JOBS_KEY,
-    JSON.stringify([{ id: REACHABLE_ID, target: evil, pkg: 'x==1', submittedAt: '2026-01-01T00:00:00Z' }]),
-  )
-  const queued = { id: REACHABLE_ID, status: 'queued', finding: null, error: null, llm_mode: null }
-  const first = await renderJob([body(queued)], REACHABLE_ID)
-  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(evil)
-  expect(first.container.querySelector('img')).toBeNull()
-  cleanup()
-
-  const done = await renderJob([body(reachable)], REACHABLE_ID)
+test('failed job shows heading, Package and Target from response.target', async () => {
+  await renderJob([body(failed)], failed.id)
   expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('pkg.sink:vulnerable')
   expect(screen.getByText('Target').nextElementSibling).toHaveTextContent('pkg.sink:vulnerable')
-  expect(done.container.textContent).not.toContain(evil)
-  expect(done.container.querySelectorAll('tbody tr')).toHaveLength(3)
-  expect(screen.getByText('Reachable')).toBeInTheDocument()
+  expect(screen.getByText('Package').nextElementSibling).toHaveTextContent('pkg==1.0.0')
+})
+
+test('queued job shows Package and Target from the response', async () => {
+  const queued = { id: REACHABLE_ID, status: 'queued', finding: null, error: null, llm_mode: null, target: derivedTarget }
+  await renderJob([body(queued)], REACHABLE_ID)
+  expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('pkg.sink:vulnerable')
+  expect(screen.getByText('Target').nextElementSibling).toHaveTextContent('pkg.sink:vulnerable')
+  expect(screen.getByText('Package').nextElementSibling).toHaveTextContent('pkg==1.0.0')
 })
 
 test('R6 arguments render as raw pretty JSON with no path trimming', async () => {
