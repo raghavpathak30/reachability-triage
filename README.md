@@ -146,7 +146,7 @@ Limits of the UI, stated plainly:
   (`NewJobPage.tsx:209`).
 - The compose default is stub mode, not a real model. Real-model injection resistance
   is unclaimed (see Results).
-- `GET /v1/triage/{id}` and `POST /v1/triage` return the submitted target (`main.py:125-150`,
+- `GET /v1/triage/{id}` and `POST /v1/triage` return the submitted target (`main.py:134-187`,
   `DECISIONS.md` §21). The job page shows Package (`package==version`) and Target for
   every status from that field (`JobPage.tsx:126-141`), and shows `none stored` when the
   stored target lacks the value. Evidence is still rendered only from `finding`.

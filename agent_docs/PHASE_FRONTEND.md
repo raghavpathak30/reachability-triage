@@ -32,7 +32,7 @@ existing Docker Compose stack and is the surface the demo GIF is recorded on.
 | `POST /v1/triage` body `{package, version, target_module, target_symbol?}` | 202 `TriageOut`, `Location: /v1/triage/{id}` | 422 `{"error":{"code":"VALIDATION_ERROR","message","details":[{loc,msg}]}}` |
 | `GET /v1/triage/{id}` | 200 `TriageOut` | 404 `{"error":{"code":"NOT_FOUND","message"}}` |
 
-`TriageOut = {id, status: queued|running|completed|failed, finding|null, error|null, llm_mode: "stub"|"groq"|null, target: {package|null, version|null, repo_url|null, target_module|null, target_symbol|null}}` (`main.py:125-150`; `target` is the submitted target, display-only, see `DECISIONS.md` §21)
+`TriageOut = {id, status: queued|running|completed|failed, finding|null, error|null, llm_mode: "stub"|"groq"|null, target: {package|null, version|null, repo_url|null, target_module|null, target_symbol|null}}` (`main.py:134-187`; `target` is the submitted target, display-only, see `DECISIONS.md` §21)
 
 `finding = {result: {target_module, target_symbol|null, verdict, path: CallEdge[]|null, reason|null}, rationale, tool_calls: [{sequence, tool_name, arguments, result}]}`
 

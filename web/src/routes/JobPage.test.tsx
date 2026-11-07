@@ -391,6 +391,22 @@ test('null target_module falls back to Job <id8> and renders without error', asy
   expect(screen.getByText('Package').nextElementSibling).toHaveTextContent('none stored')
 })
 
+test('stored empty-string target_module (GET returns null) falls back to Job <id8>', async () => {
+  // GET body for a row stored with "" fields: main.py reads "" as null
+  // (tests/test_main.py::test_get_stored_empty_strings_read_as_null).
+  const stored = withTarget(queued, {
+    package: null,
+    version: null,
+    repo_url: null,
+    target_module: null,
+    target_symbol: null,
+  })
+  await renderJob([body(stored)], stored.id)
+  expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(`Job ${stored.id.slice(0, 8)}`)
+  expect(screen.getByText('Package').nextElementSibling).toHaveTextContent('none stored')
+  expect(screen.getByText('Target').nextElementSibling).toHaveTextContent('none stored')
+})
+
 test('server-supplied hostile target renders as literal text and localStorage cannot affect heading or facts', async () => {
   const evil = '<img src=x onerror=alert(1)>'
   window.localStorage.setItem(

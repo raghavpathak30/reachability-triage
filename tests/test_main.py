@@ -272,6 +272,58 @@ def test_get_stored_non_object_target_returns_all_null_and_warns(db_session, cap
     assert len(warnings) == 1
 
 
+def test_get_redacts_userinfo_from_stored_repo_url(db_session):
+    job_id = _insert_job(
+        db_session,
+        {"repo_url": "https://user:secret@github.com/a/b", "target_module": "m", "target_symbol": None},
+    )
+    response = client.get(f"/v1/triage/{job_id}")
+    assert response.status_code == 200
+    assert response.json()["target"]["repo_url"] == "https://github.com/a/b"
+    assert "secret" not in response.text
+    assert "user" not in response.json()["target"]["repo_url"]
+
+
+def test_get_redaction_keeps_port_path_query_fragment(db_session):
+    job_id = _insert_job(
+        db_session,
+        {"repo_url": "https://tok@Example.com:8443/a/b.git?x=1#frag", "target_module": "m"},
+    )
+    target = client.get(f"/v1/triage/{job_id}").json()["target"]
+    assert target["repo_url"] == "https://Example.com:8443/a/b.git?x=1#frag"
+
+
+@pytest.mark.parametrize("stored_url", ["https://[::1/a", "https://host:notaport/a"])
+def test_get_unparseable_stored_repo_url_returns_null(db_session, stored_url):
+    job_id = _insert_job(db_session, {"repo_url": stored_url, "target_module": "m"})
+    response = client.get(f"/v1/triage/{job_id}")
+    assert response.status_code == 200
+    target = response.json()["target"]
+    assert target["repo_url"] is None
+    assert target["target_module"] == "m"
+
+
+def test_get_stored_empty_strings_read_as_null(db_session):
+    job_id = _insert_job(
+        db_session,
+        {"package": "", "version": "", "repo_url": "", "target_module": "", "target_symbol": None},
+    )
+    response = client.get(f"/v1/triage/{job_id}")
+    assert response.status_code == 200
+    assert set(response.json()["target"].values()) == {None}
+
+
+@pytest.mark.parametrize(
+    "repo_url",
+    ["https://user:secret@github.com/a/b", "https://secret@github.com/a/b"],
+)
+def test_create_triage_repo_url_with_userinfo_422(repo_url):
+    response = client.post("/v1/triage", json={"repo_url": repo_url, "target_module": "m"})
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert "secret" not in response.text
+
+
 def test_get_returns_404_when_row_vanishes_after_get_job(monkeypatch):
     import main
 
