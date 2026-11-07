@@ -4,6 +4,8 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import notFound from '../api/__fixtures__/404-valid-uuid.json'
 import failed from '../../design/samples/failed.derived.json'
 import groqMode from '../../design/samples/groq-mode.derived.json'
+import queued from '../../design/samples/queued.derived.json'
+import running from '../../design/samples/running.derived.json'
 import noEvidence from '../../design/samples/no-evidence.derived.json'
 import nullMode from '../../design/samples/null-mode.derived.json'
 import repeated from '../../design/samples/repeated-calls.derived.json'
@@ -333,11 +335,31 @@ test('failed job shows heading, Package and Target from response.target', async 
 })
 
 test('queued job shows Package and Target from the response', async () => {
-  const queued = { id: REACHABLE_ID, status: 'queued', finding: null, error: null, llm_mode: null, target: derivedTarget }
-  await renderJob([body(queued)], REACHABLE_ID)
+  await renderJob([body(queued)], queued.id)
   expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('pkg.sink:vulnerable')
   expect(screen.getByText('Target').nextElementSibling).toHaveTextContent('pkg.sink:vulnerable')
   expect(screen.getByText('Package').nextElementSibling).toHaveTextContent('pkg==1.0.0')
+})
+
+test('running job shows Package and Target from the response', async () => {
+  await renderJob([body(running), { kind: 'hang' }], running.id)
+  expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('pkg.sink:vulnerable')
+  expect(screen.getByText('Target').nextElementSibling).toHaveTextContent('pkg.sink:vulnerable')
+  expect(screen.getByText('Package').nextElementSibling).toHaveTextContent('pkg==1.0.0')
+})
+
+test('first fetch pending shows Job <id8> and Checking', async () => {
+  await renderJob([{ kind: 'hang' }], REACHABLE_ID)
+  expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(`Job ${REACHABLE_ID.slice(0, 8)}`)
+  expect(screen.getByText('Target').nextElementSibling).toHaveTextContent('Checking')
+  expect(screen.getByText('Package').nextElementSibling).toHaveTextContent('Checking')
+})
+
+test('network error before any response never shows "not recorded" for Target', async () => {
+  const { container } = await renderJob([{ kind: 'network' }], REACHABLE_ID)
+  expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(`Job ${REACHABLE_ID.slice(0, 8)}`)
+  expect(screen.getByText('Target').nextElementSibling).not.toHaveTextContent('not recorded')
+  expect(container.textContent).not.toContain('Target not recorded')
 })
 
 test('R6 arguments render as raw pretty JSON with no path trimming', async () => {
