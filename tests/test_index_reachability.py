@@ -8,6 +8,8 @@ from reachability.index.symbols import build_symbol_index
 
 from conftest import write_tree
 
+NO_ENTRYPOINTS_REASON = "no entrypoints detected; reachability cannot be determined without an entrypoint"
+
 
 def _build(tmp_path, files):
     write_tree(tmp_path, files)
@@ -170,16 +172,47 @@ def test_not_reachable_imported_but_never_called(tmp_path):
     assert result.reason is not None
 
 
-def test_not_reachable_no_entrypoints(tmp_path):
+def test_unknown_no_entrypoints(tmp_path):
     write_tree(tmp_path, {"mod.py": "def target_func():\n    return 1\n"})
     report = build_l1_index(tmp_path)
     symbol_index = build_symbol_index(report)
     edges = build_edge_index(report, symbol_index)
 
     result = compute_reachability("mod", "target_func", [], edges, report)
-    assert result.verdict == Verdict.NOT_REACHABLE
+    assert result.verdict == Verdict.UNKNOWN
     assert result.path is None
-    assert result.reason == "no entrypoints detected in repository"
+    assert result.reason == NO_ENTRYPOINTS_REASON
+
+
+def test_empty_entrypoints_never_not_reachable(tmp_path):
+    # Early return precedes D1/D3: a nameless getattr dispatch or a name escape
+    # in the repo must not change the zero-entrypoint reason.
+    getattr_dir = tmp_path / "getattr_repo"
+    getattr_dir.mkdir()
+    _, edges, report = _build(
+        getattr_dir,
+        {
+            "sink.py": "def target_func():\n    return 1\n",
+            "entry.py": "import sink\n\ndef dispatch(name):\n    getattr(sink, name)()\n",
+        },
+    )
+    result = compute_reachability("sink", "target_func", [], edges, report)
+    assert result.verdict == Verdict.UNKNOWN
+    assert result.path is None
+    assert result.reason == NO_ENTRYPOINTS_REASON
+
+    escape_dir = tmp_path / "escape_repo"
+    escape_dir.mkdir()
+    _, edges, report = _build(
+        escape_dir,
+        {
+            "mod.py": 'def target_func():\n    return 1\n\nHANDLERS = {"go": target_func}\n',
+        },
+    )
+    result = compute_reachability("mod", "target_func", [], edges, report)
+    assert result.verdict == Verdict.UNKNOWN
+    assert result.path is None
+    assert result.reason == NO_ENTRYPOINTS_REASON
 
 
 def test_l5_fixture13_nameless_getattr_dispatch_yields_unknown_not_not_reachable(tmp_path):
