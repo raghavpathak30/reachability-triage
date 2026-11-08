@@ -117,10 +117,11 @@ These are acceptance criteria, each covered by a component test.
   `/tmp/reachability-triage-xamygun_/extracted/pkg/entry.py`. The UI shows
   the part after `/extracted/` (`pkg/entry.py:5`); if the marker is absent it
   shows the full string unchanged. This is display only; the stored data is
-  not altered. The redaction marker `[REDACTED: instruction-like text]` in
-  tool results is shown muted with a title explaining that the sandbox always
-  redacts absolute paths (`sandbox.py` category 3a), so it does not read as
-  an attack.
+  not altered. Since v0.3.2 every `[REDACTED: <label>]` marker in
+  tool results is shown muted with a title matching its label (absolute path,
+  token, system-prompt-like text, instruction-like text). Jobs stored before
+  v0.3.2 carry `[REDACTED: instruction-like text]` for every category, and its
+  title says so.
 - **R8 — form errors.** Client-side checks mirror the pydantic rules
   (package and version both required, `target_module` non-empty), but the
   server is authoritative: a 422 renders `message` and each `details[].loc`/
