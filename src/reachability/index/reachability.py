@@ -116,9 +116,9 @@ def compute_reachability(
         return ReachabilityResult(
             target_module=target_module,
             target_symbol=target_symbol,
-            verdict=Verdict.NOT_REACHABLE,
+            verdict=Verdict.UNKNOWN,
             path=None,
-            reason="no entrypoints detected in repository",
+            reason="no entrypoints detected; reachability cannot be determined without an entrypoint",
         )
 
     # Computed unconditionally, every call -- not an opt-in a caller can skip or

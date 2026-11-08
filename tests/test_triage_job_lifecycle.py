@@ -162,6 +162,40 @@ def test_full_lifecycle_completed_via_monkeypatched_chain(monkeypatch, db_sessio
         assert isinstance(edge["file"], str)
 
 
+def test_job_zero_entrypoints_completed_unknown(monkeypatch, db_session, tmp_path):
+    repo = tmp_path / "zero_entrypoint_repo"
+    repo.mkdir()
+    (repo / "mod.py").write_text("def target_func():\n    return 1\n")
+
+    monkeypatch.setenv("TRIAGE_LLM_MODE", "stub")
+    monkeypatch.setattr(job_runner, "acquire_source", lambda request, workdir: repo)
+
+    response = client.post(
+        "/v1/triage",
+        json={
+            "package": "unused",
+            "version": "0.0.0",
+            "target_module": "mod",
+            "target_symbol": "target_func",
+        },
+    )
+    assert response.status_code == 202
+    triage_id = response.json()["id"]
+
+    session_factory = _session_factory_for(db_session)
+    assert run_worker_once(session_factory, "test-worker", DEFAULT_TOOL_CALL_BUDGET) is True
+
+    body = client.get(f"/v1/triage/{triage_id}").json()
+
+    assert body["status"] == "completed"
+    assert body["llm_mode"] == "stub"
+    assert body["finding"]["result"]["verdict"] == "unknown"
+    assert body["finding"]["result"]["path"] is None
+    assert body["finding"]["result"]["reason"] == (
+        "no entrypoints detected; reachability cannot be determined without an entrypoint"
+    )
+
+
 def test_full_lifecycle_failed_via_monkeypatched_acquisition_error(monkeypatch, db_session):
     def _boom(request, workdir):
         raise AcquisitionError("simulated acquisition failure")

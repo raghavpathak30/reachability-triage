@@ -288,3 +288,13 @@ def test_every_reachable_loop_bailout_reason_maps_to_a_known_member():
         assert cause != TerminationCause.UNCLASSIFIED, (
             f"reason {finding.result.reason!r} unexpectedly mapped to UNCLASSIFIED"
         )
+
+
+def test_zero_entrypoints_unknown_is_unclassified(tmp_path):
+    # Pins the open item in DECISIONS.md section 22: a zero-entrypoint UNKNOWN
+    # matches no known reason prefix, so it reports as UNCLASSIFIED.
+    (tmp_path / "mod.py").write_text("def target_func():\n    return 1\n")
+    repo_index = build_repo_index(tmp_path)
+    client = DeterministicPolicyStubLLMClient("mod", "target_func")
+    finding = run_triage_loop_langgraph(client, repo_index, "mod", "target_func", budget=5)
+    assert compute_termination_cause(finding) == TerminationCause.UNCLASSIFIED

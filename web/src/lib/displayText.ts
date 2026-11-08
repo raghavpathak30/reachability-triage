@@ -3,8 +3,6 @@ import type { components } from '../api/schema'
 type ToolCallRecord = components['schemas']['ToolCallRecord']
 type CallEdge = components['schemas']['CallEdge']
 
-export const REDACTION_MARKER = '[REDACTED: instruction-like text]'
-
 // An absolute path token (starts at a "/" that follows start, whitespace or an
 // opening quote/bracket) up to and including the first "/extracted/". The token
 // length is bounded to avoid quadratic backtracking on long untrusted input.
@@ -19,14 +17,30 @@ export interface TextPart {
   redacted: boolean
 }
 
+// One capture group so String.split interleaves text pieces (even indices) and
+// labels (odd indices). No /g flag, so there is no state shared between calls.
+// The label is bounded and excludes brackets to keep matching cost bounded on
+// long untrusted input.
+const REDACTION_SPLIT = /\[REDACTED: ([^\][]{1,64})\]/
+
 export function splitRedactions(s: string): TextPart[] {
   const parts: TextPart[] = []
-  const pieces = s.split(REDACTION_MARKER)
+  const pieces = s.split(REDACTION_SPLIT)
   pieces.forEach((piece, i) => {
-    if (piece !== '') parts.push({ text: piece, redacted: false })
-    if (i < pieces.length - 1) parts.push({ text: REDACTION_MARKER, redacted: true })
+    if (i % 2 === 1) {
+      parts.push({ text: `[REDACTED: ${piece}]`, redacted: true })
+    } else if (piece !== '') {
+      parts.push({ text: piece, redacted: false })
+    }
   })
   return parts
+}
+
+const REDACTION_LABEL = /^\[REDACTED: ([^\][]{1,64})\]$/
+
+export function redactionLabel(markerText: string): string | null {
+  const m = REDACTION_LABEL.exec(markerText)
+  return m === null ? null : (m[1] ?? null)
 }
 
 function canonical(value: unknown): string {

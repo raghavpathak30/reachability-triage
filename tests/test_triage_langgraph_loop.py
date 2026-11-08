@@ -54,6 +54,22 @@ def test_langgraph_loop_runs_fixture_end_to_end():
     assert isinstance(finding.tool_calls, list)
 
 
+def test_zero_entrypoints_full_loop_is_unknown(tmp_path):
+    (tmp_path / "mod.py").write_text("def target_func():\n    return 1\n")
+    repo_index = build_repo_index(tmp_path)
+    assert repo_index.entrypoints == []
+
+    client = DeterministicPolicyStubLLMClient("mod", "target_func")
+    finding = run_triage_loop_langgraph(client, repo_index, "mod", "target_func", budget=BUDGET)
+
+    assert finding.result.verdict == Verdict.UNKNOWN
+    assert finding.result.verdict != Verdict.NOT_REACHABLE
+    assert finding.result.path is None
+    assert finding.result.reason == (
+        "no entrypoints detected; reachability cannot be determined without an entrypoint"
+    )
+
+
 class _ScriptedStubLLMClient:
     """Test-local scripted client: a `ToolCallAction` then a
     `FinalAnswerAction`, the same shape `stub_llm.py`'s docstring says

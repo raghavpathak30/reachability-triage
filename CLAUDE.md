@@ -263,6 +263,21 @@ an oversight — see plan for rationale); `setup.py`/`[tool.poetry.scripts]`
 console-script parsing is not implemented (only PEP 621
 `[project.scripts]`/`[project.gui-scripts]` via stdlib `tomllib`).
 
+Zero entrypoints (v0.3.2, `DECISIONS.md` §22): `compute_reachability` with an
+empty entrypoint list returns `unknown` with the reason "no entrypoints detected;
+reachability cannot be determined without an entrypoint"
+(`src/reachability/index/reachability.py:115-122`), not `not_reachable`; the
+early return still precedes the D1/D3 checks. A library wheel such as `six` gets
+this verdict in package mode. In real-lane reports this reason classifies as
+`UNCLASSIFIED` (`termination_cause.py` is unchanged; a dedicated cause is future
+work). The sandbox now labels what it redacted (`sandbox.py:72-75`,
+`sandbox.py:183-188`): `[REDACTED: instruction-like text]` (categories 1 and 2),
+`[REDACTED: absolute path]`, `[REDACTED: token]` (also registered secrets) and
+`[REDACTED: system-prompt-like text]`. The web UI mutes every
+`[REDACTED: <label>]` form (`web/src/lib/displayText.ts:24-37`) with a
+per-label tooltip; jobs stored before v0.3.2 carry the old marker for every
+category. `PROMPT_VERSION` was not bumped (§22).
+
 A *named* unresolved call (e.g. `obj.load()`) bridges to `unknown` for
 **any** query whose `target_symbol` matches that name, regardless of
 `target_module` — a known false-positive-toward-`unknown` gap, since an

@@ -72,7 +72,7 @@ curl -s -X POST "http://127.0.0.1:${API_PORT:-8000}/v1/triage" -H 'Content-Type:
 docker compose down -v
 ```
 
-The `six` example finishes `not_reachable` in stub mode, with reason `no entrypoints detected in repository`: the `six` wheel has no entrypoints of its own (no `__main__` block, console script or route), so nothing inside it reaches `raise_from`. See [Limitations](#limitations).
+The `six` example finishes `unknown` in stub mode, with reason `no entrypoints detected; reachability cannot be determined without an entrypoint`: the `six` wheel has no entrypoints of its own (no `__main__` block, console script or route), so there is nothing to measure reachability from. A stub-mode run of the acquire, index and loop chain for `six==1.16.0` (target `six.raise_from`; run directly, not as a job through the API, on 8 Nov 2026) printed `modules: 1 entrypoints: 0`, `verdict: unknown`, `path: None` and that reason. The zero-entrypoint case is covered by `tests/test_triage_langgraph_loop.py::test_zero_entrypoints_full_loop_is_unknown` and, through `POST /v1/triage` and the worker, `tests/test_triage_job_lifecycle.py::test_job_zero_entrypoints_completed_unknown`. See [Limitations](#limitations).
 
 `cp .env.example .env` is optional. The POST returns HTTP 202 and a job `id`; fetch
 the result with:
@@ -207,9 +207,14 @@ the model's behaviour under injection is not established.
   `unknown`, and that check is corpus-wide, so it over-flags rather than under-flags.
 - Reachability is measured from entrypoints detected in the acquired package
   itself (`__main__` blocks, console scripts, route/CLI decorators, tests). A
-  library wheel with none (for example `six`) yields `not_reachable` with the
-  reason `no entrypoints detected in repository` — that is a statement about the
-  package's own entrypoints, not about how your application calls it.
+  library wheel with none (for example `six`) yields `unknown` with the
+  reason `no entrypoints detected; reachability cannot be determined without an
+  entrypoint` — that is a statement about the package's own entrypoints, not
+  about how your application calls it. It is not a `not_reachable` verdict.
+- The injection sandbox labels what it redacts: `[REDACTED: absolute path]`,
+  `[REDACTED: token]`, `[REDACTED: system-prompt-like text]` and
+  `[REDACTED: instruction-like text]`. Jobs stored before v0.3.2 show the last
+  label for every category.
 - A failed job is not automatically re-run (only a single LLM API call is retried).
 - The worker has no mid-execution heartbeat; a hung single worker is not recovered.
 - Real-model injection resistance is unclaimed (see Results).
