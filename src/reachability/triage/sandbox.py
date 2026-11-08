@@ -40,7 +40,7 @@ trade-off, silently letting an attack through is not.
 2. **Unauthorized tool-invocation instructions** -- phrasing like "call
    the `X` tool", "invoke `X`", "use `search_symbol`/`find_callers`/
    `resolve_import`", "run `X` again", "check ... via `X`", "you should
-   ... `X`" in imperative context. Same redaction marker.
+   ... `X`" in imperative context. Same redaction marker as category 1.
 3. **Context echo**:
    a. a generic absolute-path regex, redacted **unconditionally** (not
       root-relative) -- `sandbox_untrusted_text`'s one-argument signature
@@ -50,12 +50,14 @@ trade-off, silently letting an attack through is not.
       a precise check. Known false-positive risk: a benign absolute path
       appearing in ordinary tool output (unlikely given the three tools'
       actual return shapes, but not impossible) would also be redacted.
+      Marker: `"[REDACTED: absolute path]"`.
    b. a generic high-entropy-token heuristic (a long run of mixed
       alphanumeric characters with no whitespace, the shape of an API key
-      or bearer token), redacted unconditionally.
+      or bearer token), redacted unconditionally. Marker:
+      `"[REDACTED: token]"`, also used for registered literal secrets.
    c. a system-prompt-fragment heuristic (lines starting with
       `"system:"`/`"you are an ai"`/`"developer:"`, case-insensitive),
-      redacted.
+      redacted with `"[REDACTED: system-prompt-like text]"`.
 
 Tests that need to plant a specific literal secret string use
 `temporary_secret_pattern(literal)` (below) rather than mutating the
@@ -68,6 +70,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 _REDACTION_MARKER = "[REDACTED: instruction-like text]"
+_MARKER_ABSOLUTE_PATH = "[REDACTED: absolute path]"
+_MARKER_TOKEN = "[REDACTED: token]"
+_MARKER_SYSTEM_PROMPT = "[REDACTED: system-prompt-like text]"
 
 # Category 1: verdict manipulation.
 _VERDICT_NAMES = r"(?:REACHABLE_ONLY_FROM_TESTS|NOT_REACHABLE|REACHABLE|UNKNOWN)"
@@ -175,11 +180,11 @@ def sandbox_untrusted_text(raw: str) -> str:
     for pattern in _TOOL_INVOCATION_PATTERNS:
         text = pattern.sub(_REDACTION_MARKER, text)
 
-    text = _SYSTEM_PROMPT_FRAGMENT_PATTERN.sub(_REDACTION_MARKER, text)
-    text = _ABSOLUTE_PATH_PATTERN.sub(_REDACTION_MARKER, text)
-    text = _HIGH_ENTROPY_TOKEN_PATTERN.sub(_REDACTION_MARKER, text)
+    text = _SYSTEM_PROMPT_FRAGMENT_PATTERN.sub(_MARKER_SYSTEM_PROMPT, text)
+    text = _ABSOLUTE_PATH_PATTERN.sub(_MARKER_ABSOLUTE_PATH, text)
+    text = _HIGH_ENTROPY_TOKEN_PATTERN.sub(_MARKER_TOKEN, text)
 
     for pattern in _SECRET_MARKER_PATTERNS:
-        text = pattern.sub(_REDACTION_MARKER, text)
+        text = pattern.sub(_MARKER_TOKEN, text)
 
     return text
