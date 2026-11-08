@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import type { components } from '../api/schema'
-import { displayPath, groupToolCalls, llmModeLabel, lowConfidenceCount, splitRedactions } from './displayText'
+import { displayPath, groupToolCalls, llmModeLabel, lowConfidenceCount, redactionLabel, splitRedactions } from './displayText'
 
 type Call = components['schemas']['ToolCallRecord']
 
@@ -44,6 +44,36 @@ test('R9 splits the redaction marker into a redacted part', () => {
   ])
   expect(splitRedactions('plain')).toEqual([{ text: 'plain', redacted: false }])
   expect(splitRedactions('')).toEqual([])
+})
+
+test('splitRedactions matches every labelled marker and splits two markers', () => {
+  expect(splitRedactions('a [REDACTED: token] b [REDACTED: absolute path] c')).toEqual([
+    { text: 'a ', redacted: false },
+    { text: '[REDACTED: token]', redacted: true },
+    { text: ' b ', redacted: false },
+    { text: '[REDACTED: absolute path]', redacted: true },
+    { text: ' c', redacted: false },
+  ])
+  expect(redactionLabel('[REDACTED: absolute path]')).toBe('absolute path')
+  expect(redactionLabel('[REDACTED]')).toBeNull()
+})
+
+test('splitRedactions does not match [REDACTED] or org_[REDACTED]', () => {
+  expect(splitRedactions('[REDACTED] org_[REDACTED]')).toEqual([{ text: '[REDACTED] org_[REDACTED]', redacted: false }])
+})
+
+test('splitRedactions gives identical results when called twice on the same input', () => {
+  const input = 'x [REDACTED: token] y [REDACTED: absolute path]'
+  expect(splitRedactions(input)).toEqual(splitRedactions(input))
+  expect(splitRedactions(input)).toEqual(splitRedactions(input))
+})
+
+test('splitRedactions returns plain text quickly for long unterminated input', () => {
+  const input = '[REDACTED: '.repeat(5000)
+  const start = performance.now()
+  const parts = splitRedactions(input)
+  expect(performance.now() - start).toBeLessThan(50)
+  expect(parts).toEqual([{ text: input, redacted: false }])
 })
 
 test('R6 groups same-tool same-arguments calls and shows a sequence range', () => {

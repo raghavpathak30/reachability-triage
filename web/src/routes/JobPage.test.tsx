@@ -319,7 +319,7 @@ test('R9 renders the redaction marker muted with the sandbox title', async () =>
   expect(marker).toHaveTextContent('[REDACTED: instruction-like text]')
   expect(marker).toHaveAttribute(
     'title',
-    'Removed by the injection sandbox. Absolute paths are always redacted.',
+    'Removed by the injection sandbox: instruction-like text (an injection attempt). On jobs before v0.3.2 this marker was used for every redacted category, including absolute paths.',
   )
 })
 
@@ -478,6 +478,6 @@ test('R9 renders a redaction marker inside tool arguments muted with the sandbox
   expect(args?.textContent).toBe(JSON.stringify(raw, null, 2))
   expect(args?.querySelector('.redacted')).toHaveAttribute(
     'title',
-    'Removed by the injection sandbox. Absolute paths are always redacted.',
+    'Removed by the injection sandbox: instruction-like text (an injection attempt). On jobs before v0.3.2 this marker was used for every redacted category, including absolute paths.',
   )
 })
