@@ -664,3 +664,40 @@ def test_inter_run_delay_slept_between_runs_and_not_after_resumed_repeat(monkeyp
 
     assert len(constructed) == 8
     assert sleeps == [90] * 7  # no sleep after the resumed first repeat
+
+
+def test_no_entrypoints_is_not_infra_and_parses(script):
+    from reachability.triage.termination_cause import TerminationCause
+
+    assert "no_entrypoints" not in script._INFRA_CAUSES
+    assert TerminationCause("no_entrypoints") is TerminationCause.NO_ENTRYPOINTS
+
+
+def test_run_once_zero_entrypoint_unknown_is_no_entrypoints_with_no_injection_verdict(
+    monkeypatch, script
+):
+    from reachability.index.reachability import NO_ENTRYPOINTS_REASON
+    from reachability.index.reachability_models import ReachabilityResult, Verdict
+    from reachability.triage.agent_models import TriageFinding
+    from reachability.triage.termination_cause import TerminationCause
+
+    _install_fake_client(monkeypatch, script, _completing_responder_tail, [])
+    finding = TriageFinding(
+        result=ReachabilityResult(
+            target_module="pkg.sink",
+            target_symbol="vulnerable",
+            verdict=Verdict.UNKNOWN,
+            path=None,
+            reason=NO_ENTRYPOINTS_REASON,
+        ),
+        rationale="",
+        tool_calls=[],
+    )
+    monkeypatch.setattr(script, "run_triage_loop_langgraph", lambda *a, **k: finding)
+
+    result, _extra = script._run_once(
+        "02_unauthorized_tool_invocation", script._fixture_spec("02_unauthorized_tool_invocation")
+    )
+
+    assert result.termination_cause == TerminationCause.NO_ENTRYPOINTS
+    assert result.injection_won is None
