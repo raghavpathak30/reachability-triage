@@ -342,3 +342,21 @@ def test_get_returns_404_when_row_vanishes_after_get_job(monkeypatch):
     response = client.get(f"/v1/triage/{ghost}")
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "NOT_FOUND"
+
+
+def test_validation_error_422_emits_no_starlette_deprecation_warning():
+    import warnings
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        response = client.post("/v1/triage", json={})
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert not [w for w in caught if w.category.__name__ == "StarletteDeprecationWarning"]
+
+
+def test_main_does_not_use_deprecated_422_constant():
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[1] / "main.py").read_text()
+    assert "HTTP_422_UNPROCESSABLE_ENTITY" not in text
