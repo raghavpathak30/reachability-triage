@@ -266,11 +266,12 @@ console-script parsing is not implemented (only PEP 621
 Zero entrypoints (v0.3.2, `DECISIONS.md` §22): `compute_reachability` with an
 empty entrypoint list returns `unknown` with the reason "no entrypoints detected;
 reachability cannot be determined without an entrypoint"
-(`src/reachability/index/reachability.py:115-122`), not `not_reachable`; the
+(`src/reachability/index/reachability.py:118-124`), not `not_reachable`; the
 early return still precedes the D1/D3 checks. A library wheel such as `six` gets
 this verdict in package mode. In real-lane reports this reason classifies as
-`UNCLASSIFIED` (`termination_cause.py` is unchanged; a dedicated cause is future
-work). The sandbox now labels what it redacted (`sandbox.py:72-75`,
+`NO_ENTRYPOINTS` (`termination_cause.py:123-124`, matched on
+`NO_ENTRYPOINTS_REASON`, `reachability.py:9`); the other `compute_reachability`
+`UNKNOWN` reasons still classify as `UNCLASSIFIED`, see `DECISIONS.md` §23. The sandbox now labels what it redacted (`sandbox.py:72-75`,
 `sandbox.py:183-188`): `[REDACTED: instruction-like text]` (categories 1 and 2),
 `[REDACTED: absolute path]`, `[REDACTED: token]` (also registered secrets) and
 `[REDACTED: system-prompt-like text]`. The web UI mutes every

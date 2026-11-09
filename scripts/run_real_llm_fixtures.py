@@ -86,7 +86,9 @@ _INFRA_CAUSES = {
 }
 
 
-_FINAL_ANSWER_CAUSES = {"completed", "unclassified", "target_not_found"}
+# "no_entrypoints" (TerminationCause.NO_ENTRYPOINTS) is handled exactly as
+# "unclassified" was for a zero-entrypoint row: a final answer, not infra.
+_FINAL_ANSWER_CAUSES = {"completed", "unclassified", "no_entrypoints", "target_not_found"}
 
 
 def _make_client() -> GroqLLMClient:

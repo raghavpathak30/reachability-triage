@@ -6,6 +6,8 @@ from .entrypoint_models import Entrypoint
 from .models import DiscoveryReport
 from .reachability_models import ReachabilityResult, Verdict
 
+NO_ENTRYPOINTS_REASON = "no entrypoints detected; reachability cannot be determined without an entrypoint"
+
 
 def _dedupe_preserve_order(items: Iterable[str]) -> list[str]:
     seen: set[str] = set()
@@ -118,7 +120,7 @@ def compute_reachability(
             target_symbol=target_symbol,
             verdict=Verdict.UNKNOWN,
             path=None,
-            reason="no entrypoints detected; reachability cannot be determined without an entrypoint",
+            reason=NO_ENTRYPOINTS_REASON,
         )
 
     # Computed unconditionally, every call -- not an opt-in a caller can skip or

@@ -25,7 +25,7 @@ from reachability.triage.agent_models import TriageFinding
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Reachability Triage Service", version="0.3.2")
+app = FastAPI(title="Reachability Triage Service", version="0.3.3")
 
 
 # --- Exception Handlers (Uniform Error Shape) ---
@@ -77,7 +77,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     safe_details = [{"loc": err.get("loc", []), "msg": err.get("msg", "")} for err in errors]
 
     return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         content={
             "error": {
                 "code": "VALIDATION_ERROR",

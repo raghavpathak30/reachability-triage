@@ -16,7 +16,11 @@ of duplicating the literal values.
 **Why `verdict != Verdict.UNKNOWN` and not `reason is None`.** An earlier
 draft of this module classified completion by `reason is None`. That rule
 is factually wrong: `compute_reachability` returns `NOT_REACHABLE` with a
-non-`None` reason in two places (`reachability.py:115-122` and `:221-230`).
+non-`None` reason (`reachability.py:226-232`, its final step, the only
+`NOT_REACHABLE` return). Its zero-entrypoint return (`reachability.py:118-124`)
+is `UNKNOWN`, and is matched here as `NO_ENTRYPOINTS` via
+`NO_ENTRYPOINTS_REASON` (`reachability.py:9`); its other `UNKNOWN` returns
+(low-confidence, opaque call, name escape) still fall to `UNCLASSIFIED`.
 Since this phase's own adversarial fixture's documented correct answer is
 `NOT_REACHABLE` (`tests/fixtures/l5/11_dead_function_call_site/label.json`),
 the `reason is None` rule would have classified every genuinely-completed,
@@ -26,14 +30,14 @@ behavior or rate limits. The corrected rule below has no such gap: only
 `compute_reachability` actually running to a decidable conclusion can ever
 produce a verdict other than `UNKNOWN` -- there is no loop-level
 early-bailout path that produces a non-`UNKNOWN` verdict -- so this is a
-structurally sound positive signal regardless of which of `NOT_REACHABLE`'s
-two internal reason variants applies.
+structurally sound positive signal regardless of the `NOT_REACHABLE` reason text.
 """
 
 from __future__ import annotations
 
 from enum import Enum
 
+from reachability.index.reachability import NO_ENTRYPOINTS_REASON
 from reachability.index.reachability_models import Verdict
 
 from .agent_models import TriageFinding
@@ -57,7 +61,8 @@ class TerminationCause(str, Enum):
     and `UNCLASSIFIED` is the conservative default for an `UNKNOWN`-verdict
     run whose reason matches none of the ten known bail-out prefixes.
     `UNCLASSIFIED` must never be treated as `COMPLETED` anywhere in this
-    project's reporting logic."""
+    project's reporting logic. `NO_ENTRYPOINTS`: analysis ran, answer
+    undetermined; NOT the loop bailing out; NOT COMPLETED."""
 
     COMPLETED = "completed"
     BUDGET_EXCEEDED = "budget_exceeded"
@@ -70,6 +75,7 @@ class TerminationCause(str, Enum):
     LLM_REFUSAL = "llm_refusal"
     LLM_TRUNCATED = "llm_truncated"
     LLM_MALFORMED_RESPONSE = "llm_malformed_response"
+    NO_ENTRYPOINTS = "no_entrypoints"
     UNCLASSIFIED = "unclassified"
 
 
@@ -113,6 +119,9 @@ def compute_termination_cause(finding: TriageFinding) -> TerminationCause:
 
     if reason == TARGET_NOT_FOUND_REASON:
         return TerminationCause.TARGET_NOT_FOUND
+
+    if reason == NO_ENTRYPOINTS_REASON:
+        return TerminationCause.NO_ENTRYPOINTS
 
     for prefix, cause in _UNKNOWN_VERDICT_REASON_PREFIXES.items():
         if reason.startswith(prefix):

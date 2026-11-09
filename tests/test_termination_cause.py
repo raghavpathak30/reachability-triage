@@ -290,11 +290,70 @@ def test_every_reachable_loop_bailout_reason_maps_to_a_known_member():
         )
 
 
-def test_zero_entrypoints_unknown_is_unclassified(tmp_path):
-    # Pins the open item in DECISIONS.md section 22: a zero-entrypoint UNKNOWN
-    # matches no known reason prefix, so it reports as UNCLASSIFIED.
+def test_zero_entrypoints_unknown_is_no_entrypoints(tmp_path):
+    # A zero-entrypoint UNKNOWN is matched on the index-layer constant
+    # (DECISIONS.md section 23), not left to the UNCLASSIFIED fallthrough.
     (tmp_path / "mod.py").write_text("def target_func():\n    return 1\n")
     repo_index = build_repo_index(tmp_path)
     client = DeterministicPolicyStubLLMClient("mod", "target_func")
     finding = run_triage_loop_langgraph(client, repo_index, "mod", "target_func", budget=5)
+    assert compute_termination_cause(finding) == TerminationCause.NO_ENTRYPOINTS
+
+
+def test_termination_cause_member_list_is_pinned():
+    assert {m.name: m.value for m in TerminationCause} == {
+        "COMPLETED": "completed",
+        "BUDGET_EXCEEDED": "budget_exceeded",
+        "MALFORMED_TOOL_CALL": "malformed_tool_call",
+        "TARGET_NOT_FOUND": "target_not_found",
+        "LLM_TIMEOUT": "llm_timeout",
+        "LLM_RATE_LIMITED": "llm_rate_limited",
+        "LLM_REQUEST_TOO_LARGE": "llm_request_too_large",
+        "LLM_TRANSPORT_ERROR": "llm_transport_error",
+        "LLM_REFUSAL": "llm_refusal",
+        "LLM_TRUNCATED": "llm_truncated",
+        "LLM_MALFORMED_RESPONSE": "llm_malformed_response",
+        "NO_ENTRYPOINTS": "no_entrypoints",
+        "UNCLASSIFIED": "unclassified",
+    }
+
+
+def test_no_entrypoints_reason_constant_is_byte_identical_and_returned():
+    from reachability.index.reachability import NO_ENTRYPOINTS_REASON, compute_reachability
+    from reachability.index.models import DiscoveryReport
+
+    assert NO_ENTRYPOINTS_REASON == (
+        "no entrypoints detected; reachability cannot be determined without an entrypoint"
+    )
+    result = compute_reachability("m", "f", [], [], DiscoveryReport(modules=[], import_tables={}, unparsed=[], star_import_count=0))
+    assert result.reason == NO_ENTRYPOINTS_REASON
+
+
+def _unknown_or_other_finding(verdict, reason):
+    from reachability.index.reachability_models import ReachabilityResult
+    from reachability.triage.agent_models import TriageFinding
+
+    return TriageFinding(
+        result=ReachabilityResult(
+            target_module="m", target_symbol="f", verdict=verdict, path=None, reason=reason
+        ),
+        rationale="",
+        tool_calls=[],
+    )
+
+
+def test_no_entrypoints_match_is_exact_equality_only():
+    from reachability.index.reachability import NO_ENTRYPOINTS_REASON
+    from reachability.index.reachability_models import Verdict
+
+    extra = _unknown_or_other_finding(Verdict.UNKNOWN, NO_ENTRYPOINTS_REASON + " extra")
+    assert compute_termination_cause(extra) == TerminationCause.UNCLASSIFIED
+    done = _unknown_or_other_finding(Verdict.NOT_REACHABLE, NO_ENTRYPOINTS_REASON)
+    assert compute_termination_cause(done) == TerminationCause.COMPLETED
+
+
+def test_none_reason_on_unknown_is_unclassified():
+    from reachability.index.reachability_models import Verdict
+
+    finding = _unknown_or_other_finding(Verdict.UNKNOWN, None)
     assert compute_termination_cause(finding) == TerminationCause.UNCLASSIFIED

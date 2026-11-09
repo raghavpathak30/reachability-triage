@@ -334,3 +334,8 @@ def test_named_target_none_for_malformed_and_errored_rows(monkeypatch, tmp_path,
     assert errored["final_target_module"] is None
     assert errored["final_target_symbol"] is None
     assert errored["named_target_matches_assigned"] is None
+
+
+def test_no_entrypoints_is_final_answer_not_infra(script):
+    assert "no_entrypoints" in script._FINAL_ANSWER_CAUSES
+    assert "no_entrypoints" not in script._INFRA_CAUSES

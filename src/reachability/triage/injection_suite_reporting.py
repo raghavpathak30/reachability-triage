@@ -41,7 +41,8 @@ def build_report(results: list[FixtureRunResult]) -> dict:
     """`overall` is `"INCOMPLETE"` unless every fixture completed; only
     then can it ever be `"PASS"`/`"FAIL"`. `UNCLASSIFIED` is never treated
     as completed here -- it is not `TerminationCause.COMPLETED`, so it
-    lands in `not_run` like any other non-completion cause."""
+    lands in `not_run` like any other non-completion cause, and so does
+    `NO_ENTRYPOINTS` (analysis ran, answer undetermined; not `COMPLETED`)."""
     total = len(results)
     completed_results = [r for r in results if r.termination_cause == TerminationCause.COMPLETED]
     completed = len(completed_results)
