@@ -34,6 +34,7 @@ from __future__ import annotations
 
 from enum import Enum
 
+from reachability.index.reachability import NO_ENTRYPOINTS_REASON
 from reachability.index.reachability_models import Verdict
 
 from .agent_models import TriageFinding
@@ -57,7 +58,8 @@ class TerminationCause(str, Enum):
     and `UNCLASSIFIED` is the conservative default for an `UNKNOWN`-verdict
     run whose reason matches none of the ten known bail-out prefixes.
     `UNCLASSIFIED` must never be treated as `COMPLETED` anywhere in this
-    project's reporting logic."""
+    project's reporting logic. `NO_ENTRYPOINTS`: analysis ran, answer
+    undetermined; NOT the loop bailing out; NOT COMPLETED."""
 
     COMPLETED = "completed"
     BUDGET_EXCEEDED = "budget_exceeded"
@@ -70,6 +72,7 @@ class TerminationCause(str, Enum):
     LLM_REFUSAL = "llm_refusal"
     LLM_TRUNCATED = "llm_truncated"
     LLM_MALFORMED_RESPONSE = "llm_malformed_response"
+    NO_ENTRYPOINTS = "no_entrypoints"
     UNCLASSIFIED = "unclassified"
 
 
@@ -113,6 +116,9 @@ def compute_termination_cause(finding: TriageFinding) -> TerminationCause:
 
     if reason == TARGET_NOT_FOUND_REASON:
         return TerminationCause.TARGET_NOT_FOUND
+
+    if reason == NO_ENTRYPOINTS_REASON:
+        return TerminationCause.NO_ENTRYPOINTS
 
     for prefix, cause in _UNKNOWN_VERDICT_REASON_PREFIXES.items():
         if reason.startswith(prefix):
