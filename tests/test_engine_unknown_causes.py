@@ -238,3 +238,96 @@ def test_name_escape_symbol_with_newline_classifies_as_name_escape():
     # newline-bearing symbol can reach the engine; (.+) must match it (re.DOTALL).
     reason = _name_escape_reason("a\nb")
     assert compute_termination_cause(_unknown_finding(reason)) == TerminationCause.NAME_ESCAPE
+
+
+def test_s3_s4_match_is_startswith_not_contains():
+    from reachability.index.reachability import LOW_CONFIDENCE_REASON_PREFIX, OPAQUE_CALL_REASON_PREFIX
+
+    for prefix, expected in (
+        (LOW_CONFIDENCE_REASON_PREFIX, TerminationCause.LOW_CONFIDENCE_PATH),
+        (OPAQUE_CALL_REASON_PREFIX, TerminationCause.OPAQUE_CALL),
+    ):
+        assert compute_termination_cause(_unknown_finding(prefix + "anything")) == expected
+        assert compute_termination_cause(_unknown_finding("xx" + prefix + "anything")) == TerminationCause.UNCLASSIFIED
+
+
+def test_engine_reason_on_non_unknown_verdict_is_completed():
+    from reachability.index.reachability import LOW_CONFIDENCE_REASON_PREFIX, OPAQUE_CALL_REASON_PREFIX
+
+    for reason in (
+        LOW_CONFIDENCE_REASON_PREFIX + "unresolved_attribute",
+        OPAQUE_CALL_REASON_PREFIX + "?:<dynamic>) at x.py:1 tail",
+        _name_escape_reason("f"),
+    ):
+        finding = _unknown_finding(reason, verdict=Verdict.NOT_REACHABLE)
+        assert compute_termination_cause(finding) == TerminationCause.COMPLETED
+
+
+def test_engine_prefixes_are_disjoint_from_loop_prefixes():
+    from reachability.index.reachability import (
+        LOW_CONFIDENCE_REASON_PREFIX,
+        NAME_ESCAPE_REASON_TEMPLATE,
+        NO_ENTRYPOINTS_REASON,
+        OPAQUE_CALL_REASON_PREFIX,
+    )
+    from reachability.triage.termination_cause import (
+        TARGET_NOT_FOUND_REASON,
+        _UNKNOWN_VERDICT_REASON_PREFIXES,
+    )
+
+    loop_strings = list(_UNKNOWN_VERDICT_REASON_PREFIXES) + [TARGET_NOT_FOUND_REASON, NO_ENTRYPOINTS_REASON]
+    engine_heads = [
+        LOW_CONFIDENCE_REASON_PREFIX,
+        OPAQUE_CALL_REASON_PREFIX,
+        NAME_ESCAPE_REASON_TEMPLATE.split("{target_symbol}")[0],
+    ]
+    for engine in engine_heads:
+        for loop in loop_strings:
+            assert not engine.startswith(loop)
+            assert not loop.startswith(engine)
+    for i, a in enumerate(engine_heads):
+        for b in engine_heads[i + 1 :]:
+            assert not a.startswith(b)
+            assert not b.startswith(a)
+
+
+def _zero_entrypoint_result(tmp_path):
+    report = DiscoveryReport(modules=[], import_tables={}, unparsed=[], star_import_count=0)
+    return compute_reachability("m", "f", [], [], report)
+
+
+@pytest.mark.parametrize(
+    ("site", "expected"),
+    [
+        ("zero_entrypoints", TerminationCause.NO_ENTRYPOINTS),
+        ("low_confidence", TerminationCause.LOW_CONFIDENCE_PATH),
+        ("opaque_call", TerminationCause.OPAQUE_CALL),
+        ("name_escape", TerminationCause.NAME_ESCAPE),
+    ],
+)
+def test_every_engine_unknown_return_classifies_not_unclassified(tmp_path, site, expected):
+    builders = {
+        "zero_entrypoints": _zero_entrypoint_result,
+        "low_confidence": _s3_result,
+        "opaque_call": _s4_result,
+        "name_escape": _s5_result,
+    }
+    result = builders[site](tmp_path)
+    assert result.verdict == Verdict.UNKNOWN
+    cause = compute_termination_cause(_finding(result))
+    assert cause == expected
+    assert cause != TerminationCause.UNCLASSIFIED
+
+
+def test_compute_reachability_has_exactly_four_unknown_returns():
+    import inspect
+
+    assert inspect.getsource(compute_reachability).count("Verdict.UNKNOWN") == 4
+
+
+def test_index_package_does_not_import_triage():
+    index_dir = Path(__file__).resolve().parents[1] / "src" / "reachability" / "index"
+    for source_file in index_dir.glob("*.py"):
+        text = source_file.read_text()
+        assert "reachability.triage" not in text, source_file
+        assert "from ..triage" not in text, source_file
