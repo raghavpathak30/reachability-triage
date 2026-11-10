@@ -341,7 +341,7 @@ def test_no_entrypoints_is_final_answer_not_infra(script):
     assert "no_entrypoints" not in script._INFRA_CAUSES
 
 
-@pytest.mark.parametrize("cause", ["low_confidence_path"])
+@pytest.mark.parametrize("cause", ["low_confidence_path", "opaque_call"])
 def test_new_engine_causes_are_final_answer_not_infra(script, cause):
     assert cause in script._FINAL_ANSWER_CAUSES
     assert cause not in script._INFRA_CAUSES

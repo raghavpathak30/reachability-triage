@@ -94,6 +94,7 @@ _FINAL_ANSWER_CAUSES = {
     "no_entrypoints",
     "target_not_found",
     "low_confidence_path",
+    "opaque_call",
 }
 
 

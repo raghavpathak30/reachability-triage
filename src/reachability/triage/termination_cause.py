@@ -37,7 +37,11 @@ from __future__ import annotations
 
 from enum import Enum
 
-from reachability.index.reachability import LOW_CONFIDENCE_REASON_PREFIX, NO_ENTRYPOINTS_REASON
+from reachability.index.reachability import (
+    LOW_CONFIDENCE_REASON_PREFIX,
+    NO_ENTRYPOINTS_REASON,
+    OPAQUE_CALL_REASON_PREFIX,
+)
 from reachability.index.reachability_models import Verdict
 
 from .agent_models import TriageFinding
@@ -64,7 +68,8 @@ class TerminationCause(str, Enum):
     project's reporting logic. `NO_ENTRYPOINTS`: analysis ran, answer
     undetermined; NOT the loop bailing out; NOT COMPLETED.
     `LOW_CONFIDENCE_PATH`: analysis ran, answer undetermined; NOT a loop
-    bail-out; NOT COMPLETED."""
+    bail-out; NOT COMPLETED. `OPAQUE_CALL`: analysis ran, answer
+    undetermined; NOT a loop bail-out; NOT COMPLETED."""
 
     COMPLETED = "completed"
     BUDGET_EXCEEDED = "budget_exceeded"
@@ -79,11 +84,13 @@ class TerminationCause(str, Enum):
     LLM_MALFORMED_RESPONSE = "llm_malformed_response"
     NO_ENTRYPOINTS = "no_entrypoints"
     LOW_CONFIDENCE_PATH = "low_confidence_path"
+    OPAQUE_CALL = "opaque_call"
     UNCLASSIFIED = "unclassified"
 
 
 _ENGINE_PREFIX_CAUSES: tuple[tuple[str, TerminationCause], ...] = (
     (LOW_CONFIDENCE_REASON_PREFIX, TerminationCause.LOW_CONFIDENCE_PATH),
+    (OPAQUE_CALL_REASON_PREFIX, TerminationCause.OPAQUE_CALL),
 )
 
 # Ordered so a more-specific prefix never gets shadowed by a shorter one

@@ -5,6 +5,8 @@ independently of the constants."""
 
 from pathlib import Path
 
+import pytest
+
 from reachability.index.build import build_l1_index
 from reachability.index.edges import build_edge_index
 from reachability.index.edges_models import CallEdge, Confidence, ResolutionRule
@@ -78,5 +80,67 @@ def test_low_confidence_reason_prefix_constant_is_pinned():
 def test_s3_unknown_classifies_as_low_confidence_path(tmp_path):
     cause = compute_termination_cause(_finding(_s3_result(tmp_path)))
     assert cause == TerminationCause.LOW_CONFIDENCE_PATH
+    assert cause != TerminationCause.UNCLASSIFIED
+    assert cause != TerminationCause.COMPLETED
+
+
+_S4_TAIL = " carries no literal target name, so a not_reachable verdict cannot be trusted"
+
+
+def _s4_result(tmp_path):
+    entrypoints, edges, report = _build(
+        tmp_path,
+        {
+            "sink.py": "def target_func():\n    return 1\n",
+            "entry.py": (
+                "import sink\n"
+                "\n"
+                "def dispatch(name):\n"
+                "    getattr(sink, name)()\n"
+                "\n"
+                'if __name__ == "__main__":\n'
+                '    dispatch("target_func")\n'
+            ),
+        },
+    )
+    return compute_reachability("sink", "target_func", entrypoints, edges, report)
+
+
+def test_s4_reason_is_byte_identical_to_19a3b59(tmp_path):
+    result = _s4_result(tmp_path)
+    assert result.verdict == Verdict.UNKNOWN
+    assert result.reason == f"a reachable opaque call (?:<dynamic>) at {tmp_path / 'entry.py'}:4{_S4_TAIL}"
+
+
+@pytest.mark.parametrize("builtin", ["eval", "exec"])
+def test_s4_eval_exec_reason_is_byte_identical_to_19a3b59(tmp_path, builtin):
+    arg = '"1"' if builtin == "eval" else '"pass"'
+    entrypoints, edges, report = _build(
+        tmp_path,
+        {
+            "sink.py": "def target_func():\n    return 1\n",
+            "entry.py": (
+                "def go():\n"
+                f"    {builtin}({arg})\n"
+                "\n"
+                'if __name__ == "__main__":\n'
+                "    go()\n"
+            ),
+        },
+    )
+    result = compute_reachability("sink", "target_func", entrypoints, edges, report)
+    assert result.verdict == Verdict.UNKNOWN
+    assert result.reason == f"a reachable opaque call (ext:builtins.{builtin}) at {tmp_path / 'entry.py'}:2{_S4_TAIL}"
+
+
+def test_opaque_call_reason_prefix_constant_is_pinned():
+    from reachability.index.reachability import OPAQUE_CALL_REASON_PREFIX
+
+    assert OPAQUE_CALL_REASON_PREFIX == "a reachable opaque call ("
+
+
+def test_s4_unknown_classifies_as_opaque_call(tmp_path):
+    cause = compute_termination_cause(_finding(_s4_result(tmp_path)))
+    assert cause == TerminationCause.OPAQUE_CALL
     assert cause != TerminationCause.UNCLASSIFIED
     assert cause != TerminationCause.COMPLETED

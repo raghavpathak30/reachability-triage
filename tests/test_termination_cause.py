@@ -315,6 +315,7 @@ def test_termination_cause_member_list_is_pinned():
         "LLM_MALFORMED_RESPONSE": "llm_malformed_response",
         "NO_ENTRYPOINTS": "no_entrypoints",
         "LOW_CONFIDENCE_PATH": "low_confidence_path",
+        "OPAQUE_CALL": "opaque_call",
         "UNCLASSIFIED": "unclassified",
     }
 

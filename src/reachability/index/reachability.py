@@ -8,6 +8,7 @@ from .reachability_models import ReachabilityResult, Verdict
 
 NO_ENTRYPOINTS_REASON = "no entrypoints detected; reachability cannot be determined without an entrypoint"
 LOW_CONFIDENCE_REASON_PREFIX = "reachable only via low-confidence edge(s): "
+OPAQUE_CALL_REASON_PREFIX = "a reachable opaque call ("
 
 
 def _dedupe_preserve_order(items: Iterable[str]) -> list[str]:
@@ -194,7 +195,7 @@ def compute_reachability(
             verdict=Verdict.UNKNOWN,
             path=paths[opaque_hit],
             reason=(
-                f"a reachable opaque call ({opaque_hit}) at {opaque_edge.file}:{opaque_edge.lineno} "
+                f"{OPAQUE_CALL_REASON_PREFIX}{opaque_hit}) at {opaque_edge.file}:{opaque_edge.lineno} "
                 "carries no literal target name, so a not_reachable verdict cannot be trusted"
             ),
         )
