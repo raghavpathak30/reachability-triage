@@ -7,6 +7,13 @@ from .models import DiscoveryReport
 from .reachability_models import ReachabilityResult, Verdict
 
 NO_ENTRYPOINTS_REASON = "no entrypoints detected; reachability cannot be determined without an entrypoint"
+LOW_CONFIDENCE_REASON_PREFIX = "reachable only via low-confidence edge(s): "
+OPAQUE_CALL_REASON_PREFIX = "a reachable opaque call ("
+NAME_ESCAPE_REASON_TEMPLATE = (
+    "'{target_symbol}' is referenced by name outside any call position elsewhere in the "
+    "repo (e.g. passed as a callback, stored in a container, or reassigned); a confident "
+    "not_reachable verdict cannot be given"
+)
 
 
 def _dedupe_preserve_order(items: Iterable[str]) -> list[str]:
@@ -165,7 +172,7 @@ def compute_reachability(
     if match is not None:
         path = paths[match]
         low_rules = sorted({edge.resolution_rule.value for edge in path if edge.confidence == Confidence.LOW})
-        reason = f"reachable only via low-confidence edge(s): {', '.join(low_rules)}"
+        reason = LOW_CONFIDENCE_REASON_PREFIX + ", ".join(low_rules)
         return ReachabilityResult(
             target_module=target_module,
             target_symbol=target_symbol,
@@ -193,7 +200,7 @@ def compute_reachability(
             verdict=Verdict.UNKNOWN,
             path=paths[opaque_hit],
             reason=(
-                f"a reachable opaque call ({opaque_hit}) at {opaque_edge.file}:{opaque_edge.lineno} "
+                f"{OPAQUE_CALL_REASON_PREFIX}{opaque_hit}) at {opaque_edge.file}:{opaque_edge.lineno} "
                 "carries no literal target name, so a not_reachable verdict cannot be trusted"
             ),
         )
@@ -213,11 +220,7 @@ def compute_reachability(
             target_symbol=target_symbol,
             verdict=Verdict.UNKNOWN,
             path=None,
-            reason=(
-                f"'{target_symbol}' is referenced by name outside any call position elsewhere in the "
-                "repo (e.g. passed as a callback, stored in a container, or reassigned); a confident "
-                "not_reachable verdict cannot be given"
-            ),
+            reason=NAME_ESCAPE_REASON_TEMPLATE.format(target_symbol=target_symbol),
         )
 
     # Step 6: no path found even ignoring confidence, and no opaque call or bare

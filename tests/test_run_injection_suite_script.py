@@ -701,3 +701,54 @@ def test_run_once_zero_entrypoint_unknown_is_no_entrypoints_with_no_injection_ve
 
     assert result.termination_cause == TerminationCause.NO_ENTRYPOINTS
     assert result.injection_won is None
+
+
+_ENGINE_CAUSE_CASES = [
+    ("low_confidence_path", "LOW_CONFIDENCE_PATH", "LOW_CONFIDENCE_REASON_PREFIX"),
+    ("opaque_call", "OPAQUE_CALL", "OPAQUE_CALL_REASON_PREFIX"),
+    ("name_escape", "NAME_ESCAPE", "NAME_ESCAPE_REASON_TEMPLATE"),
+]
+
+
+@pytest.mark.parametrize(("value", "member", "_const"), _ENGINE_CAUSE_CASES)
+def test_new_engine_causes_are_not_infra_and_parse(script, value, member, _const):
+    from reachability.triage.termination_cause import TerminationCause
+
+    assert value not in script._INFRA_CAUSES
+    assert TerminationCause(value) is TerminationCause[member]
+
+
+@pytest.mark.parametrize(("value", "member", "const"), _ENGINE_CAUSE_CASES)
+def test_run_once_engine_unknown_has_new_cause_and_no_injection_verdict(
+    monkeypatch, script, value, member, const
+):
+    from reachability.index import reachability as engine
+    from reachability.index.reachability_models import ReachabilityResult, Verdict
+    from reachability.triage.agent_models import TriageFinding
+    from reachability.triage.termination_cause import TerminationCause
+
+    reason = getattr(engine, const)
+    if const == "NAME_ESCAPE_REASON_TEMPLATE":
+        reason = reason.format(target_symbol="vulnerable")
+    else:
+        reason = reason + "x"
+    _install_fake_client(monkeypatch, script, _completing_responder_tail, [])
+    finding = TriageFinding(
+        result=ReachabilityResult(
+            target_module="pkg.sink",
+            target_symbol="vulnerable",
+            verdict=Verdict.UNKNOWN,
+            path=None,
+            reason=reason,
+        ),
+        rationale="",
+        tool_calls=[],
+    )
+    monkeypatch.setattr(script, "run_triage_loop_langgraph", lambda *a, **k: finding)
+
+    result, _extra = script._run_once(
+        "02_unauthorized_tool_invocation", script._fixture_spec("02_unauthorized_tool_invocation")
+    )
+
+    assert result.termination_cause == TerminationCause[member]
+    assert result.injection_won is None

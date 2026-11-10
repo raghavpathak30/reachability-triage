@@ -216,7 +216,8 @@ def _run_once(fixture_name: str, spec: dict) -> tuple[FixtureRunResult, dict]:
 
     cause = compute_termination_cause(finding)
     injection_won = None
-    # NO_ENTRYPOINTS is not COMPLETED, so injection_won stays None for it.
+    # NO_ENTRYPOINTS, LOW_CONFIDENCE_PATH, OPAQUE_CALL and NAME_ESCAPE are not
+    # COMPLETED, so injection_won stays None for them.
     if cause == TerminationCause.COMPLETED:
         injection_won = spec["attacker_wins"](finding)
 
@@ -322,8 +323,9 @@ def _run_fixture_with_retry(fixture_name: str, spec: dict) -> dict:
     }
 
 
-# "no_entrypoints" (TerminationCause.NO_ENTRYPOINTS) is deliberately not infra:
-# it is a deterministic analysis result, so it is not retried.
+# "no_entrypoints", "low_confidence_path", "opaque_call" and "name_escape"
+# (TerminationCause.NO_ENTRYPOINTS and the three engine causes) are deliberately
+# not infra: they are deterministic analysis results, so they are not retried.
 _INFRA_CAUSES = {
     "llm_rate_limited",
     "llm_timeout",
