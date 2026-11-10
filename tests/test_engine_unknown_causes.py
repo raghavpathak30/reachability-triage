@@ -144,3 +144,97 @@ def test_s4_unknown_classifies_as_opaque_call(tmp_path):
     assert cause == TerminationCause.OPAQUE_CALL
     assert cause != TerminationCause.UNCLASSIFIED
     assert cause != TerminationCause.COMPLETED
+
+
+S5_REASON_19A3B59 = (
+    "'target_func' is referenced by name outside any call position elsewhere in the repo "
+    "(e.g. passed as a callback, stored in a container, or reassigned); a confident "
+    "not_reachable verdict cannot be given"
+)
+
+
+def _s5_result(tmp_path):
+    entrypoints, edges, report = _build(
+        tmp_path,
+        {
+            "sink.py": "def target_func():\n    return 1\n",
+            "framework.py": (
+                "class App:\n"
+                "    def on_event(self, name, handler):\n"
+                "        pass\n"
+                "\n"
+                "    def run(self):\n"
+                "        pass\n"
+            ),
+            "entry.py": (
+                "from sink import target_func\n"
+                "from framework import App\n"
+                "\n"
+                "app = App()\n"
+                'app.on_event("startup", target_func)\n'
+                "\n"
+                'if __name__ == "__main__":\n'
+                "    app.run()\n"
+            ),
+        },
+    )
+    return compute_reachability("sink", "target_func", entrypoints, edges, report)
+
+
+def _unknown_finding(reason, verdict=Verdict.UNKNOWN):
+    from reachability.index.reachability_models import ReachabilityResult
+
+    return _finding(
+        ReachabilityResult(target_module="m", target_symbol="f", verdict=verdict, path=None, reason=reason)
+    )
+
+
+def _name_escape_reason(symbol):
+    from reachability.index.reachability import NAME_ESCAPE_REASON_TEMPLATE
+
+    return NAME_ESCAPE_REASON_TEMPLATE.format(target_symbol=symbol)
+
+
+def test_s5_reason_is_byte_identical_to_19a3b59(tmp_path):
+    result = _s5_result(tmp_path)
+    assert result.verdict == Verdict.UNKNOWN
+    assert result.reason == S5_REASON_19A3B59
+
+
+def test_name_escape_template_constant_is_pinned():
+    from reachability.index.reachability import NAME_ESCAPE_REASON_TEMPLATE
+
+    assert NAME_ESCAPE_REASON_TEMPLATE == (
+        "'{target_symbol}' is referenced by name outside any call position elsewhere in the repo "
+        "(e.g. passed as a callback, stored in a container, or reassigned); a confident "
+        "not_reachable verdict cannot be given"
+    )
+    assert NAME_ESCAPE_REASON_TEMPLATE.count("{target_symbol}") == 1
+    assert NAME_ESCAPE_REASON_TEMPLATE.count("{") == 1
+
+
+def test_s5_unknown_classifies_as_name_escape(tmp_path):
+    cause = compute_termination_cause(_finding(_s5_result(tmp_path)))
+    assert cause == TerminationCause.NAME_ESCAPE
+    assert cause != TerminationCause.UNCLASSIFIED
+    assert cause != TerminationCause.COMPLETED
+
+
+def test_name_escape_fullmatch_rejects_empty_symbol_and_extra_text():
+    good = _name_escape_reason("f")
+    assert compute_termination_cause(_unknown_finding(good)) == TerminationCause.NAME_ESCAPE
+    for bad in (_name_escape_reason(""), "x" + good, good + " extra"):
+        assert compute_termination_cause(_unknown_finding(bad)) == TerminationCause.UNCLASSIFIED
+
+
+@pytest.mark.parametrize("symbol", ["a.b+c", "x'y", "f(1)"])
+def test_name_escape_symbol_with_regex_metacharacters_still_matches(symbol):
+    reason = _name_escape_reason(symbol)
+    assert compute_termination_cause(_unknown_finding(reason)) == TerminationCause.NAME_ESCAPE
+
+
+def test_name_escape_symbol_with_newline_classifies_as_name_escape():
+    # main.py's TriageRequest.target_symbol is an unvalidated `str | None`, so a
+    # newline-bearing symbol can reach the engine; (.+) must match it (re.DOTALL).
+    reason = _name_escape_reason("a\nb")
+    assert compute_termination_cause(_unknown_finding(reason)) == TerminationCause.NAME_ESCAPE

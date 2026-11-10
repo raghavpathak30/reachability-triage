@@ -35,10 +35,12 @@ structurally sound positive signal regardless of the `NOT_REACHABLE` reason text
 
 from __future__ import annotations
 
+import re
 from enum import Enum
 
 from reachability.index.reachability import (
     LOW_CONFIDENCE_REASON_PREFIX,
+    NAME_ESCAPE_REASON_TEMPLATE,
     NO_ENTRYPOINTS_REASON,
     OPAQUE_CALL_REASON_PREFIX,
 )
@@ -69,7 +71,8 @@ class TerminationCause(str, Enum):
     undetermined; NOT the loop bailing out; NOT COMPLETED.
     `LOW_CONFIDENCE_PATH`: analysis ran, answer undetermined; NOT a loop
     bail-out; NOT COMPLETED. `OPAQUE_CALL`: analysis ran, answer
-    undetermined; NOT a loop bail-out; NOT COMPLETED."""
+    undetermined; NOT a loop bail-out; NOT COMPLETED. `NAME_ESCAPE`:
+    analysis ran, answer undetermined; NOT a loop bail-out; NOT COMPLETED."""
 
     COMPLETED = "completed"
     BUDGET_EXCEEDED = "budget_exceeded"
@@ -85,6 +88,7 @@ class TerminationCause(str, Enum):
     NO_ENTRYPOINTS = "no_entrypoints"
     LOW_CONFIDENCE_PATH = "low_confidence_path"
     OPAQUE_CALL = "opaque_call"
+    NAME_ESCAPE = "name_escape"
     UNCLASSIFIED = "unclassified"
 
 
@@ -92,6 +96,11 @@ _ENGINE_PREFIX_CAUSES: tuple[tuple[str, TerminationCause], ...] = (
     (LOW_CONFIDENCE_REASON_PREFIX, TerminationCause.LOW_CONFIDENCE_PATH),
     (OPAQUE_CALL_REASON_PREFIX, TerminationCause.OPAQUE_CALL),
 )
+
+_NAME_ESCAPE_PARTS = NAME_ESCAPE_REASON_TEMPLATE.split("{target_symbol}")
+if len(_NAME_ESCAPE_PARTS) != 2:
+    raise RuntimeError("NAME_ESCAPE_REASON_TEMPLATE must contain exactly one {target_symbol} placeholder")
+_NAME_ESCAPE_RE = re.compile("(.+)".join(re.escape(part) for part in _NAME_ESCAPE_PARTS), re.DOTALL)
 
 # Ordered so a more-specific prefix never gets shadowed by a shorter one
 # that happens to be a string-prefix of it. None of the ten current
@@ -140,6 +149,9 @@ def compute_termination_cause(finding: TriageFinding) -> TerminationCause:
     for engine_prefix, engine_cause in _ENGINE_PREFIX_CAUSES:
         if reason.startswith(engine_prefix):
             return engine_cause
+
+    if _NAME_ESCAPE_RE.fullmatch(reason):
+        return TerminationCause.NAME_ESCAPE
 
     for prefix, cause in _UNKNOWN_VERDICT_REASON_PREFIXES.items():
         if reason.startswith(prefix):

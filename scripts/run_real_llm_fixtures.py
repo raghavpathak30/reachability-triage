@@ -95,6 +95,7 @@ _FINAL_ANSWER_CAUSES = {
     "target_not_found",
     "low_confidence_path",
     "opaque_call",
+    "name_escape",
 }
 
 
