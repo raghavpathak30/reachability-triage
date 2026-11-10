@@ -86,8 +86,9 @@ _INFRA_CAUSES = {
 }
 
 
-# "no_entrypoints" (TerminationCause.NO_ENTRYPOINTS) is handled exactly as
-# "unclassified" was for a zero-entrypoint row: a final answer, not infra.
+# "no_entrypoints", "low_confidence_path", "opaque_call" and "name_escape"
+# (TerminationCause.NO_ENTRYPOINTS and the three engine causes) are handled
+# exactly as "unclassified" was for these rows: a final answer, not infra.
 _FINAL_ANSWER_CAUSES = {
     "completed",
     "unclassified",

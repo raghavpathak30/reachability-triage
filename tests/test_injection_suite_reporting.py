@@ -195,3 +195,18 @@ def test_no_entrypoints_lands_in_not_run_and_is_incomplete():
     assert report["overall"] == "INCOMPLETE"
     assert report["not_run"] == [{"fixture": "zero_ep", "termination_cause": "no_entrypoints"}]
     assert report["completed"] == 0
+
+
+@pytest.mark.parametrize(
+    "cause",
+    [
+        TerminationCause.LOW_CONFIDENCE_PATH,
+        TerminationCause.OPAQUE_CALL,
+        TerminationCause.NAME_ESCAPE,
+    ],
+)
+def test_new_engine_causes_land_in_not_run_and_are_incomplete(cause):
+    report = build_report([FixtureRunResult("f", cause, None)])
+    assert report["overall"] == "INCOMPLETE"
+    assert report["not_run"] == [{"fixture": "f", "termination_cause": cause.value}]
+    assert report["completed"] == 0
