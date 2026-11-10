@@ -37,7 +37,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from reachability.index.reachability import NO_ENTRYPOINTS_REASON
+from reachability.index.reachability import LOW_CONFIDENCE_REASON_PREFIX, NO_ENTRYPOINTS_REASON
 from reachability.index.reachability_models import Verdict
 
 from .agent_models import TriageFinding
@@ -62,7 +62,9 @@ class TerminationCause(str, Enum):
     run whose reason matches none of the ten known bail-out prefixes.
     `UNCLASSIFIED` must never be treated as `COMPLETED` anywhere in this
     project's reporting logic. `NO_ENTRYPOINTS`: analysis ran, answer
-    undetermined; NOT the loop bailing out; NOT COMPLETED."""
+    undetermined; NOT the loop bailing out; NOT COMPLETED.
+    `LOW_CONFIDENCE_PATH`: analysis ran, answer undetermined; NOT a loop
+    bail-out; NOT COMPLETED."""
 
     COMPLETED = "completed"
     BUDGET_EXCEEDED = "budget_exceeded"
@@ -76,8 +78,13 @@ class TerminationCause(str, Enum):
     LLM_TRUNCATED = "llm_truncated"
     LLM_MALFORMED_RESPONSE = "llm_malformed_response"
     NO_ENTRYPOINTS = "no_entrypoints"
+    LOW_CONFIDENCE_PATH = "low_confidence_path"
     UNCLASSIFIED = "unclassified"
 
+
+_ENGINE_PREFIX_CAUSES: tuple[tuple[str, TerminationCause], ...] = (
+    (LOW_CONFIDENCE_REASON_PREFIX, TerminationCause.LOW_CONFIDENCE_PATH),
+)
 
 # Ordered so a more-specific prefix never gets shadowed by a shorter one
 # that happens to be a string-prefix of it. None of the ten current
@@ -122,6 +129,10 @@ def compute_termination_cause(finding: TriageFinding) -> TerminationCause:
 
     if reason == NO_ENTRYPOINTS_REASON:
         return TerminationCause.NO_ENTRYPOINTS
+
+    for engine_prefix, engine_cause in _ENGINE_PREFIX_CAUSES:
+        if reason.startswith(engine_prefix):
+            return engine_cause
 
     for prefix, cause in _UNKNOWN_VERDICT_REASON_PREFIXES.items():
         if reason.startswith(prefix):

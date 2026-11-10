@@ -339,3 +339,10 @@ def test_named_target_none_for_malformed_and_errored_rows(monkeypatch, tmp_path,
 def test_no_entrypoints_is_final_answer_not_infra(script):
     assert "no_entrypoints" in script._FINAL_ANSWER_CAUSES
     assert "no_entrypoints" not in script._INFRA_CAUSES
+
+
+@pytest.mark.parametrize("cause", ["low_confidence_path"])
+def test_new_engine_causes_are_final_answer_not_infra(script, cause):
+    assert cause in script._FINAL_ANSWER_CAUSES
+    assert cause not in script._INFRA_CAUSES
+    assert cause != "completed"

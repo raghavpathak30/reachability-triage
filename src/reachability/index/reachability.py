@@ -7,6 +7,7 @@ from .models import DiscoveryReport
 from .reachability_models import ReachabilityResult, Verdict
 
 NO_ENTRYPOINTS_REASON = "no entrypoints detected; reachability cannot be determined without an entrypoint"
+LOW_CONFIDENCE_REASON_PREFIX = "reachable only via low-confidence edge(s): "
 
 
 def _dedupe_preserve_order(items: Iterable[str]) -> list[str]:
@@ -165,7 +166,7 @@ def compute_reachability(
     if match is not None:
         path = paths[match]
         low_rules = sorted({edge.resolution_rule.value for edge in path if edge.confidence == Confidence.LOW})
-        reason = f"reachable only via low-confidence edge(s): {', '.join(low_rules)}"
+        reason = LOW_CONFIDENCE_REASON_PREFIX + ", ".join(low_rules)
         return ReachabilityResult(
             target_module=target_module,
             target_symbol=target_symbol,
