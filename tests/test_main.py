@@ -415,3 +415,20 @@ def test_post_invalid_target_symbol_422(symbol):
     body = response.json()
     assert body["error"]["code"] == "VALIDATION_ERROR"
     assert any(d["loc"][-1] == "target_symbol" for d in body["error"]["details"])
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        {"target_module": "a b\n", "target_symbol": "x:y"},
+        {"target_module": "m" * 300, "target_symbol": "s" * 300},
+    ],
+    ids=["bad-format", "over-length"],
+)
+def test_get_stored_nonconforming_target_is_echoed(db_session, target):
+    job_id = _insert_job(db_session, {"package": "p", "version": "1", **target})
+    response = client.get(f"/v1/triage/{job_id}")
+    assert response.status_code == 200
+    got = response.json()["target"]
+    assert got["target_module"] == target["target_module"]
+    assert got["target_symbol"] == target["target_symbol"]
