@@ -96,12 +96,23 @@ class TriageStatus(str, Enum):
     FAILED = "failed"
 
 
+def _validate_dotted_identifier(value: str, field: str) -> str:
+    if not all(segment.isidentifier() for segment in value.split(".")):
+        raise ValueError(f"'{field}' must be a dotted identifier (e.g. 'pkg.module').")
+    return value
+
+
 class TriageRequest(BaseModel):
     package: str | None = None
     version: str | None = None
     repo_url: HttpUrl | None = None
-    target_module: str = Field(min_length=1)
+    target_module: str = Field(min_length=1, max_length=256)
     target_symbol: str | None = None
+
+    @field_validator("target_module")
+    @classmethod
+    def _validate_target_module(cls, value: str) -> str:
+        return _validate_dotted_identifier(value, "target_module")
 
     @field_validator("repo_url")
     @classmethod

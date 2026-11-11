@@ -360,3 +360,22 @@ def test_main_does_not_use_deprecated_422_constant():
 
     text = (Path(__file__).resolve().parents[1] / "main.py").read_text()
     assert "HTTP_422_UNPROCESSABLE_ENTITY" not in text
+
+
+def test_post_valid_dotted_module_returns_202():
+    response = client.post(
+        "/v1/triage",
+        json={"package": "requests", "version": "2.31.0", "target_module": "pkg.sub_mod"},
+    )
+    assert response.status_code == 202
+
+
+def test_post_newline_in_target_module_422():
+    response = client.post(
+        "/v1/triage",
+        json={"package": "requests", "version": "2.31.0", "target_module": "pkg\nsub"},
+    )
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error"]["code"] == "VALIDATION_ERROR"
+    assert any(d["loc"][-1] == "target_module" for d in body["error"]["details"])
