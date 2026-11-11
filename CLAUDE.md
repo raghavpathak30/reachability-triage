@@ -266,7 +266,7 @@ console-script parsing is not implemented (only PEP 621
 Zero entrypoints (v0.3.2, `DECISIONS.md` §22): `compute_reachability` with an
 empty entrypoint list returns `unknown` with the reason "no entrypoints detected;
 reachability cannot be determined without an entrypoint"
-(`src/reachability/index/reachability.py:118-124`), not `not_reachable`; the
+(`src/reachability/index/reachability.py:124-131`), not `not_reachable`; the
 early return still precedes the D1/D3 checks. A library wheel such as `six` gets
 this verdict in package mode. In real-lane reports this reason classifies as
 `NO_ENTRYPOINTS` (`termination_cause.py:150-151`, matched on

@@ -218,8 +218,9 @@ the model's behaviour under injection is not established.
 - A failed job is not automatically re-run (only a single LLM API call is retried).
 - The worker has no mid-execution heartbeat; a hung single worker is not recovered.
 - Real-model injection resistance is unclaimed (see Results).
-- Web UI limits (no auth, browser-only recent jobs, package + version only, target not
-  shown for unfinished jobs) are listed under [Web UI](#web-ui).
+- Web UI limits (no auth, browser-only recent jobs, package + version only) are listed
+  under [Web UI](#web-ui). The job page shows Package/Target for every status,
+  including unfinished jobs, since v0.3.1 (`DECISIONS.md` §21).
 
 ## Repo
 
