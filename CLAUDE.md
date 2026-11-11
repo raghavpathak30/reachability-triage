@@ -26,7 +26,10 @@ guard against repeating an identical tool call (`run_trace.py:108` only *measure
 in the model's context (`langgraph_loop.py:210` appends only tool results). The
 last three are Phase 9 findings, see `DECISIONS.md` §17.
 Also not built (web UI): a server-side job list (recent jobs live in browser
-localStorage, max 20), auth on the web UI, `repo_url` acquisition, and
+localStorage, max 20), auth on the web UI, `repo_url` acquisition,
+client-side target-format validation (the form only checks non-empty,
+`web/src/lib/formErrors.ts:31`; the dotted-identifier rule is enforced by
+`POST /v1/triage` only, `DECISIONS.md` §25), and
 the demo GIF (`agent_docs/screenshots/demo.gif` does not exist).
 Frontend (`web/`, `agent_docs/PHASE_FRONTEND.md`): F1 (scaffold, typed
 client), F2 (`/` submit form, `usePollTriage`, recent-jobs panel) and F3
