@@ -25,7 +25,7 @@ from reachability.triage.agent_models import TriageFinding
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Reachability Triage Service", version="0.3.4")
+app = FastAPI(title="Reachability Triage Service", version="0.3.5")
 
 
 # --- Exception Handlers (Uniform Error Shape) ---
