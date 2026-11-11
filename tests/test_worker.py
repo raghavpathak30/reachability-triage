@@ -241,3 +241,28 @@ def test_finalize_persists_llm_mode(db_session):
     row = db_session.get(TriageJob, job_id)
     db_session.refresh(row)
     assert row.llm_mode == "stub"
+
+
+def test_worker_does_not_fail_queued_row_for_target_format(db_session, monkeypatch):
+    target_module, target_symbol = _resolve_fixture_target()
+    target = {
+        "package": "unused",
+        "version": "0.0.0",
+        "target_module": "a b",
+        "target_symbol": target_symbol,
+    }
+    job_id = _insert_queued_job(db_session, target)
+
+    monkeypatch.setattr(job_runner, "acquire_source", lambda request, workdir: FIXTURE_REPO)
+    monkeypatch.setattr(
+        job_runner,
+        "GroqLLMClient",
+        lambda *a, **kw: DeterministicPolicyStubLLMClient(target_module, target_symbol),
+    )
+
+    session_factory = _session_factory_for(db_session)
+    assert run_worker_once(session_factory, "test-worker", budget=30) is True
+
+    row = db_session.get(TriageJob, job_id)
+    db_session.refresh(row)
+    assert row.status == "completed"

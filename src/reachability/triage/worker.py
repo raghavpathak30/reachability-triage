@@ -47,7 +47,7 @@ from .job_runner import (
 from .reaper import reap_stale_jobs
 
 if TYPE_CHECKING:
-    from main import TriageRequest
+    from main import TriageRequestBase
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +128,7 @@ def _record_from_claimed(claimed: dict) -> dict:
     }
 
 
-def _target_to_triage_request(target: dict) -> "TriageRequest":
+def _target_to_triage_request(target: dict) -> "TriageRequestBase":
     """Reconstruct a `TriageRequest` from the stored JSONB `target` dict.
 
     Both shapes `main.py` ever stores (`package`+`version` or `repo_url`,
@@ -136,9 +136,9 @@ def _target_to_triage_request(target: dict) -> "TriageRequest":
     `TriageRequest`'s own field names, so this is a direct
     `TriageRequest(**target)` -- no shape-specific branching needed.
     """
-    from main import TriageRequest
+    from main import TriageRequestBase
 
-    return TriageRequest(**target)
+    return TriageRequestBase(**target)
 
 
 def finalize_job(
