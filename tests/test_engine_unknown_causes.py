@@ -17,7 +17,12 @@ from reachability.index.reachability import compute_reachability
 from reachability.index.reachability_models import Verdict
 from reachability.index.symbols import build_symbol_index
 from reachability.triage.agent_models import TriageFinding
-from reachability.triage.termination_cause import TerminationCause, compute_termination_cause
+from reachability.triage.termination_cause import (
+    _NAME_ESCAPE_PARTS,
+    _NAME_ESCAPE_RE,
+    TerminationCause,
+    compute_termination_cause,
+)
 
 from conftest import write_tree
 
@@ -223,7 +228,10 @@ def test_s5_unknown_classifies_as_name_escape(tmp_path):
 def test_name_escape_fullmatch_rejects_empty_symbol_and_extra_text():
     good = _name_escape_reason("f")
     assert compute_termination_cause(_unknown_finding(good)) == TerminationCause.NAME_ESCAPE
-    for bad in (_name_escape_reason(""), "x" + good, good + " extra"):
+    truncated = good[:-1]
+    assert truncated.startswith(_NAME_ESCAPE_PARTS[0] + "f" + _NAME_ESCAPE_PARTS[1][:-1])
+    assert _NAME_ESCAPE_RE.fullmatch(truncated) is None
+    for bad in (_name_escape_reason(""), truncated, good + " extra"):
         assert compute_termination_cause(_unknown_finding(bad)) == TerminationCause.UNCLASSIFIED
 
 
@@ -234,8 +242,8 @@ def test_name_escape_symbol_with_regex_metacharacters_still_matches(symbol):
 
 
 def test_name_escape_symbol_with_newline_classifies_as_name_escape():
-    # main.py's TriageRequest.target_symbol is an unvalidated `str | None`, so a
-    # newline-bearing symbol can reach the engine; (.+) must match it (re.DOTALL).
+    # Pre-v0.3.5 stored rows (and direct engine callers) can carry a newline-bearing
+    # symbol; (.+) must match it (re.DOTALL). New POSTs reject it (DECISIONS 25).
     reason = _name_escape_reason("a\nb")
     assert compute_termination_cause(_unknown_finding(reason)) == TerminationCause.NAME_ESCAPE
 

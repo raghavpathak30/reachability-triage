@@ -7,14 +7,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from main import TriageRequest
+    from main import TriageRequestBase
 
 
 class AcquisitionError(RuntimeError):
     pass
 
 
-def acquire_source(request: TriageRequest, workdir: Path) -> Path:
+def acquire_source(request: TriageRequestBase, workdir: Path) -> Path:
     """
     Resolve a TriageRequest's package+version target into an extracted
     source tree under `workdir` and return the extracted root, for

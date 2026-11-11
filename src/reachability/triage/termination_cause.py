@@ -16,7 +16,7 @@ that module's step-1a edit), instead of duplicating the literal values.
 **Why `verdict != Verdict.UNKNOWN` and not `reason is None`.** An earlier
 draft of this module classified completion by `reason is None`. That rule
 is factually wrong: `compute_reachability` returns `NOT_REACHABLE` with a
-non-`None` reason (`reachability.py:226-232`, its final step, the only
+non-`None` reason (`reachability.py:226-235`, its final step, the only
 `NOT_REACHABLE` return). Its four `UNKNOWN` returns each classify to their own
 cause here: zero entrypoints as `NO_ENTRYPOINTS` via `NO_ENTRYPOINTS_REASON`,
 and the low-confidence, opaque-call and name-escape returns as
@@ -106,10 +106,12 @@ _NAME_ESCAPE_RE = re.compile("(.+)".join(re.escape(part) for part in _NAME_ESCAP
 
 # Ordered so a more-specific prefix never gets shadowed by a shorter one
 # that happens to be a string-prefix of it. None of the nine current
-# prefixes collide this way, but this module's own conformance test
-# (`tests/test_termination_cause.py`) drives every one of the loop's ten
-# actual bail-out paths through this table, so an accidental future
-# collision would fail loudly rather than silently misclassify.
+# prefixes collide this way. This table holds the nine prefixes; the tenth
+# bail-out path (target not found) is an exact-match reason outside it. This
+# module's own conformance test (`tests/test_termination_cause.py`) drives
+# every one of the ten bail-out paths through `compute_termination_cause`,
+# so an accidental future collision would fail loudly rather than silently
+# misclassify.
 _UNKNOWN_VERDICT_REASON_PREFIXES: dict[str, TerminationCause] = {
     BUDGET_EXCEEDED_PREFIX: TerminationCause.BUDGET_EXCEEDED,
     MALFORMED_TOOL_CALL_PREFIX: TerminationCause.MALFORMED_TOOL_CALL,

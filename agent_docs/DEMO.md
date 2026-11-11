@@ -64,7 +64,7 @@ Target module `pkg.sink`, Target symbol `vulnerable`, and one Package per case:
 | Package | Expected on the job page (stub mode) |
 |---|---|
 | `reach-fx-02` | Reachable, a 3-edge call path |
-| `reach-fx-09` | No path found, with the reason "no call path found from any entrypoint to ..." (`src/reachability/index/reachability.py:229`) |
+| `reach-fx-09` | No path found, with the reason "no call path found from any entrypoint to ..." (`src/reachability/index/reachability.py:234`) |
 | `reach-fx-13` | Unknown; the last path edge is a low-confidence `dynamic_dispatch` edge |
 
 Every job shows the LLM mode "stub (deterministic policy, not a real model)". Fixture

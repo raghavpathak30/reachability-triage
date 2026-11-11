@@ -25,7 +25,7 @@ from reachability.triage.agent_models import TriageFinding
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Reachability Triage Service", version="0.3.4")
+app = FastAPI(title="Reachability Triage Service", version="0.3.5")
 
 
 # --- Exception Handlers (Uniform Error Shape) ---
@@ -96,7 +96,13 @@ class TriageStatus(str, Enum):
     FAILED = "failed"
 
 
-class TriageRequest(BaseModel):
+def _validate_dotted_identifier(value: str, field: str) -> str:
+    if not all(segment.isidentifier() for segment in value.split(".")):
+        raise ValueError(f"'{field}' must be a dotted identifier (e.g. 'pkg.module').")
+    return value
+
+
+class TriageRequestBase(BaseModel):
     package: str | None = None
     version: str | None = None
     repo_url: HttpUrl | None = None
@@ -112,7 +118,7 @@ class TriageRequest(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_exactly_one_target(self) -> "TriageRequest":
+    def _validate_exactly_one_target(self) -> "TriageRequestBase":
         has_pkg = self.package is not None
         has_ver = self.version is not None
         has_repo = self.repo_url is not None
@@ -129,6 +135,26 @@ class TriageRequest(BaseModel):
             raise ValueError("Must provide either ('package' and 'version') OR 'repo_url'.")
 
         return self
+
+
+class TriageRequest(TriageRequestBase):
+    # Write-side request model: adds target format rules that must not apply
+    # to stored rows (worker) or reads (`TriageTarget`).
+
+    target_module: str = Field(min_length=1, max_length=256)
+    target_symbol: str | None = Field(default=None, max_length=256)
+
+    @field_validator("target_module")
+    @classmethod
+    def _validate_target_module(cls, value: str) -> str:
+        return _validate_dotted_identifier(value, "target_module")
+
+    @field_validator("target_symbol")
+    @classmethod
+    def _validate_target_symbol(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        return _validate_dotted_identifier(value, "target_symbol")
 
 
 class TriageTarget(BaseModel):

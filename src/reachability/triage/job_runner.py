@@ -98,7 +98,7 @@ from .sandbox import sandbox_untrusted_text
 from .stub_llm import DeterministicPolicyStubLLMClient
 
 if TYPE_CHECKING:
-    from main import TriageRequest
+    from main import TriageRequestBase
 
 DEFAULT_TOOL_CALL_BUDGET = 30
 
@@ -122,7 +122,7 @@ def resolve_llm_mode() -> str:
     return raw
 
 
-def _build_llm_client(mode: str, request: "TriageRequest"):
+def _build_llm_client(mode: str, request: "TriageRequestBase"):
     if mode == "stub":
         return DeterministicPolicyStubLLMClient(
             request.target_module, request.target_symbol
@@ -159,7 +159,7 @@ def sanitize_error(exc: Exception) -> str:
 
 def run_triage_job(
     record: dict,
-    request: "TriageRequest",
+    request: "TriageRequestBase",
     budget: int = DEFAULT_TOOL_CALL_BUDGET,
 ) -> None:
     """Run one triage job end-to-end and mutate `record` in place through

@@ -26,7 +26,10 @@ guard against repeating an identical tool call (`run_trace.py:108` only *measure
 in the model's context (`langgraph_loop.py:210` appends only tool results). The
 last three are Phase 9 findings, see `DECISIONS.md` §17.
 Also not built (web UI): a server-side job list (recent jobs live in browser
-localStorage, max 20), auth on the web UI, `repo_url` acquisition, and
+localStorage, max 20), auth on the web UI, `repo_url` acquisition,
+client-side target-format validation (the form only checks non-empty,
+`web/src/lib/formErrors.ts:31`; the dotted-identifier rule is enforced by
+`POST /v1/triage` only, `DECISIONS.md` §25), and
 the demo GIF (`agent_docs/screenshots/demo.gif` does not exist).
 Frontend (`web/`, `agent_docs/PHASE_FRONTEND.md`): F1 (scaffold, typed
 client), F2 (`/` submit form, `usePollTriage`, recent-jobs panel) and F3
@@ -266,7 +269,7 @@ console-script parsing is not implemented (only PEP 621
 Zero entrypoints (v0.3.2, `DECISIONS.md` §22): `compute_reachability` with an
 empty entrypoint list returns `unknown` with the reason "no entrypoints detected;
 reachability cannot be determined without an entrypoint"
-(`src/reachability/index/reachability.py:118-124`), not `not_reachable`; the
+(`src/reachability/index/reachability.py:124-131`), not `not_reachable`; the
 early return still precedes the D1/D3 checks. A library wheel such as `six` gets
 this verdict in package mode. In real-lane reports this reason classifies as
 `NO_ENTRYPOINTS` (`termination_cause.py:150-151`, matched on

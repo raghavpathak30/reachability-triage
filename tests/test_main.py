@@ -360,3 +360,75 @@ def test_main_does_not_use_deprecated_422_constant():
 
     text = (Path(__file__).resolve().parents[1] / "main.py").read_text()
     assert "HTTP_422_UNPROCESSABLE_ENTITY" not in text
+
+
+def test_post_valid_dotted_module_returns_202():
+    response = client.post(
+        "/v1/triage",
+        json={"package": "requests", "version": "2.31.0", "target_module": "pkg.sub_mod"},
+    )
+    assert response.status_code == 202
+
+
+def test_post_newline_in_target_module_422():
+    response = client.post(
+        "/v1/triage",
+        json={"package": "requests", "version": "2.31.0", "target_module": "pkg\nsub"},
+    )
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error"]["code"] == "VALIDATION_ERROR"
+    assert any(d["loc"][-1] == "target_module" for d in body["error"]["details"])
+
+
+def _post_target(**overrides):
+    body = {"package": "requests", "version": "2.31.0", "target_module": "placeholder"}
+    body.update(overrides)
+    return client.post("/v1/triage", json=body)
+
+
+@pytest.mark.parametrize(
+    "module",
+    ["a\nb", "a\x00b", "a b", "a..b", ".a", "a:b", "a" * 257],
+    ids=["newline", "nul", "space", "empty-segment", "leading-dot", "colon", "too-long"],
+)
+def test_post_invalid_target_module_422(module):
+    response = _post_target(target_module=module)
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error"]["code"] == "VALIDATION_ERROR"
+    assert any(d["loc"][-1] == "target_module" for d in body["error"]["details"])
+
+
+def test_post_dotted_symbol_returns_202():
+    assert _post_target(target_symbol="Class.method").status_code == 202
+
+
+def test_post_absent_symbol_returns_202():
+    assert _post_target().status_code == 202
+
+
+@pytest.mark.parametrize("symbol", ["a b", "", "a" * 257], ids=["space", "empty", "too-long"])
+def test_post_invalid_target_symbol_422(symbol):
+    response = _post_target(target_symbol=symbol)
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error"]["code"] == "VALIDATION_ERROR"
+    assert any(d["loc"][-1] == "target_symbol" for d in body["error"]["details"])
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        {"target_module": "a b\n", "target_symbol": "x:y"},
+        {"target_module": "m" * 300, "target_symbol": "s" * 300},
+    ],
+    ids=["bad-format", "over-length"],
+)
+def test_get_stored_nonconforming_target_is_echoed(db_session, target):
+    job_id = _insert_job(db_session, {"package": "p", "version": "1", **target})
+    response = client.get(f"/v1/triage/{job_id}")
+    assert response.status_code == 200
+    got = response.json()["target"]
+    assert got["target_module"] == target["target_module"]
+    assert got["target_symbol"] == target["target_symbol"]

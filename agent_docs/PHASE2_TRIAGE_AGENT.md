@@ -87,7 +87,7 @@ gates pass; do not start U6 before U3/U4's gate passes.
 `src/reachability/triage/index_adapter.py`), calling in order: `build_l1_index`
 (`build.py`), `build_symbol_index` (`symbols.py`), `build_edge_index` (`edges.py`),
 `build_entrypoint_index` (`entrypoints.py`). `compute_reachability`'s `report`
-parameter (required since L5/D3, `reachability.py:113`) is satisfied automatically —
+parameter (required since L5/D3, `reachability.py:122`) is satisfied automatically —
 `RepoIndex` already carries it.
 
 **Gate:** reusing an existing fixture under `tests/fixtures/l5/`, `build_repo_index`
