@@ -149,6 +149,13 @@ class TriageRequest(TriageRequestBase):
     def _validate_target_module(cls, value: str) -> str:
         return _validate_dotted_identifier(value, "target_module")
 
+    @field_validator("target_symbol")
+    @classmethod
+    def _validate_target_symbol(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        return _validate_dotted_identifier(value, "target_symbol")
+
 
 class TriageTarget(BaseModel):
     """Read model for the stored submitted target. Deliberately tolerant:

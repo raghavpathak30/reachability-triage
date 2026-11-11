@@ -379,3 +379,39 @@ def test_post_newline_in_target_module_422():
     body = response.json()
     assert body["error"]["code"] == "VALIDATION_ERROR"
     assert any(d["loc"][-1] == "target_module" for d in body["error"]["details"])
+
+
+def _post_target(**overrides):
+    body = {"package": "requests", "version": "2.31.0", "target_module": "placeholder"}
+    body.update(overrides)
+    return client.post("/v1/triage", json=body)
+
+
+@pytest.mark.parametrize(
+    "module",
+    ["a\nb", "a\x00b", "a b", "a..b", ".a", "a:b", "a" * 257],
+    ids=["newline", "nul", "space", "empty-segment", "leading-dot", "colon", "too-long"],
+)
+def test_post_invalid_target_module_422(module):
+    response = _post_target(target_module=module)
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error"]["code"] == "VALIDATION_ERROR"
+    assert any(d["loc"][-1] == "target_module" for d in body["error"]["details"])
+
+
+def test_post_dotted_symbol_returns_202():
+    assert _post_target(target_symbol="Class.method").status_code == 202
+
+
+def test_post_absent_symbol_returns_202():
+    assert _post_target().status_code == 202
+
+
+@pytest.mark.parametrize("symbol", ["a b", "", "a" * 257], ids=["space", "empty", "too-long"])
+def test_post_invalid_target_symbol_422(symbol):
+    response = _post_target(target_symbol=symbol)
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error"]["code"] == "VALIDATION_ERROR"
+    assert any(d["loc"][-1] == "target_symbol" for d in body["error"]["details"])
