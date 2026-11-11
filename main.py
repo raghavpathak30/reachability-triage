@@ -138,8 +138,8 @@ class TriageRequestBase(BaseModel):
 
 
 class TriageRequest(TriageRequestBase):
-    """Write-side request model: adds target format rules that must not apply
-    to stored rows (worker) or reads (`TriageTarget`)."""
+    # Write-side request model: adds target format rules that must not apply
+    # to stored rows (worker) or reads (`TriageTarget`).
 
     target_module: str = Field(min_length=1, max_length=256)
     target_symbol: str | None = Field(default=None, max_length=256)

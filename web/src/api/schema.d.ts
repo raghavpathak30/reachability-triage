@@ -162,11 +162,7 @@ export interface components {
             status: components["schemas"]["TriageStatus"];
             target: components["schemas"]["TriageTarget"];
         };
-        /**
-         * TriageRequest
-         * @description Write-side request model: adds target format rules that must not apply
-         *     to stored rows (worker) or reads (`TriageTarget`).
-         */
+        /** TriageRequest */
         TriageRequest: {
             /** Package */
             package?: string | null;
