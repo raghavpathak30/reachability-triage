@@ -82,8 +82,9 @@ New package `src/reachability/scan/`. `src/reachability/index/` stays
 unchanged except in two places:
 - A5: a no-new-capability helper that computes the D3 name-escape set once per
   index;
-- A7: the bounded resolution changes, which need the `DECISIONS.md` §26 text
-  that lifts the L3 freeze for exactly those shapes (§6).
+- A7: the bounded resolution changes. The L3 exception is pending: it is
+  decided at the start of A7, in its own `DECISIONS.md` section, and is not
+  part of §26 (§6).
 
 The LangGraph triage loop is not on the scan path (§2.7).
 
@@ -694,8 +695,9 @@ calls" to the rule above (critique M1/M3), before any run, on 2026-11-12.
   (R §4.3). This is contained by the sentence wording (§2.5), by showing the
   confidence, and by G3 treating a path to a non-true symbol as a failure.
 - **L3 freeze (CLAUDE.md, L5 paragraph).** A7 adds new resolution capability,
-  which CLAUDE.md forbids today. A7 may only start after `DECISIONS.md` §26 is
-  applied with the scoped exception (§8). More resolved edges can also remove
+  which CLAUDE.md forbids today. The exception is pending: it is decided at the
+  start of A7, in its own `DECISIONS.md` section, and is not part of §26 (§8).
+  A7 may only start after that section exists. More resolved edges can also remove
   a low-confidence bridge that today forces `unknown` in `/v1/triage`. A7's
   gate checks that no corpus verdict moves to `not_reachable`.
 - **Config-driven and host loading** (psycopg via URL, uvicorn → httptools,
@@ -725,12 +727,15 @@ calls" to the rule above (critique M1/M3), before any run, on 2026-11-12.
 - Fix-commit fetching on by default.
 - Severity scoring of our own.
 
-**Changed:** the L3 "frozen against new resolution capability" statement gets
-the A7 exception, scoped to its three shapes.
+**Changed (pending, at A7/A9):** the L3 "frozen against new resolution
+capability" statement changes only if the A7 exception is granted, which is
+decided at the start of A7 in its own section, not in §26.
 
 **Removed:** nothing. `repo_url` acquisition stays NOT BUILT.
 
-## 8. Draft `DECISIONS.md` §26 (draft only; not applied to DECISIONS.md)
+## 8. `DECISIONS.md` §26 (applied as `DECISIONS.md` §26 on 12 Nov 2026 with changes: the L3 exception is not granted yet, the eval rules include G8, and the title drops "(draft)")
+
+The quoted text below is the original draft, kept for history. Its "L3 exception (scoped)" paragraph was NOT applied: `DECISIONS.md` §26 says the L3 exception is not granted yet and is decided at the start of A7. It also had G1-G7 where §26 has G1-G8.
 
 > ## 26. App scan: evidence levels instead of `not_reachable` (draft, 2026-11-12)
 >

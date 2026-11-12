@@ -1439,3 +1439,38 @@ Version 0.3.5. `POST /v1/triage` accepted any string for `target_module` and `ta
 3. **`target_symbol=""` is now 422** (it was accepted before). Absent or null stays valid.
 4. **Tests.** `tests/test_main.py` (valid module and `Class.method` give 202; newline, NUL, space, empty segment, leading dot, colon and 257 characters give 422; stored non-conforming targets are echoed by GET), `tests/test_worker.py::test_worker_does_not_fail_queued_row_for_target_format`.
 5. **Cleanup in the same version.** `termination_cause.py` cite and the "ten paths / nine prefixes" comment; the truncated-reason input in `tests/test_engine_unknown_causes.py` now carries the whole head literal and all but the last character of the tail; stale `reachability.py` cites in `CLAUDE.md`, `agent_docs/DEMO.md` and `agent_docs/PHASE2_TRIAGE_AGENT.md`; the README no longer says the target is hidden for unfinished jobs (§21). Historical cites in §22-§24 are left as written.
+
+## 26. App scan: evidence levels instead of `not_reachable` (12 Nov 2026)
+
+**Decision.** `/v1/scans` takes a relative path under a read-only mount,
+requires a lockfile or fully pinned requirements, matches a pinned OSV PyPI
+snapshot (date and sha256 in every result), and returns one finding per
+advisory. Each finding carries one of the four existing verdicts plus an
+evidence level: `path_proven`, `module_imported_by_app`,
+`package_installed_not_imported` or `no_target_symbol`. Malicious-package
+records are listed separately and first, with no verdict. `/v1/triage` is
+unchanged.
+
+**Scans never issue `not_reachable`.** Two measured results:
+- A call graph over the Flask tutorial plus its wheels answered
+  `not_reachable` for werkzeug's multipart parser, which `request.form` runs
+  at runtime.
+- An import-graph rule looked sound until the FastAPI template showed
+  psycopg loaded from a URL string (`backend/app/core/config.py:39`, via
+  SQLAlchemy's `__import__`). With dynamic imports treated corpus-wide (the
+  D1 precedent), 0 dependency modules were eligible on either app.
+
+The earlier "87 of 2,241" figure is withdrawn (`APP_SCAN_RESEARCH.md` §0.4).
+
+**Target confidence:** high = named in the advisory text (code form) and
+changed between the installed version and the first fixed version above it.
+Medium = one of the two. The model may only rank within that set.
+
+**L3 exception:** not granted yet. It is decided at the start of A7, in its own section. Until then the L3 freeze in CLAUDE.md stands unchanged.
+
+**Frozen eval rules:** `PHASE_APP_SCAN.md` §4 (G1/G2/G3/G5/G6/G7/G8 hard, G4 reported).
+
+**Applied with changes (12 Nov 2026).** Copied from `agent_docs/PHASE_APP_SCAN.md` §8 with three changes:
+1. The "L3 exception (scoped)" paragraph is removed and replaced with the "L3 exception: not granted yet" paragraph above. The L3 freeze in CLAUDE.md is unchanged by this section.
+2. The frozen eval rules line is now G1/G2/G3/G5/G6/G7/G8 hard, G4 reported. G8 was added to the spec after the draft was written.
+3. "(draft)" is dropped from the title.
