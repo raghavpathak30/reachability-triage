@@ -61,6 +61,18 @@ class LockfileParseError(ScanError):
     pass
 
 
+class UvLockFormatError(ScanError):
+    pass
+
+
+class UvLockRootError(ScanError):
+    pass
+
+
+class UvLockResolutionError(ScanError):
+    pass
+
+
 class Status(str, Enum):
     PINNED = "pinned"
     UNPINNED = "unpinned"
@@ -483,6 +495,46 @@ def _parse_poetry_lock(path: Path, rel: str) -> list[InventoryEntry]:
     return out
 
 
+def _describe_source(source: object) -> str:
+    return ", ".join(f"{k} = {v!r}" for k, v in source.items()) if isinstance(source, dict) else repr(source)
+
+
+def find_uv_root(packages: list[dict]) -> dict:
+    """The single [[package]] whose source is `editable = "."` or `virtual = "."`."""
+    roots = []
+    candidates = []
+    for pkg in packages:
+        source = pkg.get("source")
+        if not isinstance(source, dict):
+            continue
+        for kind in ("editable", "virtual"):
+            if kind in source:
+                candidates.append(f"{pkg.get('name')} ({kind} = {source[kind]!r})")
+                if source[kind] == ".":
+                    roots.append(pkg)
+    listing = "; ".join(candidates) if candidates else "none"
+    if len(roots) == 1:
+        return roots[0]
+    if not roots:
+        raise UvLockRootError(
+            "uv.lock has no root member (a package with source editable = \".\" or virtual = \".\"); "
+            f"editable/virtual candidates: {listing}"
+        )
+    raise UvLockRootError(
+        f"uv.lock has {len(roots)} root members, expected exactly one; candidates: {listing}"
+    )
+
+
+def _parse_uv_lock(path: Path, rel: str) -> list[InventoryEntry]:
+    data = _load_toml(path, rel)
+    version = data.get("version")
+    if version != 1 or isinstance(version, bool):
+        raise UvLockFormatError(f"{rel}: unsupported uv.lock version {version!r}; only version 1 is read")
+    packages = data.get("package", []) or []
+    find_uv_root(packages)
+    return []
+
+
 _CANDIDATES = ("uv.lock", "poetry.lock", "requirements.txt")
 _A1B_FORMATS = ("Pipfile.lock", "pylock.toml")
 
@@ -527,5 +579,7 @@ def build_inventory(root: Path) -> Inventory:
         entries = _apply_taint(tree.entries, tree.taints)
     elif lockfile == "poetry.lock" and path is not None:
         entries = _parse_poetry_lock(path, "poetry.lock")
+    elif lockfile == "uv.lock" and path is not None:
+        entries = _parse_uv_lock(path, "uv.lock")
     hint = HINT if lockfile is None or any(e.status is Status.UNPINNED for e in entries) else None
     return Inventory(str(resolved), lockfile, tuple(entries), tuple(skipped) + tuple(tree.skipped), hint)
