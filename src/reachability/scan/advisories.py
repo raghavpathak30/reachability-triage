@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from packaging.utils import canonicalize_name
+from packaging.version import InvalidVersion, Version
 
 from reachability.scan.inventory import Inventory, ScanError, Status
 
@@ -65,6 +66,71 @@ class Snapshot:
     withdrawn_excluded: int = 0
     groups: dict[str, AdvisoryGroup] = field(default_factory=dict, repr=False)
     group_of: dict[str, str] = field(default_factory=dict, repr=False)
+
+
+_EVENT_KINDS = ("introduced", "fixed", "last_affected", "limit")
+_BAD_EVENT = "?"
+
+
+def reduce_events(events: object) -> tuple[tuple[str, str], ...]:
+    """Reduce OSV events to (kind, value); anything malformed becomes ("?", json)."""
+    out: list[tuple[str, str]] = []
+    if not isinstance(events, (list, tuple)):
+        return ((_BAD_EVENT, json.dumps(events, default=str)),)
+    for ev in events:
+        if isinstance(ev, dict) and len(ev) == 1:
+            (kind, value), = ev.items()
+            if kind in _EVENT_KINDS and isinstance(value, str):
+                out.append((kind, value))
+                continue
+        out.append((_BAD_EVENT, json.dumps(ev, default=str)))
+    return tuple(out)
+
+
+_RANK = {"fixed": 0, "limit": 0, "last_affected": 0, "introduced": 1}
+
+
+def _parse_bound(value: str) -> Version | None:
+    try:
+        return Version(value)
+    except InvalidVersion:
+        return None
+
+
+def range_matches(
+    events: tuple[tuple[str, str], ...], installed: Version, label: str = ""
+) -> tuple[bool, tuple[str, ...]]:
+    """Ordered-event walk. `introduced "0"` is minus infinity; fixed/limit exclusive,
+    last_affected inclusive. Anything it cannot read makes the range match, with a note."""
+    where = f" in {label}" if label else ""
+    parsed: list[tuple[Version | None, str]] = []
+    saw_introduced = False
+    for kind, value in events:
+        if kind == _BAD_EVENT:
+            return True, (f"malformed event {value}{where}; matched conservatively",)
+        if kind == "introduced":
+            saw_introduced = True
+            if value == "0":
+                parsed.append((None, kind))
+                continue
+        bound = _parse_bound(value)
+        if bound is None:
+            return True, (f"unparseable range bound {value!r}{where}; matched conservatively",)
+        parsed.append((bound, kind))
+    if not saw_introduced:
+        return True, (f"range has no introduced event{where}; matched conservatively",)
+    parsed.sort(key=lambda p: ((0, Version("0")) if p[0] is None else (1, p[0]), _RANK[p[1]]))
+    affected = False
+    for bound, kind in parsed:
+        if kind == "introduced":
+            if bound is None or installed >= bound:
+                affected = True
+        elif kind == "last_affected":
+            if installed > bound:
+                affected = False
+        elif installed >= bound:
+            affected = False
+    return affected, ()
 
 
 def _build_groups(records: dict[str, Record]) -> tuple[dict[str, AdvisoryGroup], dict[str, str]]:
