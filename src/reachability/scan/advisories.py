@@ -355,7 +355,10 @@ def load_snapshot(path: Path, expected_sha256: str) -> Snapshot:
         date = datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
     except ValueError as exc:
         raise SnapshotFilenameError(f"snapshot filename has an invalid date: {path.name!r}") from exc
-    data = path.read_bytes()
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        raise SnapshotError(f"cannot read snapshot {path}: {exc}") from exc
     actual = hashlib.sha256(data).hexdigest()
     if actual != expected_sha256.lower():
         raise SnapshotHashMismatchError(

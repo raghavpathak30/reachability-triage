@@ -167,3 +167,87 @@ def test_cli_inventory_notes_listed(snapshot_factory):
     path, sha = snapshot_factory([{"id": "A-1", "aliases": [], "affected": []}])
     out = cli(FIX / "lockfiles" / "uv_extras_markers", path, sha).stdout
     assert "edge to root member" in out
+
+
+def test_cli_exit_1_on_hash_mismatch_with_named_error_on_stderr(snapshot_factory, scan_root):
+    path, _ = snapshot_factory([{"id": "A-1", "aliases": [], "affected": []}])
+    proc = cli(scan_root, path, "0" * 64)
+    assert proc.returncode == 1
+    assert proc.stderr.startswith("error: SnapshotHashMismatchError: ")
+    assert proc.stdout == ""
+
+
+def test_cli_exit_1_on_bad_snapshot_filename(snapshot_factory, scan_root):
+    path, sha = snapshot_factory([{"id": "A-1", "aliases": [], "affected": []}], name="PyPI-all.zip")
+    proc = cli(scan_root, path, sha)
+    assert proc.returncode == 1 and proc.stderr.startswith("error: SnapshotFilenameError: ")
+
+
+def test_cli_exit_1_on_missing_snapshot_file(scan_root, tmp_path):
+    proc = cli(scan_root, tmp_path / "osv-pypi-2026-11-12.zip", "0" * 64)
+    assert proc.returncode == 1 and proc.stderr.startswith("error: SnapshotError: ")
+
+
+def test_cli_exit_1_on_uv_lock_without_root(mini):
+    path, sha = mini
+    proc = cli(FIX / "lockfiles" / "uv_no_root", path, sha)
+    assert proc.returncode == 1
+    assert proc.stderr.startswith("error: UvLockRootError: ") and "root" in proc.stderr
+
+
+def test_cli_exit_1_on_uv_lock_root_in_subdirectory(mini):
+    path, sha = mini
+    proc = cli(FIX / "lockfiles" / "uv_root_subdir", path, sha)
+    assert proc.returncode == 1 and "backend" in proc.stderr
+
+
+def test_cli_exit_1_on_missing_scan_root(mini, tmp_path):
+    path, sha = mini
+    proc = cli(tmp_path / "nope", path, sha)
+    assert proc.returncode == 1 and proc.stderr.startswith("error: ScanRootError: ")
+
+
+def test_cli_exit_1_on_undecodable_requirements(mini, scan_root):
+    path, sha = mini
+    (scan_root / "requirements.txt").write_bytes(b"foo==1.0\n\xff\xfe\xfa\n")
+    proc = cli(scan_root, path, sha)
+    assert proc.returncode == 1 and proc.stderr.startswith("error: LockfileParseError: ")
+
+
+def test_cli_argparse_errors_exit_2(mini):
+    path, _ = mini
+    proc = subprocess.run([sys.executable, str(SCRIPT), "--snapshot", str(path)], capture_output=True, text=True)
+    assert proc.returncode == 2
+
+
+def test_cli_default_sha256_is_reference_value():
+    ref = "c7ea4e15b83912960fc5cbd42c6003dd630e422ec4dfbfc4ed19445573e1b08c"
+    help_text = subprocess.run([sys.executable, str(SCRIPT), "--help"], capture_output=True, text=True).stdout
+    assert ref in help_text.replace("\n", "").replace(" ", "")
+    assert f'REFERENCE_SHA256 = "{ref}"' in SCRIPT.read_text()
+
+
+def test_cli_default_sha256_is_used_when_omitted(snapshot_factory, scan_root):
+    path, _ = snapshot_factory([{"id": "A-1", "aliases": [], "affected": []}])
+    proc = cli(scan_root, path)  # no --snapshot-sha256: the reference hash will not match a mini zip
+    assert proc.returncode == 1 and "c7ea4e15b83912960fc5cbd42c6003dd630e422ec4dfbfc4ed19445573e1b08c" in proc.stderr
+
+
+def test_no_print_calls_in_scan_package():
+    for p in (REPO / "src" / "reachability" / "scan").glob("*.py"):
+        assert "print(" not in p.read_text(), p
+
+
+def test_no_not_reachable_string_in_scan_package():
+    for p in (REPO / "src" / "reachability" / "scan").rglob("*"):
+        if p.is_file() and "__pycache__" not in p.parts:
+            assert "not_reachable" not in p.read_text(), p
+    assert "not_reachable" not in SCRIPT.read_text()
+
+
+def test_scan_package_has_no_network_or_exec_imports():
+    banned = ("import socket", "import subprocess", "import requests", "import urllib", "import http", "importlib")
+    for p in (REPO / "src" / "reachability" / "scan").glob("*.py"):
+        text = p.read_text()
+        for b in banned:
+            assert b not in text, (p, b)
