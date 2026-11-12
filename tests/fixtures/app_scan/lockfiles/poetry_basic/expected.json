@@ -1,0 +1,8 @@
+{"inventory": {
+  "click": {"version": "8.1.7", "status": "pinned"},
+  "pytest": {"version": "8.3.4", "status": "pinned"},
+  "legacy-cat": {"version": "1.2", "status": "pinned"},
+  "gitdep": {"version": "0.1.0", "status": "unsupported"},
+  "privdep": {"version": "2.0", "status": "unsupported"},
+  "weird": {"version": "1.0-custom", "status": "unsupported"}
+}}

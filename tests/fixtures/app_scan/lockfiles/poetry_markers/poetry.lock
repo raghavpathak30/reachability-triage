@@ -1,0 +1,45 @@
+[[package]]
+name = "colorama"
+version = "0.4.6"
+groups = ["main"]
+markers = "sys_platform == \"win32\""
+files = []
+
+[[package]]
+name = "uvloop"
+version = "0.19.0"
+groups = ["main"]
+markers = "sys_platform != \"win32\""
+files = []
+
+[[package]]
+name = "grouped"
+version = "1.0"
+groups = ["main", "dev"]
+files = []
+
+[package.markers]
+main = "sys_platform == \"win32\""
+dev = "sys_platform == \"linux\""
+
+[[package]]
+name = "allfalse"
+version = "1.0"
+groups = ["main", "dev"]
+files = []
+
+[package.markers]
+main = "sys_platform == \"win32\""
+dev = "os_name == \"nt\""
+
+[[package]]
+name = "partial"
+version = "1.0"
+groups = ["main", "dev"]
+files = []
+
+[package.markers]
+main = "sys_platform == \"win32\""
+
+[metadata]
+lock-version = "2.1"

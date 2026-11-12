@@ -11,12 +11,13 @@ import os
 import re
 import shlex
 import stat
+import tomllib
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 
 from packaging._parser import Variable
-from packaging.markers import Marker, UndefinedComparison, UndefinedEnvironmentName
+from packaging.markers import InvalidMarker, Marker, UndefinedComparison, UndefinedEnvironmentName
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
@@ -391,6 +392,97 @@ def _apply_taint(entries: list[InventoryEntry], taints: list[str]) -> list[Inven
     return out
 
 
+def _load_toml(path: Path, rel: str) -> dict:
+    text = _read_text(path, rel)
+    try:
+        return tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise LockfileParseError(f"cannot parse {rel} as TOML: {exc}") from exc
+
+
+def _parse_marker_string(text: str, rel: str) -> Marker:
+    try:
+        return Marker(text)
+    except InvalidMarker as exc:
+        raise LockfileParseError(f"invalid marker in {rel}: {text!r}: {exc}") from exc
+
+
+def _version_status(version: object) -> tuple[Status, str | None, str | None]:
+    """(status, version, note) for a lock-file version value."""
+    if not isinstance(version, str) or not version:
+        return Status.UNSUPPORTED, None, "no version in lock"
+    try:
+        Version(version)
+    except InvalidVersion:
+        return Status.UNSUPPORTED, version, f"version {version!r} is not valid PEP 440"
+    return Status.PINNED, version, None
+
+
+_POETRY_OK_SOURCES = frozenset({None, "pypi"})
+
+
+def _poetry_applies(pkg: dict, groups: tuple[str, ...], rel: str) -> tuple[bool, tuple[str, ...]]:
+    markers = pkg.get("markers")
+    if markers is None:
+        return True, ()
+    if isinstance(markers, str):
+        return marker_applies(_parse_marker_string(markers, rel))
+    if isinstance(markers, dict):
+        notes: list[str] = []
+        parsed: dict[str, bool] = {}
+        for group, text in markers.items():
+            ok, n = marker_applies(_parse_marker_string(str(text), rel))
+            parsed[group] = ok
+            notes.extend(n)
+        if groups:
+            applies = any(g not in parsed or parsed[g] for g in groups)
+        else:
+            applies = any(parsed.values()) if parsed else True
+        return applies, tuple(notes)
+    raise LockfileParseError(f"unexpected markers value in {rel}: {markers!r}")
+
+
+def _parse_poetry_lock(path: Path, rel: str) -> list[InventoryEntry]:
+    data = _load_toml(path, rel)
+    out: list[InventoryEntry] = []
+    for pkg in data.get("package", []) or []:
+        name = pkg.get("name")
+        if not isinstance(name, str):
+            raise LockfileParseError(f"{rel}: a [[package]] has no name")
+        if isinstance(pkg.get("groups"), list):
+            groups = tuple(str(g) for g in pkg["groups"])
+        elif isinstance(pkg.get("category"), str):
+            groups = (pkg["category"],)
+        else:
+            groups = ()
+        status, version, note = _version_status(pkg.get("version"))
+        notes: list[str] = [note] if note else []
+        source = pkg.get("source") or {}
+        source_type = source.get("type") if isinstance(source, dict) else None
+        if source_type not in _POETRY_OK_SOURCES:
+            status = Status.UNSUPPORTED
+            notes.append(f"source type {source_type}")
+        if pkg.get("optional") is True:
+            notes.append("optional = true")
+        applies, marker_notes = _poetry_applies(pkg, groups, rel)
+        notes.extend(marker_notes)
+        if not applies:
+            status = Status.MARKER_SKIPPED
+            notes.append(f"marker false for {TARGET_ENV}")
+        out.append(
+            InventoryEntry(
+                dist=canonicalize_name(name),
+                version=version,
+                status=status,
+                source_file=rel,
+                line=None,
+                groups=groups,
+                notes=tuple(notes),
+            )
+        )
+    return out
+
+
 _CANDIDATES = ("uv.lock", "poetry.lock", "requirements.txt")
 _A1B_FORMATS = ("Pipfile.lock", "pylock.toml")
 
@@ -429,8 +521,11 @@ def build_inventory(root: Path) -> Inventory:
         raise ScanRootError(f"scan root is not a directory: {root}")
     lockfile, path, skipped = discover_lockfile(resolved)
     tree = _RequirementsTree(resolved)
+    entries: list[InventoryEntry] = []
     if lockfile == "requirements.txt" and path is not None:
         tree.parse(path)
-    entries = _apply_taint(tree.entries, tree.taints)
+        entries = _apply_taint(tree.entries, tree.taints)
+    elif lockfile == "poetry.lock" and path is not None:
+        entries = _parse_poetry_lock(path, "poetry.lock")
     hint = HINT if lockfile is None or any(e.status is Status.UNPINNED for e in entries) else None
     return Inventory(str(resolved), lockfile, tuple(entries), tuple(skipped) + tuple(tree.skipped), hint)
