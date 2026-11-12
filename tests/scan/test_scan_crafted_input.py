@@ -5,7 +5,7 @@ import sys
 
 import pytest
 
-from reachability.scan.inventory import MAX_INCLUDE_DEPTH, LockfileParseError, build_inventory
+from reachability.scan.inventory import MAX_INCLUDE_DEPTH, LockfileParseError, Status, build_inventory
 
 
 def run_cli(scan_root, snapshot_factory):
@@ -118,11 +118,61 @@ N = 3000
 DEEP_MARKER = "(" * N + "python_version >= '3'" + ")" * N
 
 
-def test_requirements_deep_marker_raises(scan_root, snapshot_factory):
-    (scan_root / "requirements.txt").write_text(f"foo==1.0; {DEEP_MARKER}\n")
-    with pytest.raises(LockfileParseError, match="requirements.txt"):
+def test_requirements_deep_marker_line_is_unsupported_and_scan_continues(scan_root, snapshot_factory):
+    # Step-1 rule (DECISIONS §27): only that requirements line degrades; the scan goes on.
+    (scan_root / "requirements.txt").write_text(f"Foo_Bar==1.0; {DEEP_MARKER}\nbaz==2.0\n")
+    inv = build_inventory(scan_root)
+    deep, baz = inv.entries
+    assert deep.status is Status.UNSUPPORTED
+    assert deep.dist == "foo-bar"
+    assert deep.version is None
+    assert (deep.source_file, deep.line) == ("requirements.txt", 1)
+    assert deep.notes[0] == "marker is nested too deeply"
+    assert deep.notes[1].startswith("raw: Foo_Bar==1.0; (((")
+    assert (baz.dist, baz.version, baz.status) == ("baz", "2.0", Status.PINNED)
+    proc = run_cli(scan_root, snapshot_factory)
+    assert proc.returncode == 0, proc.stderr
+    assert "Traceback" not in proc.stderr
+    assert "foo-bar | - | unsupported" in proc.stdout
+    assert "note: marker is nested too deeply" in proc.stdout
+    assert "baz | 2.0 | pinned" in proc.stdout
+
+
+def test_requirements_deep_marker_in_include_is_unsupported(scan_root):
+    (scan_root / "requirements.txt").write_text("-r more.txt\n")
+    (scan_root / "more.txt").write_text(f"foo==1.0; {DEEP_MARKER}\n")
+    (deep,) = build_inventory(scan_root).entries
+    assert (deep.status, deep.source_file, deep.line) == (Status.UNSUPPORTED, "more.txt", 1)
+
+
+def test_requirements_marker_recursion_during_evaluation_is_unsupported(scan_root, monkeypatch):
+    # A marker that parses but overflows while being walked or evaluated takes the same path.
+    from packaging.markers import Marker  # noqa: PLC0415
+
+    def boom(self, environment=None):
+        raise RecursionError
+
+    monkeypatch.setattr(Marker, "evaluate", boom)
+    (scan_root / "requirements.txt").write_text('foo==1.0; sys_platform == "linux"\nbaz==2.0\n')
+    deep, baz = build_inventory(scan_root).entries
+    assert (deep.dist, deep.status) == ("foo", Status.UNSUPPORTED)
+    assert deep.notes[0] == "marker is nested too deeply"
+    assert baz.status is Status.PINNED
+
+
+def test_poetry_marker_recursion_during_evaluation_still_raises(scan_root, monkeypatch):
+    # Lockfile markers keep the named error; only requirements lines degrade.
+    from packaging.markers import Marker  # noqa: PLC0415
+
+    def boom(self, environment=None):
+        raise RecursionError
+
+    monkeypatch.setattr(Marker, "evaluate", boom)
+    (scan_root / "poetry.lock").write_text(
+        '[[package]]\nname = "foo"\nversion = "1.0"\ngroups = ["main"]\nmarkers = "sys_platform == \'linux\'"\n'
+    )
+    with pytest.raises(LockfileParseError, match="nested too deeply"):
         build_inventory(scan_root)
-    assert_named_exit(run_cli(scan_root, snapshot_factory))
 
 
 def test_poetry_deep_marker_raises(scan_root, snapshot_factory):

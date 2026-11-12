@@ -134,14 +134,14 @@ def _marker_variables(marker: Marker) -> set[str]:
     return found
 
 
-def marker_applies(marker: Marker | None) -> tuple[bool, tuple[str, ...]]:
-    """Evaluate `marker` for TARGET_ENV. Unmapped keys keep the entry, with a note."""
+MARKER_TOO_DEEP = "marker is nested too deeply"
+
+
+def _marker_applies_unguarded(marker: Marker | None) -> tuple[bool, tuple[str, ...]]:
+    """`marker_applies` without the RecursionError mapping; callers choose the policy."""
     if marker is None:
         return True, ()
-    try:
-        unmapped = sorted(_marker_variables(marker) - _MARKER_KEYS)
-    except RecursionError as exc:
-        raise LockfileParseError("marker is nested too deeply") from exc
+    unmapped = sorted(_marker_variables(marker) - _MARKER_KEYS)
     if unmapped:
         return True, (f"marker uses unmapped key {unmapped[0]}; kept",)
     env = dict(MARKER_ENV, extra="")
@@ -149,8 +149,18 @@ def marker_applies(marker: Marker | None) -> tuple[bool, tuple[str, ...]]:
         return marker.evaluate(env), ()
     except (UndefinedComparison, UndefinedEnvironmentName, ValueError) as exc:
         return True, (f"marker could not be evaluated ({exc}); kept",)
+
+
+def marker_applies(marker: Marker | None) -> tuple[bool, tuple[str, ...]]:
+    """Evaluate `marker` for TARGET_ENV. Unmapped keys keep the entry, with a note.
+
+    A marker too deep to walk raises LockfileParseError (the lockfile policy). A
+    requirements line instead becomes `unsupported`, see `_parse_requirement_line`.
+    """
+    try:
+        return _marker_applies_unguarded(marker)
     except RecursionError as exc:
-        raise LockfileParseError("marker is nested too deeply") from exc
+        raise LockfileParseError(MARKER_TOO_DEEP) from exc
 
 
 _COMMENT_LINE = re.compile(r"\s*#")
@@ -203,6 +213,7 @@ def _logical_lines(text: str) -> list[tuple[int, str]]:
 
 _URL_LIKE = re.compile(r"^([A-Za-z][A-Za-z0-9+.-]*://|file:)")
 _PATH_LIKE = ("./", "../", "/", "~", ".\\")
+_LEADING_NAME = re.compile(r"^([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)")
 _EQ_PIN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\s*(\[[^\]]*\])?\s*={2,3}\s*([^\s;,]+)")
 _SHORT_VALUE_OPTIONS = ("-r", "-i", "-f", "-c", "-e")
 
@@ -259,8 +270,13 @@ def _parse_requirement_line(line: str, rel: str, lineno: int) -> InventoryEntry:
         return _unsupported(rel, lineno, line, "URL, VCS or path requirement")
     try:
         req = Requirement(req_text)
-    except RecursionError as exc:
-        raise LockfileParseError(f"{rel}:{lineno}: requirement is nested too deeply") from exc
+        applies, marker_notes = _marker_applies_unguarded(req.marker)
+    except RecursionError:
+        # One line only: it becomes unsupported and the scan continues (DECISIONS §27).
+        name = _LEADING_NAME.match(req_text)
+        return _unsupported(
+            rel, lineno, line, MARKER_TOO_DEEP, canonicalize_name(name.group(1)) if name else None
+        )
     except InvalidRequirement as exc:
         salvage = _EQ_PIN.match(req_text)
         if salvage:
@@ -276,7 +292,6 @@ def _parse_requirement_line(line: str, rel: str, lineno: int) -> InventoryEntry:
     notes: list[str] = []
     if req.extras:
         notes.append("extras: " + ",".join(sorted(req.extras)))
-    applies, marker_notes = marker_applies(req.marker)
     notes.extend(marker_notes)
     if req.url:
         notes.append("direct URL requirement")
