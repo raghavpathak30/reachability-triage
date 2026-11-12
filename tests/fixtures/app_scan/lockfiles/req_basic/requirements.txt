@@ -1,0 +1,8 @@
+# a fully pinned file
+Flask==3.0.3   # inline comment
+click==8.1.7 \
+    --hash=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+    --hash=sha256:bbbbbbbbbbbbbbbbbbbbbbbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
+requests[security]==2.32.3
+PyYAML==6.0.2
