@@ -164,3 +164,23 @@ def test_snapshot_deep_json_raises_snapshot_error(snapshot_factory):
     path, sha = snapshot_factory([("a.json", "[" * 100000 + "]" * 100000)])
     with pytest.raises(SnapshotError):
         load_snapshot(path, sha)
+
+
+# ---- F10: odd -r operands
+
+
+@pytest.mark.parametrize("operand", ["a\x00b", "x" * 5000], ids=["nul", "long_name"])
+def test_odd_include_operand_is_skipped_include_missing(scan_root, operand):
+    (scan_root / "requirements.txt").write_text(f"foo==1.0\n-r {operand}\n")
+    inv = build_inventory(scan_root)
+    assert [e.dist for e in inv.entries] == ["foo"]
+    (item,) = inv.skipped
+    assert item.kind == "include_missing"
+    assert item.detail.startswith(("ValueError", "OSError"))
+
+
+def test_long_include_operand_cli_exits_0(scan_root, snapshot_factory):
+    (scan_root / "requirements.txt").write_text("foo==1.0\n-r " + "x" * 5000 + "\n")
+    proc = run_cli(scan_root, snapshot_factory)
+    assert proc.returncode == 0
+    assert "Traceback" not in proc.stderr

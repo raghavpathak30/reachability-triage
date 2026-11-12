@@ -368,6 +368,13 @@ _INCLUDE_OPTIONS = frozenset({"-r", "--requirement"})
 
 
 def _check_path(root: Path, lexical: Path) -> tuple[Path | None, str | None, str]:
+    try:
+        return _check_path_unguarded(root, lexical)
+    except (OSError, ValueError) as exc:
+        return None, "include_missing", f"{type(exc).__name__}: cannot check path"
+
+
+def _check_path_unguarded(root: Path, lexical: Path) -> tuple[Path | None, str | None, str]:
     """Return (resolved, None, "") if safe to open, else (None, kind, detail).
 
     `lexical` is already normalised and absolute. A symlink (the path itself or
