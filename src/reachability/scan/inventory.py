@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import codecs
 import logging
+import os
 import re
 import shlex
 from dataclasses import dataclass, replace
@@ -229,20 +230,60 @@ _TAINT_OPTIONS = frozenset(
 )
 
 
-def _parse_requirements(path: Path, rel: str) -> tuple[list[InventoryEntry], list[str]]:
-    entries: list[InventoryEntry] = []
-    taints: list[str] = []
-    for lineno, raw in _logical_lines(_read_text(path, rel)):
-        line = _INLINE_COMMENT.sub("", raw).strip()
-        if not line:
-            continue
-        if line.startswith("-"):
-            opt = _split_option(line)
-            if opt and opt[0] in _TAINT_OPTIONS:
-                taints.append(f"{opt[0]} at {rel}:{lineno}")
+_INCLUDE_OPTIONS = frozenset({"-r", "--requirement"})
+
+
+def _check_path(root: Path, lexical: Path) -> tuple[Path | None, str | None, str]:
+    """Return (resolved, None, "") if safe to open, else (None, kind, detail)."""
+    try:
+        resolved = lexical.resolve(strict=True)
+    except FileNotFoundError:
+        return None, "include_missing", "file does not exist"
+    if not resolved.is_relative_to(root):
+        return None, "include_outside_root", "resolves outside the scan root"
+    return resolved, None, ""
+
+
+class _RequirementsTree:
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.entries: list[InventoryEntry] = []
+        self.taints: list[str] = []
+        self.skipped: list[SkippedItem] = []
+        self._active: list[Path] = []
+        self._done: set[Path] = set()
+
+    def parse(self, path: Path) -> None:
+        rel = path.relative_to(self.root).as_posix()
+        self._active.append(path)
+        for lineno, raw in _logical_lines(_read_text(path, rel)):
+            line = _INLINE_COMMENT.sub("", raw).strip()
+            if not line:
                 continue
-        entries.append(_parse_requirement_line(line, rel, lineno))
-    return entries, taints
+            if line.startswith("-"):
+                opt = _split_option(line)
+                if opt and opt[0] in _TAINT_OPTIONS:
+                    self.taints.append(f"{opt[0]} at {rel}:{lineno}")
+                    continue
+                if opt and opt[0] in _INCLUDE_OPTIONS and opt[1]:
+                    self._include(path, rel, lineno, opt[1])
+                    continue
+            self.entries.append(_parse_requirement_line(line, rel, lineno))
+        self._active.pop()
+        self._done.add(path)
+
+    def _include(self, including: Path, rel: str, lineno: int, value: str) -> None:
+        lexical = Path(os.path.normpath(including.parent / value))
+        resolved, kind, detail = _check_path(self.root, lexical)
+        if resolved is None:
+            self.skipped.append(SkippedItem(kind or "include_missing", value, rel, lineno, detail))
+            return
+        if resolved in self._active:
+            self.skipped.append(SkippedItem("include_cycle", value, rel, lineno, "include cycle; not followed"))
+            return
+        if resolved in self._done:
+            return
+        self.parse(resolved)
 
 
 def _apply_taint(entries: list[InventoryEntry], taints: list[str]) -> list[InventoryEntry]:
@@ -265,6 +306,7 @@ def build_inventory(root: Path) -> Inventory:
         raise ScanRootError(f"scan root not found: {root}") from exc
     if not resolved.is_dir():
         raise ScanRootError(f"scan root is not a directory: {root}")
-    entries, taints = _parse_requirements(resolved / "requirements.txt", "requirements.txt")
-    entries = _apply_taint(entries, taints)
-    return Inventory(str(resolved), "requirements.txt", tuple(entries), (), None)
+    tree = _RequirementsTree(resolved)
+    tree.parse(resolved / "requirements.txt")
+    entries = _apply_taint(tree.entries, tree.taints)
+    return Inventory(str(resolved), "requirements.txt", tuple(entries), tuple(tree.skipped), None)

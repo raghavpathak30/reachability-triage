@@ -176,3 +176,65 @@ def test_trusted_host_is_unsupported_option_row_no_taint(scan_root):
     inv = inv_of(scan_root, "--trusted-host example.invalid\nfoo==1.0\n")
     assert inv.entries[0].dist is None and inv.entries[0].status is Status.UNSUPPORTED
     assert inv.entries[1].status is Status.PINNED
+
+
+def test_include_inside_root_adds_entries_with_their_own_source_file(scan_root):
+    (scan_root / "base").mkdir()
+    (scan_root / "base" / "common.txt").write_text("# c\nshared==2.0\n")
+    inv = inv_of(scan_root, "-r base/common.txt\nown==1.0\n")
+    assert [(e.dist, e.source_file, e.line) for e in inv.entries] == [
+        ("shared", "base/common.txt", 2),
+        ("own", "requirements.txt", 2),
+    ]
+    assert inv.skipped == ()
+
+
+@pytest.mark.parametrize("spelling", ["-r inc.txt", "-rinc.txt", "--requirement=inc.txt", "--requirement inc.txt"])
+def test_requirement_include_spellings(scan_root, spelling):
+    (scan_root / "inc.txt").write_text("shared==2.0\n")
+    inv = inv_of(scan_root, spelling + "\n")
+    assert [e.dist for e in inv.entries] == ["shared"]
+
+
+def test_include_cycle_recorded_not_followed(scan_root):
+    (scan_root / "a.txt").write_text("a==1.0\n-r requirements.txt\n")
+    inv = inv_of(scan_root, "root==1.0\n-r a.txt\n")
+    assert sorted(e.dist for e in inv.entries) == ["a", "root"]
+    assert [s.kind for s in inv.skipped] == ["include_cycle"]
+    assert inv.skipped[0].source_file == "a.txt"
+    assert inv.skipped[0].line == 2
+
+
+def test_diamond_include_not_a_cycle(scan_root):
+    (scan_root / "shared.txt").write_text("shared==1.0\n")
+    (scan_root / "a.txt").write_text("-r shared.txt\n")
+    (scan_root / "b.txt").write_text("-r shared.txt\n")
+    inv = inv_of(scan_root, "-r a.txt\n-r b.txt\n")
+    assert [e.dist for e in inv.entries] == ["shared"]
+    assert inv.skipped == ()
+
+
+def test_missing_include_recorded(scan_root):
+    inv = inv_of(scan_root, "-r nope.txt\nfoo==1.0\n")
+    assert [e.dist for e in inv.entries] == ["foo"]
+    assert [(s.kind, s.path, s.line) for s in inv.skipped] == [("include_missing", "nope.txt", 1)]
+
+
+def test_include_without_value_is_unsupported_row(scan_root):
+    inv = inv_of(scan_root, "-r\n")
+    assert inv.entries[0].status is Status.UNSUPPORTED
+
+
+def test_index_option_in_included_file_taints_whole_tree(scan_root):
+    (scan_root / "inc.txt").write_text("--extra-index-url https://example.invalid/simple\ninc==1.0\n")
+    inv = inv_of(scan_root, "root==1.0\n-r inc.txt\n")
+    assert {e.dist: e.status for e in inv.entries} == {
+        "root": Status.UNSUPPORTED,
+        "inc": Status.UNSUPPORTED,
+    }
+
+
+def test_index_option_in_root_taints_included_entries(scan_root):
+    (scan_root / "inc.txt").write_text("inc==1.0\n")
+    inv = inv_of(scan_root, "--index-url https://example.invalid/simple\n-r inc.txt\n")
+    assert inv.entries[0].status is Status.UNSUPPORTED
