@@ -1,0 +1,9 @@
+{"inventory": {
+  "foo": [
+    {"version": "1.0", "status": "pinned"},
+    {"version": "2.0", "status": "pinned"},
+    {"version": "3.0", "status": "marker_skipped"}
+  ],
+  "typing-extensions": {"version": "4.12.2", "status": "pinned"},
+  "zope-interface": {"version": "6.0", "status": "pinned"}
+}}
