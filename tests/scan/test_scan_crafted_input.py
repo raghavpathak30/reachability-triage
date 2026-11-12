@@ -110,3 +110,57 @@ def test_snapshot_huge_bound_matches_conservatively(scan_root, snapshot_factory,
         assert r.findings == ()
     else:
         assert len(r.findings) == 1
+
+
+# ---- F9: deep nesting (RecursionError)
+
+N = 3000
+DEEP_MARKER = "(" * N + "python_version >= '3'" + ")" * N
+
+
+def test_requirements_deep_marker_raises(scan_root, snapshot_factory):
+    (scan_root / "requirements.txt").write_text(f"foo==1.0; {DEEP_MARKER}\n")
+    with pytest.raises(LockfileParseError, match="requirements.txt"):
+        build_inventory(scan_root)
+    assert_named_exit(run_cli(scan_root, snapshot_factory))
+
+
+def test_poetry_deep_marker_raises(scan_root, snapshot_factory):
+    (scan_root / "poetry.lock").write_text(
+        f'[[package]]\nname = "foo"\nversion = "1.0"\ngroups = ["main"]\nmarkers = "{DEEP_MARKER}"\n'
+    )
+    with pytest.raises(LockfileParseError, match="poetry.lock"):
+        build_inventory(scan_root)
+    assert_named_exit(run_cli(scan_root, snapshot_factory))
+
+
+def test_uv_deep_toml_array_raises(scan_root, snapshot_factory):
+    (scan_root / "uv.lock").write_text("version = 1\nx = " + "[" * N + "]" * N + "\n")
+    with pytest.raises(LockfileParseError, match="uv.lock"):
+        build_inventory(scan_root)
+    assert_named_exit(run_cli(scan_root, snapshot_factory))
+
+
+def test_poetry_deep_toml_array_raises(scan_root, snapshot_factory):
+    (scan_root / "poetry.lock").write_text("x = " + "[" * N + "]" * N + "\n")
+    with pytest.raises(LockfileParseError, match="poetry.lock"):
+        build_inventory(scan_root)
+    assert_named_exit(run_cli(scan_root, snapshot_factory))
+
+
+def test_uv_deep_edge_marker_raises(scan_root):
+    (scan_root / "uv.lock").write_text(
+        'version = 1\n[[package]]\nname = "app"\nversion = "0.1"\nsource = {virtual = "."}\n'
+        f'dependencies = [{{name = "foo", marker = "{DEEP_MARKER}"}}]\n'
+        '[[package]]\nname = "foo"\nversion = "1.0"\nsource = {registry = "https://pypi.org/simple"}\n'
+    )
+    with pytest.raises(LockfileParseError, match="uv.lock"):
+        build_inventory(scan_root)
+
+
+def test_snapshot_deep_json_raises_snapshot_error(snapshot_factory):
+    from reachability.scan.advisories import SnapshotError, load_snapshot  # noqa: PLC0415
+
+    path, sha = snapshot_factory([("a.json", "[" * 100000 + "]" * 100000)])
+    with pytest.raises(SnapshotError):
+        load_snapshot(path, sha)

@@ -138,7 +138,10 @@ def marker_applies(marker: Marker | None) -> tuple[bool, tuple[str, ...]]:
     """Evaluate `marker` for TARGET_ENV. Unmapped keys keep the entry, with a note."""
     if marker is None:
         return True, ()
-    unmapped = sorted(_marker_variables(marker) - _MARKER_KEYS)
+    try:
+        unmapped = sorted(_marker_variables(marker) - _MARKER_KEYS)
+    except RecursionError as exc:
+        raise LockfileParseError("marker is nested too deeply") from exc
     if unmapped:
         return True, (f"marker uses unmapped key {unmapped[0]}; kept",)
     env = dict(MARKER_ENV, extra="")
@@ -146,6 +149,8 @@ def marker_applies(marker: Marker | None) -> tuple[bool, tuple[str, ...]]:
         return marker.evaluate(env), ()
     except (UndefinedComparison, UndefinedEnvironmentName, ValueError) as exc:
         return True, (f"marker could not be evaluated ({exc}); kept",)
+    except RecursionError as exc:
+        raise LockfileParseError("marker is nested too deeply") from exc
 
 
 _COMMENT_LINE = re.compile(r"\s*#")
@@ -254,6 +259,8 @@ def _parse_requirement_line(line: str, rel: str, lineno: int) -> InventoryEntry:
         return _unsupported(rel, lineno, line, "URL, VCS or path requirement")
     try:
         req = Requirement(req_text)
+    except RecursionError as exc:
+        raise LockfileParseError(f"{rel}:{lineno}: requirement is nested too deeply") from exc
     except InvalidRequirement as exc:
         salvage = _EQ_PIN.match(req_text)
         if salvage:
@@ -455,6 +462,8 @@ def _load_toml(path: Path, rel: str) -> dict:
     text = _read_text(path, rel)
     try:
         return tomllib.loads(text)
+    except RecursionError as exc:
+        raise LockfileParseError(f"cannot parse {rel} as TOML: nested too deeply") from exc
     except tomllib.TOMLDecodeError as exc:
         raise LockfileParseError(f"cannot parse {rel} as TOML: {exc}") from exc
 
@@ -462,6 +471,8 @@ def _load_toml(path: Path, rel: str) -> dict:
 def _parse_marker_string(text: str, rel: str) -> Marker:
     try:
         return Marker(text)
+    except RecursionError as exc:
+        raise LockfileParseError(f"invalid marker in {rel}: nested too deeply") from exc
     except InvalidMarker as exc:
         raise LockfileParseError(f"invalid marker in {rel}: {text!r}: {exc}") from exc
 
