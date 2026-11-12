@@ -31,6 +31,8 @@ POETRY_BAD = {
     "version_int": "[[package]]\nname = 'a'\nversion = 1\n",
     "source_str": "[[package]]\nname = 'a'\nversion = '1'\nsource = 'git'\n",
     "groups_str": "[[package]]\nname = 'a'\nversion = '1'\ngroups = 'main'\n",
+    "source_type_list": "[[package]]\nname = 'a'\nversion = '1'\n[package.source]\ntype = ['x']\n",
+    "source_type_inline_table": "[[package]]\nname = 'a'\nversion = '1'\nsource = {type = {a = 1}}\n",
     "markers_int": "[[package]]\nname = 'a'\nversion = '1'\nmarkers = 3\n",
     "markers_table_int": "[[package]]\nname = 'a'\nversion = '1'\nmarkers = {main = 3}\n",
 }

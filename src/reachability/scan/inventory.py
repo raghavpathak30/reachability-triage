@@ -504,6 +504,9 @@ def _check_poetry_shapes(packages: list[dict], rel: str) -> None:
         where = f"package #{i + 1}"
         if "groups" in pkg:
             _check_str_list(rel, f"{where} field 'groups'", pkg["groups"])
+        source = pkg.get("source")
+        if isinstance(source, dict) and "type" in source and not isinstance(source["type"], str):
+            raise _shape_error(rel, f"{where} field 'source.type'", "a string", source["type"])
         if "category" in pkg and not isinstance(pkg["category"], str):
             raise _shape_error(rel, f"{where} field 'category'", "a string", pkg["category"])
         markers = pkg.get("markers")
