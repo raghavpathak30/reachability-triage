@@ -105,12 +105,14 @@ ScanOut = {
   inventory: {source_file|null, hint|null,       # hint per D2 when no lockfile / unpinned lines
               closure_complete: bool, closure_gaps: [Gap],
               packages: [{name, version|null, status, advisories_any_version?: int}]},
-  summary: {verdicts: {reachable, reachable_only_from_tests, not_reachable: 0, unknown},
+  summary: {lead: str|null,                       # unpinned lead line (§2.6); first line of the summary when set
+            unpinned: {packages: N, advisories_any_version: M},
+            verdicts: {reachable, reachable_only_from_tests, not_reachable: 0, unknown},
             evidence: {path_proven, module_imported_by_app, package_installed_not_imported, no_target_symbol},
             reasons: {CODE: n}},
   findings: [Finding]
 }
-MaliciousEntry = {advisory_id, aliases[], dist, version, summary, signal: mal_id|mal_alias|summary_prefix|cwe_506}
+MaliciousEntry = {advisory_id, aliases[], dist, version, summary, signal: mal_prefix|cwe_506}
 Finding = {advisory_id, aliases[], dist, version, severity_as_given|null,
            verdict, evidence_level, reason_code|null, sentence,
            evidence: PathEvidence | ImportEvidence | NotImportedEvidence | NoTargetEvidence,
@@ -180,6 +182,22 @@ The levels are total and mutually exclusive: every matched, non-malicious
 advisory on a pinned dist gets exactly one. Unpinned dists get no findings at
 all. They appear in the inventory with `status: unpinned` and
 `advisories_any_version` (D2).
+
+**Summary rule for unpinned packages.** Unpinned packages stay finding-free.
+But when N ≥ 1, the scan summary **leads** with exactly this line, before the
+malicious list and the verdict counts:
+
+> "N packages are not pinned; they have M known advisories (any version). Pin
+> them to check."
+
+The terms are:
+- **N** = the number of inventory rows with `status: unpinned`.
+- **M** = the number of distinct non-withdrawn, non-malicious advisory groups
+  in the snapshot whose `affected[].package.name` (PEP 503-normalised) equals
+  any of those packages, regardless of version.
+
+It is returned as `summary.lead`, with `summary.unpinned = {packages: N,
+advisories_any_version: M}`. When N = 0, `summary.lead` is `null`.
 
 ### 2.4 Target confidence
 
@@ -311,19 +329,31 @@ CI. Scans do not call `run_triage_loop_langgraph`.
 ### 2.10 Malicious packages (D5)
 
 A matched record is classified as malicious, and moved to `ScanOut.malicious`,
-if any of these holds:
-- its id is `MAL-*`;
-- an alias is `MAL-*`;
-- its summary starts with "Malicious code in";
-- its `database_specific.cwe_ids` contains CWE-506.
+by structured fields only. There is **no keyword or summary-text matching.**
+- **Primary signal (`mal_prefix`):** the record's OSV id, or any of its
+  `aliases`, starts with `MAL-`. That is the OpenSSF malicious-packages
+  database prefix.
+- **Secondary signal (`cwe_506`):** otherwise,
+  `database_specific.cwe_ids` contains `CWE-506` (embedded malicious code).
 
-Measured over the export: 12,020 `MAL-*` records, plus 42 non-MAL groups by
-alias or summary, plus 9 by CWE-506 (R §0.6).
+Measured on the pinned snapshot (sha256 `c7ea4e15…08c`, 26,863 records):
+
+| Signal | Records | Non-withdrawn |
+|---|---|---|
+| id starts `MAL-` | 12,020 | 11,995 |
+| id not `MAL-`, an alias starts `MAL-` | 42 | 42 |
+| neither of the above, CWE-506 | 8 | 8 |
+
+Command: `cd /tmp/app-scan-research/osv && sha256sum PyPI-all.zip && python3 -I -`
+with a script that reads every member of the zip and classifies each record by
+the first matching rule above (R §3.3).
 
 These entries have no verdict and no evidence level. The UI and summary show
-them first. Malware records with none of these signals (e.g. `PYSEC-2025-7`)
-are missed and fall through to a normal finding. That is a known, documented
-gap; the normal finding never claims safety.
+them first, after the unpinned lead line when there is one. Malware records
+carrying neither signal (e.g. `PYSEC-2025-7`) are missed and fall through to a
+normal finding. Dropping the earlier "Malicious code in" summary rule loses
+**1** advisory group that has the summary but no `MAL-` alias (R §3.3). That
+is a known, documented gap; the normal finding never claims safety.
 
 ## 3. Units
 
@@ -579,7 +609,8 @@ from snapshot sha256 `c7ea4e15b83912960fc5cbd42c6003dd630e422ec4dfbfc4ed19445573
                           "true_symbols": ["module:qualname", ..]?}},
  "inventory":  {"<dist>": {"version": "..."|null, "status": "..."}},
  "closure_complete": true|false,
- "malicious": ["<id>", ..]}
+ "malicious": ["<id>", ..],
+ "summary_lead": "<exact expected line>"|null}
 ```
 Synthetic advisories, used where no real advisory exists for a trap dist, live
 in `tests/fixtures/app_scan/advisories/synthetic/`. Their ids start
@@ -614,6 +645,7 @@ in `tests/fixtures/app_scan/advisories/synthetic/`. Their ids start
 | T7 | symlinked app file | an app file that is a symlink | skipped, `Gap{skipped_symlink}`, `closure_complete: false` |
 | T8 | property read (R §5.3) | Flask view reads `request.form`, GHSA-q34m-jh98-gwm2 on Werkzeug 3.0.5 | verdict {unknown, reachable}; evidence {module_imported_by_app, path_proven}; reachable only with a path ending in `true_symbols` = werkzeug form-parsing functions changed in 3.0.5→3.0.6 (listed by the A4 plan from the diff, before any A6 run) |
 | T9 | inventory | `requirements.txt` with one unpinned line, one `-e` line, `--hash` lines, and a marker false for `target_env` | statuses `unpinned`, `unsupported`, `pinned`, `marker_skipped`; hint present; no findings for the unpinned dist |
+| T10 | unpinned summary lead | `requirements.txt` with `jinja2` and `werkzeug` unpinned (no `==`) plus one pinned dist; reference snapshot | no findings for either unpinned dist. `summary.unpinned.packages` = 2. `summary.lead` = "2 packages are not pinned; they have M known advisories (any version). Pin them to check.", where M is the count of distinct non-withdrawn, non-malicious advisory groups for jinja2 ∪ werkzeug in the reference snapshot. The A1a plan computes M with a recorded command and writes it into `label.json` before any run. `summary.lead` is the first line of the CLI summary output |
 
 **Decision rules:**
 - **G1 (hard):** zero `not_reachable` in any finding on any fixture, on either
@@ -631,6 +663,8 @@ in `tests/fixtures/app_scan/advisories/synthetic/`. Their ids start
 - **G5 (hard):** inventory exact match on every fixture.
 - **G6 (hard):** zero network access in the miniature lane.
 - **G7 (hard):** malicious rows are in `malicious`, and nowhere in `findings`.
+- **G8 (hard):** `summary.lead` equals the label's `summary_lead` exactly (T10,
+  T9, and `null` on every fully pinned fixture).
 - **If G3 fails:** the phase does not close. Raghav decides between fixing and
   re-running (a new dated run, both runs reported) and amending E1.
 - Budget exhaustion never counts as a pass for any row (DECISIONS §13).
@@ -646,7 +680,8 @@ calls" to the rule above (critique M1/M3), before any run, on 2026-11-12.
 | D2 | **A lockfile or fully pinned requirements file is required.** Unpinned → status `unpinned`, never a guessed version. A user-facing hint tells the user to generate a lockfile locally (§2.6). |
 | D3 | **Never issue `not_reachable` in this phase.** |
 | D4 | **Pinned OSV snapshot only** for A1–A7. GitHub fix-commit fetch only in A8 (off by default). The refresh command is documented (§2.9). The snapshot date and sha256 are in every scan result. |
-| D5 | **Malicious-package advisories are a separate category, shown first, verdict-independent** (§2.10). |
+| D5 | **Malicious-package advisories are a separate category, shown first, verdict-independent** (§2.10). Primary signal: the OSV id or an alias starts `MAL-` (OpenSSF malicious-packages). Secondary: CWE-506. No keyword matching (amended 2026-11-12). |
+| D2a | **Unpinned packages stay finding-free, but the summary leads with** "N packages are not pinned; they have M known advisories (any version). Pin them to check." (§2.3, T10, G8; amended 2026-11-12). |
 
 ## 6. Risks
 
@@ -668,8 +703,9 @@ calls" to the rule above (critique M1/M3), before any run, on 2026-11-12.
 - **Snapshot staleness.** Every result carries the date (D4).
 - **The `named` heuristic** can miss names written in prose. A miss only lowers
   confidence; it never creates a target, because code form is required.
-- **The malicious classifier** misses unsignalled records (§2.10); they fall
-  through to normal findings.
+- **The malicious classifier** uses structured fields only (`MAL-` prefix,
+  then CWE-506). It misses unsignalled records (§2.10), including 1 group found
+  only by the dropped summary-text rule; these fall through to normal findings.
 - **Cost.** 13.2 s to index the FastAPI combined tree; 3.9–4.9 s per query
   before the D3 cache (R §5.3). A5's gate sets ≤ 1.0 s.
 - **Licence.** CC-BY-4.0 attribution for the committed advisory subset.

@@ -374,14 +374,37 @@ rows from real records, including the pre-release, `last_affected` and
   `[measured: scripts/osv_stats.py]`. The proposal is one finding per group,
   with the representative GHSA id preferred and every alias listed.
 - `withdrawn` records (607) are excluded `[measured]`.
-- **Malicious-package records** are not reachability questions. These are
-  `MAL-*` ids, records with a `MAL-*` alias (41 groups), records whose summary
-  starts "Malicious code in" (38, overlapping), and records with CWE-506 (9)
-  `[measured]`. They would get their own verdict-free category, with wording
-  "this package version is known to be malicious; installing it is the
-  compromise". Records with no structural signal (e.g. `PYSEC-2025-7`) are not
-  detected. They fall through to a normal finding, which is visibly wrong but
-  never claims safety. This was decided in spec D5.
+- **Malicious-package records** are not reachability questions. Per spec D5
+  (amended 2026-11-12), the classifier uses structured fields only.
+  - **Primary signal:** the OSV id or an alias starts `MAL-`, the OpenSSF
+    malicious-packages prefix.
+  - **Secondary signal:** CWE-506 in `database_specific.cwe_ids`.
+  - **No keyword matching.**
+
+  Measured on the pinned snapshot, per record, first matching rule wins
+  `[measured]`:
+
+  | Rule | Records | Non-withdrawn |
+  |---|---|---|
+  | id starts `MAL-` | 12,020 | 11,995 |
+  | id not `MAL-`, an alias starts `MAL-` | 42 | 42 |
+  | neither, CWE-506 | 8 | 8 |
+  | total of 26,863 records | 12,070 | |
+
+  Command:
+  ```
+  cd /tmp/app-scan-research/osv && sha256sum PyPI-all.zip    # c7ea4e15…08c
+  python3 -I - <<'EOF'
+  import zipfile, json
+  z = zipfile.ZipFile('PyPI-all.zip')
+  # for each member: json.loads; MAL- id? else MAL- alias? else 'CWE-506' in database_specific.cwe_ids?
+  # tally each bucket, and each bucket's records without a 'withdrawn' field
+  EOF
+  ```
+  At group level (R §0.6), one advisory group has a "Malicious code in" summary
+  but no `MAL-` alias; dropping keyword matching loses it. Records with no
+  structural signal (e.g. `PYSEC-2025-7`) are not detected. They fall through to
+  a normal finding, which is visibly wrong but never claims safety.
 
 ### 3.4 Network change
 
@@ -953,6 +976,11 @@ changes the advisory verdict, because steps 3–4 use the full module set.
   be malicious. Remove it; reachability does not apply."*
 
 ### 7.4 App summary
+
+> Amended by spec §2.3 (2026-11-12). Unpinned packages produce no findings,
+> but when any exist the summary **leads** with: "N packages are not pinned;
+> they have M known advisories (any version). Pin them to check." Fixture
+> T10 and gate G8 check this.
 
 Counts per advisory verdict. The list is ordered `reachable` first (with
 severity from the record's `severity`/`database_specific.severity`, shown
