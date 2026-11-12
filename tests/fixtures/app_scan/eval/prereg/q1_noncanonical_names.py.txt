@@ -1,0 +1,14 @@
+import sys, zipfile, json, re
+z=zipfile.ZipFile(sys.argv[1])
+n=0
+for name in sorted(z.namelist()):
+    r=json.loads(z.read(name))
+    if 'withdrawn' in r: continue
+    for a in r.get('affected',[]):
+        p=a.get('package',{})
+        if p.get('ecosystem')=='PyPI':
+            raw=p['name']
+            if raw!=re.sub(r'[-_.]+','-',raw).lower():
+                n+=1
+                if n<=12: print(r['id'],raw,len(r['affected']),'versions',len(a.get('versions') or []),[x.get('type') for x in a.get('ranges',[])])
+print(n)

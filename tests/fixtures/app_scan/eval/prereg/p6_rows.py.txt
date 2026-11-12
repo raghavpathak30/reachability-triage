@@ -1,0 +1,433 @@
+import json
+import re
+import sys
+import zipfile
+
+from packaging.version import InvalidVersion, Version
+
+
+def canon(name):
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def load(path):
+    z = zipfile.ZipFile(path)
+    recs = {}
+    for n in sorted(z.namelist()):
+        if n.endswith(".json"):
+            recs[n[:-5]] = json.loads(z.read(n))
+    return recs
+
+
+def valid(v):
+    try:
+        Version(v)
+        return True
+    except InvalidVersion:
+        return False
+
+
+def pypi_affected(rec):
+    out = []
+    for i, a in enumerate(rec.get("affected", [])):
+        p = a.get("package", {})
+        if p.get("ecosystem") == "PyPI":
+            out.append((i, p.get("name", ""), a))
+    return out
+
+
+def groups(recs):
+    """union-find over id + aliases of non-withdrawn records; never `related`."""
+    parent = {}
+
+    def find(x):
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[max(ra, rb)] = min(ra, rb)
+
+    live = {k: r for k, r in recs.items() if "withdrawn" not in r}
+    for k, r in live.items():
+        find(r["id"])
+        for al in r.get("aliases", []):
+            union(r["id"], al)
+    members = {}
+    for k, r in live.items():
+        members.setdefault(find(r["id"]), []).append(k)
+    return live, members
+
+
+def is_malicious(live, member_ids):
+    for k in member_ids:
+        r = live[k]
+        names = [r["id"]] + list(r.get("aliases", []))
+        if any(n.startswith("MAL-") for n in names):
+            return True
+        if "CWE-506" in (r.get("database_specific") or {}).get("cwe_ids", []):
+            return True
+    return False
+
+
+def rep(live, member_ids):
+    names = set()
+    for k in member_ids:
+        names.add(live[k]["id"])
+        names.update(live[k].get("aliases", []))
+    ghsa = sorted(n for n in names if n.startswith("GHSA-"))
+    return ghsa[0] if ghsa else sorted(names)[0]
+
+
+def entries_of(rec):
+    return pypi_affected(rec)
+
+
+def mal_like(rec):
+    names = [rec["id"]] + list(rec.get("aliases", []))
+    return any(n.startswith("MAL-") for n in names) or "CWE-506" in (rec.get("database_specific") or {}).get("cwe_ids", [])
+
+
+def eco(a):
+    return [rg for rg in a.get("ranges", []) if rg.get("type") == "ECOSYSTEM"]
+
+
+def events(rg):
+    return rg.get("events", [])
+
+
+def lkavr(a):
+    return (a.get("database_specific") or {}).get("last_known_affected_version_range")
+
+
+def show(row, rec, idx, installed, note=""):
+    a = rec["affected"][idx]
+    vs = a.get("versions") or []
+    print("ROW", row)
+    print("  record", rec["id"], "| aliases", rec.get("aliases", []), "| withdrawn", rec.get("withdrawn"))
+    print("  cwe_ids", (rec.get("database_specific") or {}).get("cwe_ids", []))
+    print("  package.name", a["package"]["name"], "| canonical", canon(a["package"]["name"]))
+    print("  installed", repr(installed), "| installed in versions list:", installed in vs)
+    print("  versions count", len(vs), "first5", vs[:5], "last2", vs[-2:])
+    for rg in a.get("ranges", []):
+        print("  range", rg.get("type"), json.dumps(rg.get("events")))
+    print("  last_known_affected_version_range", lkavr(a))
+    print("  n_pypi_affected_entries_in_record", len(entries_of(rec)), "n_affected_total", len(rec["affected"]))
+    if note:
+        print("  note", note)
+
+
+def first(recs, pred, skip=()):
+    for k in sorted(recs):
+        r = recs[k]
+        if k in skip:
+            continue
+        res = pred(r)
+        if res is not None:
+            return r, res
+    return None, None
+
+
+def main(path):
+    recs = load(path)
+    live = {k: r for k, r in recs.items() if "withdrawn" not in r}
+    wd = {k: r for k, r in recs.items() if "withdrawn" in r}
+    used = set()
+
+    def single_pypi(r):
+        pa = entries_of(r)
+        return pa[0] if len(pa) == 1 and len(r["affected"]) == 1 else None
+
+    # R1
+    def r1(r):
+        if mal_like(r):
+            return None
+        pa = single_pypi(r)
+        if not pa:
+            return None
+        i, raw, a = pa
+        rgs = eco(a)
+        if len(rgs) != 1 or len(a.get("ranges", [])) != 1:
+            return None
+        ev = events(rgs[0])
+        if len(ev) == 2 and ev[0] == {"introduced": "0"} and "fixed" in ev[1] and valid(ev[1]["fixed"]) and Version(ev[1]["fixed"]) > Version("0.0.0rc1"):
+            return i
+    r, i = first(live, r1)
+    show("R1 prerelease installed vs introduced 0", r, i, "0.0.0rc1"); used.add(r["id"])
+
+    # R2/R3
+    def r23(r):
+        if mal_like(r):
+            return None
+        pa = single_pypi(r)
+        if not pa:
+            return None
+        i, raw, a = pa
+        rgs = eco(a)
+        if a.get("versions") or len(rgs) != 1 or len(a.get("ranges", [])) != 1 or lkavr(a):
+            return None
+        ev = events(rgs[0])
+        if len(ev) == 2 and "introduced" in ev[0] and "last_affected" in ev[1] and valid(ev[1]["last_affected"]) and (ev[0]["introduced"] == "0" or valid(ev[0]["introduced"])):
+            return i
+    r, i = first(live, r23)
+    L = r["affected"][i]["ranges"][0]["events"][1]["last_affected"]
+    show("R2 last_affected boundary (inclusive)", r, i, L)
+    show("R3 one above last_affected", r, i, L + ".post1"); used.add(r["id"])
+
+    # R4
+    def r4(r):
+        if mal_like(r):
+            return None
+        pa = single_pypi(r)
+        if not pa:
+            return None
+        i, raw, a = pa
+        rgs = eco(a)
+        if len(rgs) != 1 or len(a.get("ranges", [])) != 1 or lkavr(a):
+            return None
+        ev = events(rgs[0])
+        if len(ev) == 2 and "introduced" in ev[0] and "fixed" in ev[1] and valid(ev[1]["fixed"]) and ev[1]["fixed"] not in (a.get("versions") or []):
+            return i
+    r, i = first(live, r4, used)
+    F = r["affected"][i]["ranges"][0]["events"][1]["fixed"]
+    show("R4 fixed exclusive at the boundary", r, i, F); used.add(r["id"])
+
+    # R5
+    def r5(r):
+        if mal_like(r):
+            return None
+        pa = single_pypi(r)
+        if not pa:
+            return None
+        i, raw, a = pa
+        rgs = eco(a)
+        if a.get("versions") or len(rgs) != 1 or len(a.get("ranges", [])) != 1 or lkavr(a):
+            return None
+        ev = events(rgs[0])
+        if len(ev) == 2 and "introduced" in ev[0] and "fixed" in ev[1] and valid(ev[1]["fixed"]):
+            intro = ev[0]["introduced"]
+            inst = "0.0.1" if intro == "0" else intro
+            if valid(inst) and Version(inst) < Version(ev[1]["fixed"]):
+                return (i, inst)
+    r, res = first(live, r5, used)
+    show("R5 empty versions with a range, installed inside", r, res[0], res[1]); used.add(r["id"])
+
+    # R6
+    def r6(r):
+        if mal_like(r):
+            return None
+        pa = single_pypi(r)
+        if not pa:
+            return None
+        i, raw, a = pa
+        vs = a.get("versions") or []
+        if vs and not a.get("ranges") and not lkavr(a) and valid(vs[0]):
+            return i
+    r, i = first(live, r6, used)
+    show("R6 versions only, no range", r, i, r["affected"][i]["versions"][0]); used.add(r["id"])
+
+    # R7
+    pat = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+!-]*$")
+
+    def r7(r):
+        if mal_like(r):
+            return None
+        pa = single_pypi(r)
+        if not pa:
+            return None
+        i, raw, a = pa
+        for v in a.get("versions") or []:
+            if not valid(v) and pat.match(v):
+                return (i, v)
+    r, res = first(live, r7, used)
+    show("R7 non-PEP440 installed in versions", r, res[0], res[1]); used.add(r["id"])
+
+    # R8
+    dist_users = {}
+    for k, rr in live.items():
+        for _, n, _ in entries_of(rr):
+            dist_users.setdefault(canon(n), set()).add(k)
+
+    def r8(r):
+        pa = single_pypi(r)
+        if not pa:
+            return None
+        i, raw, a = pa
+        vs = a.get("versions") or []
+        if vs and valid(vs[0]) and not dist_users.get(canon(raw)):
+            return i
+    r, i = first(wd, r8)
+    show("R8 withdrawn record", r, i, r["affected"][i]["versions"][0], "no non-withdrawn record in the snapshot names this dist")
+
+    # R9
+    alias_to_ids = {}
+    for k, rr in live.items():
+        for al in [rr["id"]] + list(rr.get("aliases", [])):
+            alias_to_ids.setdefault(al, set()).add(k)
+
+    def r9(r):
+        if mal_like(r):
+            return None
+        pa = single_pypi(r)
+        if not pa:
+            return None
+        i, raw, a = pa
+        vs = a.get("versions") or []
+        if not vs or a.get("ranges") or lkavr(a):
+            return None
+        for al in r.get("aliases", []):
+            for other in sorted(alias_to_ids.get(al, ())):
+                if other == r["id"] or other in used:
+                    continue
+                o = live[other]
+                if mal_like(o):
+                    continue
+                opa = single_pypi(o)
+                if not opa or canon(opa[1]) != canon(raw):
+                    continue
+                common = [v for v in vs if v in (opa[2].get("versions") or []) and valid(v)]
+                if common and not opa[2].get("ranges") and not lkavr(opa[2]):
+                    return (i, other, opa[0], common[0])
+    r, res = first(live, r9, used)
+    o = live[res[1]]
+    show("R9 alias group, record A", r, res[0], res[3])
+    show("R9 alias group, record B", o, res[2], res[3]); used.add(r["id"]); used.add(o["id"])
+
+    # R10
+    def r10(r):
+        if r["id"].startswith("MAL-"):
+            return None
+        if not any(a.startswith("MAL-") for a in r.get("aliases", [])):
+            return None
+        for i, raw, a in entries_of(r):
+            vs = a.get("versions") or []
+            if vs and valid(vs[0]):
+                return (i, vs[0])
+    r, res = first(live, r10, used)
+    show("R10 MAL- alias", r, res[0], res[1]); used.add(r["id"])
+
+    # R11
+    def r11(r):
+        names = [r["id"]] + list(r.get("aliases", []))
+        if any(n.startswith("MAL-") for n in names):
+            return None
+        if "CWE-506" not in (r.get("database_specific") or {}).get("cwe_ids", []):
+            return None
+        for i, raw, a in entries_of(r):
+            vs = a.get("versions") or []
+            if vs and valid(vs[0]):
+                return (i, vs[0])
+    r, res = first(live, r11, used)
+    show("R11 CWE-506 only", r, res[0], res[1]); used.add(r["id"])
+
+    # R12
+    def r12(r):
+        if mal_like(r):
+            return None
+        pa = single_pypi(r)
+        if not pa:
+            return None
+        i, raw, a = pa
+        vs = a.get("versions") or []
+        if raw == "jinja2" and vs and valid(vs[0]):
+            return (i, vs[0])
+    r, res = first(live, r12, used)
+    print("# R12 NOTE: the snapshot has no PyPI record whose raw name differs from its canonical form (see q-check in plan.md); the requirement is written as Jinja2==<installed> against the record name jinja2.")
+    show("R12 name normalisation (requirement spelled Jinja2)", r, res[0], res[1]); used.add(r["id"])
+
+    # R13
+    def r13(r):
+        if mal_like(r):
+            return None
+        pa = single_pypi(r)
+        if not pa:
+            return None
+        i, raw, a = pa
+        rgs = eco(a)
+        if len(rgs) != 1:
+            return None
+        ev = events(rgs[0])
+        bad = [e for e in ev for k2, v2 in e.items() if k2 in ("introduced", "fixed", "last_affected", "limit") and v2 != "0" and not valid(v2)]
+        if bad and "introduced" in ev[0]:
+            return i
+    r, i = first(live, r13, used)
+    intro = r["affected"][i]["ranges"][0]["events"][0]["introduced"]
+    show("R13 unparseable bound", r, i, "0.0.1" if intro == "0" else intro); used.add(r["id"])
+
+    # R14
+    def r14(r):
+        if mal_like(r):
+            return None
+        pa = single_pypi(r)
+        if not pa:
+            return None
+        i, raw, a = pa
+        lk = lkavr(a)
+        if not lk or a.get("versions"):
+            return None
+        m = re.match(r"^<=\s*(\S+)$", lk)
+        if m and valid(m.group(1)):
+            return (i, m.group(1))
+    r, res = first(live, r14, used)
+    print("# R14 NOTE: in this snapshot every record with last_known_affected_version_range also has an ECOSYSTEM range (survey q2 in plan.md), so a real record cannot isolate lkavr as the only reason to match; lkavr-as-union is tested synthetically in step 25a. This row checks that a real lkavr record matches at its bound.")
+    show("R14 lkavr (versions empty), installed at the lkavr bound", r, res[0], res[1]); used.add(r["id"])
+
+    # R15
+    def r15(r):
+        if mal_like(r):
+            return None
+        pa = single_pypi(r)
+        if not pa:
+            return None
+        i, raw, a = pa
+        types = [rg.get("type") for rg in a.get("ranges", [])]
+        vs = a.get("versions") or []
+        if ("GIT" in types or "SEMVER" in types) and vs and valid(vs[0]):
+            return (i, vs[0])
+    r, res = first(live, r15, used)
+    show("R15 GIT/SEMVER range ignored", r, res[0], res[1]); used.add(r["id"])
+
+    # R16
+    def r16(r):
+        if mal_like(r):
+            return None
+        pa = single_pypi(r)
+        if not pa:
+            return None
+        i, raw, a = pa
+        rgs = eco(a)
+        if len(rgs) != 1 or lkavr(a) or a.get("versions"):
+            return None
+        ev = events(rgs[0])
+        if len(ev) == 2 and "introduced" in ev[0] and "last_affected" in ev[1] and valid(ev[1]["last_affected"]):
+            return i
+    r, i = first(live, r16, used)
+    show("R16 last_affected only, fixed_in none", r, i, r["affected"][i]["ranges"][0]["events"][1]["last_affected"]); used.add(r["id"])
+
+    # R17
+    def r17(r):
+        if mal_like(r):
+            return None
+        pa = single_pypi(r)
+        if not pa:
+            return None
+        i, raw, a = pa
+        rgs = eco(a)
+        if len(rgs) != 1 or lkavr(a) or a.get("versions"):
+            return None
+        ev = events(rgs[0])
+        fixed = [e["fixed"] for e in ev if "fixed" in e]
+        if len(fixed) == 2 and all(valid(f) for f in fixed) and "introduced" in ev[0]:
+            intro = ev[0]["introduced"]
+            inst = "0.0.1" if intro == "0" else intro
+            if valid(inst) and Version(inst) < Version(fixed[0]) and Version(inst) < Version(fixed[1]):
+                return (i, inst)
+    r, res = first(live, r17, used)
+    show("R17 two fixed events, installed below both", r, res[0], res[1])
+
+
+main(sys.argv[1])
