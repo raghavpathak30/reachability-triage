@@ -221,3 +221,31 @@ def test_local_version_with_range_uses_public_part():
     e = entry(ranges=[[{"introduced": "0"}, {"fixed": "1.0"}]])
     assert em(e, "0.9+cpu").matched is True
     assert em(e, "1.0+cpu").matched is False
+
+
+# SYNTHETIC same-version tie shapes (fix round 1, F1).
+def test_synthetic_introduced_and_fixed_same_version_is_empty_interval():
+    ev = [{"introduced": "1.0"}, {"fixed": "1.0"}]
+    assert m(ev, "1.0")[0] is False
+    assert m(ev, "0.5")[0] is False
+    assert m(ev, "1.5")[0] is False
+
+
+def test_synthetic_introduced_and_last_affected_same_version_is_exactly_that_version():
+    ev = [{"introduced": "1.0"}, {"last_affected": "1.0"}]
+    assert m(ev, "1.0")[0] is True
+    assert m(ev, "1.5")[0] is False
+    assert m(ev, "0.9")[0] is False
+
+
+def test_synthetic_introduced_zero_last_affected_zero():
+    ev = [{"introduced": "0"}, {"last_affected": "0"}]
+    assert m(ev, "0")[0] is True
+    assert m(ev, "0.1")[0] is False
+    assert m(ev, "0.0.0rc1")[0] is True
+
+
+def test_synthetic_back_to_back_fixed_then_introduced_stays_affected():
+    ev = [{"introduced": "0"}, {"fixed": "1.0"}, {"introduced": "1.0"}, {"fixed": "2.0"}]
+    assert m(ev, "1.0")[0] is True
+    assert m(ev, "2.0")[0] is False

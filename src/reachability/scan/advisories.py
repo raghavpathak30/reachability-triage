@@ -96,9 +96,6 @@ def reduce_events(events: object) -> tuple[tuple[str, str], ...]:
     return tuple(out)
 
 
-_RANK = {"fixed": 0, "limit": 0, "last_affected": 0, "introduced": 1}
-
-
 def _parse_bound(value: str) -> Version | None:
     try:
         return Version(value)
@@ -128,17 +125,32 @@ def range_matches(
         parsed.append((bound, kind))
     if not saw_introduced:
         return True, (f"range has no introduced event{where}; matched conservatively",)
-    parsed.sort(key=lambda p: ((0, Version("0")) if p[0] is None else (1, p[0]), _RANK[p[1]]))
+    parsed.sort(key=lambda p: (0, Version("0")) if p[0] is None else (1, p[0]))
     affected = False
-    for bound, kind in parsed:
-        if kind == "introduced":
-            if bound is None or installed >= bound:
-                affected = True
-        elif kind == "last_affected":
-            if installed > bound:
-                affected = False
-        elif installed >= bound:
-            affected = False
+    is_open = False  # structural: an interval is open between an introduced and its terminator
+    i = 0
+    while i < len(parsed):
+        j = i
+        while j < len(parsed) and parsed[j][0] == parsed[i][0]:
+            j += 1
+        group = parsed[i:j]
+        # Open interval: close it before a new one starts here (fixed X, introduced X stays
+        # affected from X). Closed: introduced first, so introduced X + fixed X is empty.
+        terminators = [e for e in group if e[1] != "introduced"]
+        introduced = [e for e in group if e[1] == "introduced"]
+        for bound, kind in (terminators + introduced) if is_open else (introduced + terminators):
+            if kind == "introduced":
+                is_open = True
+                if bound is None or installed >= bound:
+                    affected = True
+            else:
+                is_open = False
+                if kind == "last_affected":
+                    if installed > bound:
+                        affected = False
+                elif installed >= bound:
+                    affected = False
+        i = j
     return affected, ()
 
 
