@@ -1,0 +1,28 @@
+dists_with_M>=1 1658
+M distribution (M: dist count)
+  1 955
+  2 243
+  3 117
+  4 75
+  5 37
+  6 30
+first 15 candidates (M, dist):
+  1 accelerate
+  1 acryl-datahub
+  1 adx-mcp-server
+  1 aegra-api
+  1 ag2
+  1 agent-coderag
+  1 agentos-taskweaver
+  1 agixt
+  1 ai-agents
+  1 ai-flow
+  1 aiir
+  1 aiomysql
+  1 aiosend
+  1 aioxmpp
+  1 airflow-diagrams
+PICK accelerate M 1
+groups ['CVE-2026-69112']
+group CVE-2026-69112 members ['GHSA-4j2p-28q2-5m79', 'PYSEC-2026-3804']
+record_ids_to_copy ['GHSA-4j2p-28q2-5m79', 'PYSEC-2026-3804']

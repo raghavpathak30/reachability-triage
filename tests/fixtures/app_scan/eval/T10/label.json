@@ -1,0 +1,11 @@
+{
+  "advisories": {},
+  "inventory": {
+    "jinja2": {"version": null, "status": "unpinned"},
+    "werkzeug": {"version": null, "status": "unpinned"},
+    "click": {"version": "8.1.7", "status": "pinned"}
+  },
+  "closure_complete": true,
+  "malicious": [],
+  "summary_lead": "2 packages are not pinned; they have 25 known advisories (any version). Pin them to check."
+}

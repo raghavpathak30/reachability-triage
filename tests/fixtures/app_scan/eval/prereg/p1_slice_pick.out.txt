@@ -1,0 +1,6 @@
+id GHSA-9p73-x86v-jw57
+raw_name lollms
+dist lollms
+versions_first_two ['9.6']
+A_matched 9.6
+B_unmatched 9.6.99

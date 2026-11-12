@@ -1,0 +1,183 @@
+import json
+import re
+import sys
+import zipfile
+
+from packaging.version import InvalidVersion, Version
+
+
+def canon(name):
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def load(path):
+    z = zipfile.ZipFile(path)
+    recs = {}
+    for n in sorted(z.namelist()):
+        if n.endswith(".json"):
+            recs[n[:-5]] = json.loads(z.read(n))
+    return recs
+
+
+def valid(v):
+    try:
+        Version(v)
+        return True
+    except InvalidVersion:
+        return False
+
+
+def pypi_affected(rec):
+    out = []
+    for i, a in enumerate(rec.get("affected", [])):
+        p = a.get("package", {})
+        if p.get("ecosystem") == "PyPI":
+            out.append((i, p.get("name", ""), a))
+    return out
+
+
+def groups(recs):
+    """union-find over id + aliases of non-withdrawn records; never `related`."""
+    parent = {}
+
+    def find(x):
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[max(ra, rb)] = min(ra, rb)
+
+    live = {k: r for k, r in recs.items() if "withdrawn" not in r}
+    for k, r in live.items():
+        find(r["id"])
+        for al in r.get("aliases", []):
+            union(r["id"], al)
+    members = {}
+    for k, r in live.items():
+        members.setdefault(find(r["id"]), []).append(k)
+    return live, members
+
+
+def is_malicious(live, member_ids):
+    for k in member_ids:
+        r = live[k]
+        names = [r["id"]] + list(r.get("aliases", []))
+        if any(n.startswith("MAL-") for n in names):
+            return True
+        if "CWE-506" in (r.get("database_specific") or {}).get("cwe_ids", []):
+            return True
+    return False
+
+
+def rep(live, member_ids):
+    names = set()
+    for k in member_ids:
+        names.add(live[k]["id"])
+        names.update(live[k].get("aliases", []))
+    ghsa = sorted(n for n in names if n.startswith("GHSA-"))
+    return ghsa[0] if ghsa else sorted(names)[0]
+
+
+def main(path):
+    from collections import Counter
+
+    recs = load(path)
+    live, members = groups(recs)
+    mal_ids = set()
+    for gid, mem in members.items():
+        if is_malicious(live, mem):
+            mal_ids.update(mem)
+    gitc = semc = bothc = ecoc = 0
+    git_with_eco = git_without_eco = sem_with_eco = sem_without_eco = 0
+    bad_events = []
+    bad_records = set()
+    no_intro = 0
+    bad_versions = 0
+    neither_git_only = neither_empty = 0
+    shapes = Counter()
+    lkavr_total = 0
+    ops_ok = re.compile(r"^\s*(<=|<|>=|>|==)\s*(\S+)\s*$")
+    lkavr_unparseable = 0
+    entries = 0
+    for k in sorted(live):
+        if k in mal_ids:
+            continue
+        r = live[k]
+        for i, raw, a in pypi_affected(r):
+            entries += 1
+            types = [rg.get("type") for rg in a.get("ranges", [])]
+            has_eco = "ECOSYSTEM" in types
+            has_git = "GIT" in types
+            has_sem = "SEMVER" in types
+            if has_git:
+                gitc += 1
+                git_with_eco += has_eco
+                git_without_eco += not has_eco
+            if has_sem:
+                semc += 1
+                sem_with_eco += has_eco
+                sem_without_eco += not has_eco
+            if has_git and has_sem:
+                bothc += 1
+            for rg in a.get("ranges", []):
+                if rg.get("type") != "ECOSYSTEM":
+                    continue
+                evs = rg.get("events", [])
+                if not any("introduced" in e for e in evs):
+                    no_intro += 1
+                for e in evs:
+                    for key, val in e.items():
+                        if key in ("introduced", "fixed", "last_affected", "limit"):
+                            if val != "0" and not valid(val):
+                                bad_events.append((r["id"], key, val))
+                                bad_records.add(r["id"])
+            for v in a.get("versions", []) or []:
+                if not valid(v):
+                    bad_versions += 1
+            if not has_eco and not (a.get("versions") or []):
+                if has_git:
+                    neither_git_only += 1
+                else:
+                    neither_empty += 1
+            ds = a.get("database_specific") or {}
+            lk = ds.get("last_known_affected_version_range")
+            if lk is not None:
+                lkavr_total += 1
+                shapes[re.sub(r"\d+", "N", lk)] += 1
+                for clause in lk.split(","):
+                    m = ops_ok.match(clause)
+                    if not m or not valid(m.group(2)):
+                        lkavr_unparseable += 1
+                        break
+    print("pypi_affected_entries_non_malicious", entries)
+    print("(a) GIT", gitc, "SEMVER", semc, "both", bothc)
+    print("    GIT with ECOSYSTEM", git_with_eco, "GIT without ECOSYSTEM", git_without_eco)
+    print("    SEMVER with ECOSYSTEM", sem_with_eco, "SEMVER without ECOSYSTEM", sem_without_eco)
+    print("(b) unparseable ECOSYSTEM event values", len(bad_events))
+    for x in bad_events[:10]:
+        print("   ", x)
+    print("(c) lkavr entries", lkavr_total, "clause-unparseable entries (own comparator regex)", lkavr_unparseable)
+    for s, c in shapes.most_common(25):
+        print("   ", c, repr(s))
+    print("(d) ECOSYSTEM ranges with no introduced event", no_intro)
+    print("(e) versions items not valid PEP 440", bad_versions)
+    print("(f) entries with neither ECOSYSTEM range nor versions: GIT-only", neither_git_only, "empty", neither_empty)
+    print("(g) distinct records with >=1 unparseable ECOSYSTEM bound", len(bad_records))
+    mixed = 0
+    for gid, mem in members.items():
+        flags = set()
+        for k in mem:
+            r = live[k]
+            ns = [r["id"]] + list(r.get("aliases", []))
+            flags.add(any(n.startswith("MAL-") for n in ns) or "CWE-506" in (r.get("database_specific") or {}).get("cwe_ids", []))
+        if len(flags) == 2:
+            mixed += 1
+    print("(h) groups mixing malicious and non-malicious records", mixed)
+
+
+main(sys.argv[1])

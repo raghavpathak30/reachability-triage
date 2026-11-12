@@ -1,0 +1,12 @@
+{
+  "advisories": {},
+  "inventory": {
+    "accelerate": {"version": null, "status": "unpinned"},
+    "(unnamed line 3)": {"version": null, "status": "unsupported"},
+    "click": {"version": "8.1.7", "status": "pinned"},
+    "pywin32": {"version": "306", "status": "marker_skipped"}
+  },
+  "closure_complete": true,
+  "malicious": [],
+  "summary_lead": "1 packages are not pinned; they have 1 known advisories (any version). Pin them to check."
+}

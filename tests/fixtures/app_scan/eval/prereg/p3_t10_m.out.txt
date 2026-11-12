@@ -1,0 +1,4 @@
+M jinja2 10
+M werkzeug 15
+M union ['jinja2', 'werkzeug'] 25
+lead 2 packages are not pinned; they have 25 known advisories (any version). Pin them to check.

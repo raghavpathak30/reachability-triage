@@ -1,0 +1,7 @@
+records with summary starting 'Malicious code in' (non-withdrawn): 12033
+... of which no record-level structural signal:
+count 0
+distinct groups among them 0
+mixed groups (malicious + non-malicious records):
+   GHSA-w37p-236h-pfx3 [('GHSA-w37p-236h-pfx3', True), ('PYSEC-2026-3973', False), ('PYSEC-2026-508', False)]
+   GHSA-xmpw-2vmm-p4p6 [('GHSA-xmpw-2vmm-p4p6', True), ('PYSEC-2026-206', False)]
