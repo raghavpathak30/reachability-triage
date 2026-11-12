@@ -1,0 +1,10 @@
+{"inventory": {
+  "fastapi": {"version": "0.115.0", "status": "pinned"},
+  "starlette": {"version": "0.38.0", "status": "pinned"},
+  "uvicorn": {"version": "0.30.0", "status": "pinned"},
+  "tzdata": {"version": "2024.1", "status": "marker_skipped"},
+  "gitdep": {"version": "0.1.0", "status": "unsupported"},
+  "wheelless": {"version": null, "status": "unsupported"},
+  "oldpy": {"version": "1.0", "status": "marker_skipped"},
+  "pywin": {"version": "306", "status": "pinned"}
+}}

@@ -1,0 +1,86 @@
+version = 1
+revision = 5
+requires-python = ">=3.13"
+
+[[package]]
+name = "app"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "fastapi", extra = ["standard"] },
+    { name = "tzdata", marker = "sys_platform == 'win32'" },
+    { name = "gitdep" },
+    { name = "wheelless" },
+    { name = "oldpy", marker = "python_full_version < '3.9'" },
+    { name = "pywin", marker = "sys_platform == 'win32'" },
+    { name = "pywin", marker = "sys_platform == 'linux'" },
+]
+
+[package.optional-dependencies]
+extra-only = [
+    { name = "root-opt-only" },
+]
+
+[[package]]
+name = "fastapi"
+version = "0.115.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "starlette" },
+]
+
+[package.optional-dependencies]
+standard = [
+    { name = "uvicorn" },
+]
+other = [
+    { name = "not-requested" },
+]
+
+[[package]]
+name = "starlette"
+version = "0.38.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "app" },
+    { name = "app", extra = ["extra-only"] },
+]
+
+[[package]]
+name = "uvicorn"
+version = "0.30.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "not-requested"
+version = "1.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "root-opt-only"
+version = "1.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "tzdata"
+version = "2024.1"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "gitdep"
+version = "0.1.0"
+source = { git = "https://example.invalid/gitdep.git?rev=main#0123456789abcdef" }
+
+[[package]]
+name = "wheelless"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "oldpy"
+version = "1.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "pywin"
+version = "306"
+source = { registry = "https://pypi.org/simple" }

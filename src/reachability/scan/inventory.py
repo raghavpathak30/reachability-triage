@@ -108,6 +108,7 @@ class Inventory:
     entries: tuple[InventoryEntry, ...]
     skipped: tuple[SkippedItem, ...]
     hint: str | None
+    notes: tuple[str, ...] = ()
 
 
 def _marker_variables(marker: Marker) -> set[str]:
@@ -525,14 +526,108 @@ def find_uv_root(packages: list[dict]) -> dict:
     )
 
 
-def _parse_uv_lock(path: Path, rel: str) -> list[InventoryEntry]:
+_UV_REGISTRY_ONLY = "registry"
+
+
+def _uv_resolve_edge(edge: dict, by_name: dict[str, list[int]], packages: list[dict]) -> int:
+    name = edge.get("name")
+    if not isinstance(name, str):
+        raise UvLockResolutionError(f"uv.lock edge has no name: {edge!r}")
+    cands = by_name.get(canonicalize_name(name), [])
+    if "version" in edge:
+        cands = [i for i in cands if packages[i].get("version") == edge["version"]]
+    if "source" in edge:
+        cands = [i for i in cands if packages[i].get("source") == edge["source"]]
+    if not cands:
+        raise UvLockResolutionError(f"uv.lock edge to {name!r} matches no package in the lock")
+    if len(cands) > 1:
+        raise UvLockResolutionError(
+            f"uv.lock edge to {name!r} is ambiguous: {len(cands)} packages match "
+            "and the edge carries no version or source to choose between them"
+        )
+    return cands[0]
+
+
+def _uv_edges(pkg: dict, extra: str | None) -> list[dict]:
+    if extra is None:
+        edges = pkg.get("dependencies", [])
+    else:
+        edges = (pkg.get("optional-dependencies") or {}).get(extra, [])
+    if not isinstance(edges, list) or not all(isinstance(e, dict) for e in edges):
+        raise UvLockResolutionError(f"uv.lock package {pkg.get('name')!r} has malformed dependency edges")
+    return edges
+
+
+def _parse_uv_lock(path: Path, rel: str) -> tuple[list[InventoryEntry], list[str]]:
     data = _load_toml(path, rel)
     version = data.get("version")
     if version != 1 or isinstance(version, bool):
         raise UvLockFormatError(f"{rel}: unsupported uv.lock version {version!r}; only version 1 is read")
     packages = data.get("package", []) or []
-    find_uv_root(packages)
-    return []
+    root = find_uv_root(packages)
+    root_idx = next(i for i, p in enumerate(packages) if p is root)
+    by_name: dict[str, list[int]] = {}
+    for i, p in enumerate(packages):
+        if isinstance(p.get("name"), str):
+            by_name.setdefault(canonicalize_name(p["name"]), []).append(i)
+
+    true_reached: set[int] = set()
+    false_seen: set[int] = set()
+    marker_notes: dict[int, list[str]] = {}
+    notes: list[str] = []
+    expanded: set[tuple[int, str | None]] = set()
+    stack: list[tuple[int, str | None]] = [(root_idx, None)]
+    while stack:
+        idx, extra = stack.pop()
+        if (idx, extra) in expanded:
+            continue
+        expanded.add((idx, extra))
+        for edge in _uv_edges(packages[idx], extra):
+            target = _uv_resolve_edge(edge, by_name, packages)
+            if target == root_idx:
+                note = f"edge to root member {packages[root_idx].get('name')!r} ignored"
+                if note not in notes:
+                    notes.append(note)
+                continue
+            marker = edge.get("marker")
+            applies, mnotes = (True, ())
+            if marker is not None:
+                applies, mnotes = marker_applies(_parse_marker_string(str(marker), rel))
+            if mnotes:
+                marker_notes.setdefault(target, []).extend(mnotes)
+            if not applies:
+                false_seen.add(target)
+                continue
+            true_reached.add(target)
+            stack.append((target, None))
+            for x in edge.get("extra", []) or []:
+                stack.append((target, str(x)))
+
+    out: list[InventoryEntry] = []
+    for i, pkg in enumerate(packages):
+        if i == root_idx or (i not in true_reached and i not in false_seen):
+            continue
+        status, ver, note = _version_status(pkg.get("version"))
+        entry_notes = [note] if note else []
+        source = pkg.get("source")
+        if not isinstance(source, dict) or _UV_REGISTRY_ONLY not in source:
+            status = Status.UNSUPPORTED
+            entry_notes.append(f"source kind: {_describe_source(source)}")
+        entry_notes.extend(dict.fromkeys(marker_notes.get(i, [])))
+        if i not in true_reached:
+            status = Status.MARKER_SKIPPED
+            entry_notes.append(f"every edge marker is false for {TARGET_ENV}")
+        out.append(
+            InventoryEntry(
+                dist=canonicalize_name(pkg["name"]),
+                version=ver,
+                status=status,
+                source_file=rel,
+                line=None,
+                notes=tuple(entry_notes),
+            )
+        )
+    return out, notes
 
 
 _CANDIDATES = ("uv.lock", "poetry.lock", "requirements.txt")
@@ -574,12 +669,13 @@ def build_inventory(root: Path) -> Inventory:
     lockfile, path, skipped = discover_lockfile(resolved)
     tree = _RequirementsTree(resolved)
     entries: list[InventoryEntry] = []
+    lock_notes: list[str] = []
     if lockfile == "requirements.txt" and path is not None:
         tree.parse(path)
         entries = _apply_taint(tree.entries, tree.taints)
     elif lockfile == "poetry.lock" and path is not None:
         entries = _parse_poetry_lock(path, "poetry.lock")
     elif lockfile == "uv.lock" and path is not None:
-        entries = _parse_uv_lock(path, "uv.lock")
+        entries, lock_notes = _parse_uv_lock(path, "uv.lock")
     hint = HINT if lockfile is None or any(e.status is Status.UNPINNED for e in entries) else None
-    return Inventory(str(resolved), lockfile, tuple(entries), tuple(skipped) + tuple(tree.skipped), hint)
+    return Inventory(str(resolved), lockfile, tuple(entries), tuple(skipped) + tuple(tree.skipped), hint, tuple(lock_notes))
