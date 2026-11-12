@@ -25,6 +25,7 @@ from packaging.version import InvalidVersion, Version
 logger = logging.getLogger(__name__)
 
 MAX_LOCKFILE_BYTES = 5 * 1024 * 1024
+MAX_INCLUDE_DEPTH = 32
 
 HINT = (
     "We need exact versions and never run a resolver. Create a lockfile where you "
@@ -402,6 +403,8 @@ class _RequirementsTree:
 
     def parse(self, path: Path) -> None:
         rel = path.relative_to(self.root).as_posix()
+        if len(self._active) > MAX_INCLUDE_DEPTH:
+            raise LockfileParseError(f"include depth exceeds {MAX_INCLUDE_DEPTH} at {rel}")
         self._active.append(path)
         for lineno, raw in _logical_lines(_read_text(path, rel)):
             line = _INLINE_COMMENT.sub("", raw).strip()
