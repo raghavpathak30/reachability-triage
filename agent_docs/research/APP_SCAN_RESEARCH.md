@@ -1,7 +1,19 @@
 # App scan: research report
 
 Status: research only. Nothing in this file is built. Every design in it is
-**proposed**. Branch `app-scan-research`, from `main` at `2a540d5` (tag v0.3.5).
+**proposed**. Where this report's design sections (§4.5–§4.7, §5.5, §7, §9)
+differ from `agent_docs/PHASE_APP_SCAN.md`, the spec wins. In particular, the
+spec issues **no `not_reachable` at all** in this phase, and it adds an
+evidence level to every finding.
+
+**Corrections (2026-11-12, after the plan critique; the original text is
+replaced, not kept):**
+- The "87 of 2,241 dependency modules eligible for `not_reachable`" figure is
+  **withdrawn**. Under a corrected, corpus-wide rule, **0** modules are eligible
+  in both apps (§0.4, §5.5).
+- The Flask tutorial unresolved-edge figure was miscounted as "101 of 182
+  (55%)". The correct figure is 104 of 177 app edges unresolved (59%), of
+  which 101 (57%) are `unresolved_attribute` (§5.3). Branch `app-scan-research`, from `main` at `2a540d5` (tag v0.3.5).
 Date of all reads and measurements: **2026-11-12**.
 
 **How claims are marked.**
@@ -42,22 +54,44 @@ The measurement environment was Python 3.13.5 (`.venv` and system), pip from
    `unknown`. Most were caused by D1 (a corpus-wide opaque-call check) firing on
    `fastapi/encoders.py:337`, which is reachable from the app's tests
    `[measured, §5.3]`.
-4. **Confident `not_reachable` will be rare under rules that survive (2).** A
-   rule set based on the import graph (§5.5) leaves **0 of 131** dependency
-   modules eligible for flaskr and **87 of 2,241 (3.9%)** for the FastAPI
-   template `[measured]`. The product's value would therefore be (i) `reachable`
-   with a concrete path, and (ii) `unknown` with a precise, graded reason. It
-   would not be a large number of "you can ignore this" answers. The spec has
-   to say this plainly.
+4. **No sound `not_reachable` for a dependency was found on either app.** An
+   import-graph rule (§5.5) first appeared to leave 87 of 2,241 FastAPI-template
+   dependency modules eligible. **That figure is withdrawn.** The eligible set
+   included code that is loaded at runtime without any literal import:
+   - **psycopg**: the template never imports it. It builds the string
+     `"postgresql+psycopg://"` (`backend/app/core/config.py:39`), and SQLAlchemy
+     loads the driver with `__import__(modulepath)`
+     (`sqlalchemy/util/langhelpers.py:351`) `[measured: read both files]`.
+   - **tzdata**: loaded by stdlib `zoneinfo`. This is a known stdlib behaviour,
+     not traced in this loop (**ASSUMPTION**).
+
+   The original rule only tainted the lock-graph dependencies of a dynamic
+   importer. Config-driven imports go the other way: the importer loads
+   whatever the config names. A rule that treats any import-reachable
+   non-literal import as corpus-wide (the D1 precedent) leaves **0 eligible on
+   both apps**, because both have import-reachable dynamic imports (5 modules
+   in flaskr, 24 in FastAPI) `[measured]`. The product's value is therefore:
+   - (i) `reachable` with a concrete path;
+   - (ii) `unknown` with a graded evidence level and reason.
+
+   The spec issues no `not_reachable` in this phase.
 5. **About half of PyPI advisories are about applications, not library APIs.**
    Examples are pyLoad, Open WebUI, MLflow server and Cobbler. In the hand
    labelling, 28 of the 57 non-malware advisories describe a server, tool or UI
    whose vulnerable code runs inside that product's own process `[measured,
    §4.2]`. "Your code reaches it" barely applies to these.
-6. **The OSV PyPI export has malware outside the `MAL-` prefix.** 431 of 7,086
-   advisory groups (6.1%) contain "malicious" in their summary or opening text.
-   Many are `PYSEC-2026-*` "Hades"/Shai-Hulud entries `[measured]`. Reachability
-   is meaningless for these: installing the package is the compromise.
+6. **The OSV PyPI export has malware outside the `MAL-` prefix.** 12,020
+   `MAL-*` records sit in the export. Among the 7,086 live non-MAL groups, 42
+   are identifiable as malware by structure: a `MAL-*` alias (41) or a summary
+   starting "Malicious code in" (38), with overlap. 9 more carry CWE-506.
+   Examples are the `PYSEC-2026-*` "Hades"/Shai-Hulud entries `[measured]`.
+   Some malware records carry none of these signals (e.g. `PYSEC-2025-7`,
+   imblog). Reachability is meaningless for these: installing the package is the
+   compromise.
+
+   *Correction:* an earlier draft said "431 groups (6.1%)". That was a keyword
+   count of "malicious", which also matches ordinary advisories ("malicious
+   input"), so it was wrong.
 7. **A wheel diff finds the fix, but releases bundle fixes.** The single Django
    4.2.13→4.2.14 diff holds the fixes for several advisories. Only 1 of its 8
    changed functions belongs to the urlize advisory `[measured, §4.3]`. Our own
@@ -340,12 +374,14 @@ rows from real records, including the pre-release, `last_affected` and
   `[measured: scripts/osv_stats.py]`. The proposal is one finding per group,
   with the representative GHSA id preferred and every alias listed.
 - `withdrawn` records (607) are excluded `[measured]`.
-- **Malicious-package records** are not reachability questions. `MAL-*` ids
-  plus PYSEC records whose text says "Malicious code" (431 groups mention
-  "malicious") would get their own verdict-free category, `malicious_package`,
-  with wording "this package version is known to be malicious; installing it
-  is the compromise" `[measured]`. This is not one of the four verdicts. The
-  spec has to decide whether it is a finding at all (Decision D5 in the spec).
+- **Malicious-package records** are not reachability questions. These are
+  `MAL-*` ids, records with a `MAL-*` alias (41 groups), records whose summary
+  starts "Malicious code in" (38, overlapping), and records with CWE-506 (9)
+  `[measured]`. They would get their own verdict-free category, with wording
+  "this package version is known to be malicious; installing it is the
+  compromise". Records with no structural signal (e.g. `PYSEC-2025-7`) are not
+  detected. They fall through to a normal finding, which is visibly wrong but
+  never claims safety. This was decided in spec D5.
 
 ### 3.4 Network change
 
@@ -514,14 +550,19 @@ Findings:
   (10/57); native-only fixes (no `.py` changes, empty diff); fixes made by
   bumping a dependency (`Requires-Dist` change, no code change).
 
-**Why the diff is still useful despite poor precision.** The *module set* of
-a pure-python diff is a complete over-approximation of where the fixed code
-lives. That supports a sound **module-level `not_reachable`**: "none of the
-modules this fix touched can be imported by your app" (§5.5). The *symbol set*
+**Why the diff is still useful despite poor precision.** The *symbol set*
 supports `reachable` only where a path to a changed symbol exists, and a path
-to a noise symbol would be a false positive. That is why ranking (c) or
-fix-commit narrowing (b) is needed before a symbol-level `reachable` is
-presented as "the vulnerable function".
+to a noise symbol would be a false positive. That is why the spec grades
+target confidence: *high* means named in the advisory text **and** changed in
+the diff, and *medium* means only one of the two. That is also why ranking (c)
+or fix-commit narrowing (b) only orders candidates.
+
+*Withdrawn claim:* an earlier draft said the diff's module set "supports a sound
+module-level `not_reachable`". It does not. A mixed `.py` + template/native fix
+leaves the vulnerable file outside the module set. The adjacent
+last-affected/first-fixed pair can differ in layout from the installed version.
+And module-level import evidence is defeated by config-driven imports (§0.4).
+The spec issues no `not_reachable`.
 
 ### 4.4 (b) Fix-commit diff
 
@@ -569,13 +610,12 @@ Not measured: real-model runs are Raghav's only, per the task. Design:
 - Failure modes and containment:
   - *Hallucinated symbol*: rejected by the existence check. Recorded as
     `rejected: not found in <dist>==<ver>`.
-  - *Ranking a noise symbol first*: harmless to the safety property, because
-    the advisory-level rollup (§7.2) never lets a ranking turn `unknown` into
-    `not_reachable`.
-  - *Ranking the true symbol out*: the rollup only allows `not_reachable` at
-    module level over the **whole** diff module set, never over the model's
-    subset. A wrong ranking can lose a `reachable` (shown as `unknown`) but
-    cannot create a `not_reachable`.
+  - *Ranking a noise symbol first*: it can change which path is shown first.
+    It cannot create a `not_reachable`, because the spec never issues one.
+  - *Ranking the true symbol out*: the spec queries every candidate up to the
+    budget, ranked or not. A ranking can only reorder.
+  - *Superseded*: the spec forbids free-form model symbols. The model may only
+    rank symbols already in the named ∪ changed sets.
   - *Injection via advisory text*: the existing `sandbox_untrusted_text`
     boundary, plus the existence check.
 - Stub lane: a deterministic stub that ranks by "symbol named in the advisory
@@ -584,15 +624,16 @@ Not measured: real-model runs are Raghav's only, per the task. Design:
 ### 4.6 (d) Module-level fallback
 
 When no symbol set exists (no fixed version, no wheel pair, native-only
-change), the question becomes "is the affected *distribution* (or module)
-importable by the app at all?". Verdicts:
-- Distribution not in the app's import closure under all §5.5 rules →
-  `not_reachable`, scope `distribution`. Plain English: *"Your app never
-  imports `<dist>`, and no installed tool or plugin does either, so this
-  advisory's code is not loaded by your app."*
-- Otherwise → `unknown`, reason code `MODULE_IMPORTED_SYMBOL_UNKNOWN`. Plain
-  English: *"Your app loads `<dist>`, but we could not tell which function the
-  advisory is about, so we cannot say whether your code reaches it."*
+change), the question becomes "is the affected *distribution* imported by the
+app's own code?". Both answers give verdict `unknown`, with different evidence
+levels (spec §2.3):
+- not imported → `package_installed_not_imported`. A host, plugin or
+  config-driven import can still load it (§0.4), so this is **never**
+  `not_reachable`;
+- imported → `no_target_symbol`.
+
+*Withdrawn:* an earlier draft mapped "not imported" to a distribution-scope
+`not_reachable`.
 - **Never** `not_reachable` for a *function* from module-level evidence that
   the module *is* imported. Never `reachable` from module-level evidence alone.
   "The module is imported" is not "the function is called".
@@ -607,9 +648,10 @@ importable by the app at all?". Verdicts:
    symbols.
 4. **(d) module/distribution fallback** when (a) yields nothing usable.
 
-Every path that ends in a wrong `not_reachable` has to pass through the §5.5
-import rules over the **full** diff module set. Nothing in (b) or (c) can
-shrink that set.
+The spec issues no `not_reachable`, so no step here can produce one. The
+remaining wrong-answer risk is a `reachable` whose path ends at a noise
+symbol. Target confidence (spec §2.4) and G3's labelled true symbol (spec §4)
+address that.
 
 ---
 
@@ -654,10 +696,29 @@ then the unmodified `build_repo_index`. Script:
 | Per-query `compute_reachability` | 0.23–0.26 s | 3.9–4.9 s |
 
 App-originating edges by resolution rule `[measured: scripts/app_edge_rules.py]`:
-- flaskr: `unresolved_attribute` 101 of 182 (55%), dependency via
-  `import_alias` 30, app-internal 25, `ext:` 18.
-- FastAPI: `unresolved_attribute` 467 of 765 (61%), app-internal 173,
-  dependency via `import_alias` 75, via `module_attribute` 6.
+- flaskr: 177 app edges. **104 unresolved (`?:` callee) = 59%**:
+  `unresolved_attribute` 101 (57%), `self_unresolved` 2, `unresolved_name` 1.
+  The rest: dependency via `import_alias` 30, app-internal 25, `ext:` 18
+  (corrected; an earlier draft said "101 of 182 (55%)").
+- FastAPI: 765 app edges. **468 unresolved = 61%**: `unresolved_attribute` 467,
+  `self_unresolved` 1. The rest: app-internal 173, dependency via `import_alias`
+  75, via `module_attribute` 6.
+
+Unresolved app edges by receiver shape `[measured: scripts/unresolved_breakdown.py,
+which reads the AST at each edge's file:lineno]`:
+
+| Receiver shape | flaskr (of 104) | FastAPI (of 468) |
+|---|---|---|
+| `local_var.method()`: object of unknown type | 74 (71%) | 231 (49%) |
+| `Imported.attr()` via `from x import Imported` (class or object) | 7 (7%) | 133 (28%) |
+| `imported_module.attr()` via `import x` (re-export gap, e.g. `jwt.decode`) | 2 (2%) | 52 (11%) |
+| `call().method()` | 14 (13%) | 44 (9%) |
+| `a.b.method()` chain | 6 (6%) | 6 (1%) |
+| `self.`/`cls.method()` | 0 | 0 |
+| other | 1 | 2 |
+
+Property reads such as `request.form` are not in this table. They produce no
+edge at all today, so they are invisible in the unresolved rate.
 - Most unresolved edges are method calls on objects of unknown type
   (`session.add`, `db.execute`).
 - One is a **re-export gap**: `jwt.decode(...)` with `import jwt`, where
@@ -729,9 +790,10 @@ from the *app's* `pyproject.toml`, route/CLI/Celery decorators, and app tests
 counted as tests). Library `__main__`, library tests and fixtures, and library
 CLI decorators are never start points.
 
-**What can make a dependency symbol `not_reachable`.** Not the call graph (§5.3
-conclusion 3). Proposed: the **import-closure rule**, using the L1 import
-tables that already exist.
+**Historical (withdrawn): the import-closure `not_reachable` rule.** This
+subsection records what was measured. The rule below is **not** proposed any
+more. The spec issues no `not_reachable` in this phase, and uses import-closure
+facts only as *evidence levels* on `unknown` findings.
 
 > A dependency module *m* may be reported `not_reachable` only if all hold:
 > - **R1** *m* is not in the import closure from the start set, where the start
@@ -761,7 +823,8 @@ scripts/safe_notreach.py, scripts/safe_notreach_strict.py]`:
 | + entry-point roots of all installed dists (23 roots, FastAPI) | – | 1,352 |
 | Distributions with an import-reachable non-literal dynamic import | 3 (flask, jinja2, werkzeug) | 10 (anyio, dns, jinja2, mako, pydantic, pygments, rich, sentry_sdk, sqlalchemy, …) |
 | Distributions tainted after lock-graph propagation | – | 49 of 63 |
-| **Eligible for module-level `not_reachable` (R1+R2)** | **0** | **87 (3.9%)**: alembic 27, tzdata 22, python-dateutil 18, psycopg 6, sqlmodel 5, emails 3, others 1 each |
+| Eligible under R1+R2 with lock-graph taint (**withdrawn rule**) | 0 | 87, withdrawn: includes psycopg (loaded from a URL string, `config.py:39`) and tzdata (loaded by stdlib `zoneinfo`) |
+| **Eligible under a corpus-wide dynamic-import rule (D1 precedent)** | **0** | **0** |
 
 Why entry-point roots matter, measured: without them, `uvicorn`, `httptools`,
 `websockets`, `uvloop` and `watchfiles` are "never imported" by the FastAPI
@@ -771,7 +834,9 @@ app `[measured: never-imported list]`. But the template's container runs `CMD ["
 
 Why `sentry_sdk.integrations.django` is a warning: it is not import-reachable
 by literal imports, but `sentry_sdk.integrations` does import by string
-`[measured: dynamic-import list]`. R2 covers this.
+`[measured: dynamic-import list]`. Lock-graph taint happened to cover this
+case. It does not cover psycopg, whose importer (SQLAlchemy) does not depend on
+it; the dependency runs the other way. That is why the rule is withdrawn.
 
 ### 5.6 Frameworks that hide calls
 
@@ -823,6 +888,15 @@ is used".
 ---
 
 ## 7. Verdicts and output
+
+> **Superseded by spec §2.3–§2.6.** This section is the first draft. The spec
+> replaces its `not_reachable` rows, rollup step 3 and reason codes with:
+> - no `not_reachable` in this phase;
+> - four evidence levels;
+> - target confidence high/medium/none;
+> - a closed reason-code registry.
+>
+> This section is kept as the research record.
 
 ### 7.1 Per (app, advisory, target symbol)
 
@@ -892,6 +966,8 @@ not loaded"*.
 
 ## 8. API and data model (proposal)
 
+> Superseded by spec §2.1–§2.2 (adds `evidence_level`, snapshot fields, and a `malicious` list shown first).
+
 - `POST /v1/scans` body `{"path": "<relative path under the scan mount>"}` →
   202 `ScanOut`, `Location`.
 - `GET /v1/scans/{id}` → `ScanOut = {id, status, error, llm_mode, inventory:
@@ -935,6 +1011,8 @@ scans through `run_triage_loop_langgraph`.**
 ---
 
 ## 9. Evaluation (pre-registered design; the spec freezes it)
+
+> Superseded by spec §4. G3 is now pinned to a labelled true symbol. G1 no longer applies, because no `not_reachable` is issued. Trap and evidence-level fixtures were added. The phase gate runs on real wheels.
 
 Fixture shape: small apps under `tests/fixtures/app_scan/<NN_name>/`. Each has
 an app tree, a `uv.lock` or pinned `requirements.txt`, and a `label.json` with
@@ -997,6 +1075,7 @@ committed). Commands, run from `/tmp/app-scan-research`:
 ```
 curl -sS -o osv/PyPI-all.zip https://osv-vulnerabilities.storage.googleapis.com/PyPI/all.zip   # sha256 c7ea4e15…08c
 python3 -I scripts/osv_stats.py osv/extracted 60                          # §4.1, sample draw
+.venv/bin/python -I scripts/unresolved_breakdown.py combined/fastapi app,tests   # §5.3 receiver shapes
 .venv/bin/python -I scripts/wheel_pair_avail.py                           # §4.2 wheel pairs
 scripts/fetch_pair.sh django 4.2.13 4.2.14                                # §4.3 (and 4 others)
 .venv/bin/python -I scripts/wheel_diff.py wheels/django-4.2.13/x wheels/django-4.2.14/x
