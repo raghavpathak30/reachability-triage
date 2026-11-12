@@ -224,14 +224,38 @@ def _parse_requirement_line(line: str, rel: str, lineno: int) -> InventoryEntry:
     )
 
 
-def _parse_requirements(path: Path, rel: str) -> list[InventoryEntry]:
+_TAINT_OPTIONS = frozenset(
+    {"-i", "--index-url", "--extra-index-url", "--no-index", "-f", "--find-links"}
+)
+
+
+def _parse_requirements(path: Path, rel: str) -> tuple[list[InventoryEntry], list[str]]:
     entries: list[InventoryEntry] = []
+    taints: list[str] = []
     for lineno, raw in _logical_lines(_read_text(path, rel)):
         line = _INLINE_COMMENT.sub("", raw).strip()
         if not line:
             continue
+        if line.startswith("-"):
+            opt = _split_option(line)
+            if opt and opt[0] in _TAINT_OPTIONS:
+                taints.append(f"{opt[0]} at {rel}:{lineno}")
+                continue
         entries.append(_parse_requirement_line(line, rel, lineno))
-    return entries
+    return entries, taints
+
+
+def _apply_taint(entries: list[InventoryEntry], taints: list[str]) -> list[InventoryEntry]:
+    if not taints:
+        return entries
+    out = []
+    for e in entries:
+        if e.dist is None:
+            out.append(e)
+            continue
+        notes = e.notes + (f"original status: {e.status.value}", "package source changed by " + "; ".join(taints))
+        out.append(replace(e, status=Status.UNSUPPORTED, notes=notes))
+    return out
 
 
 def build_inventory(root: Path) -> Inventory:
@@ -241,5 +265,6 @@ def build_inventory(root: Path) -> Inventory:
         raise ScanRootError(f"scan root not found: {root}") from exc
     if not resolved.is_dir():
         raise ScanRootError(f"scan root is not a directory: {root}")
-    entries = _parse_requirements(resolved / "requirements.txt", "requirements.txt")
+    entries, taints = _parse_requirements(resolved / "requirements.txt", "requirements.txt")
+    entries = _apply_taint(entries, taints)
     return Inventory(str(resolved), "requirements.txt", tuple(entries), (), None)

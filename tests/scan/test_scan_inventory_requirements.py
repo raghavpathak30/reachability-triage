@@ -126,3 +126,53 @@ def test_local_version_pinned(scan_root):
 def test_option_value_spellings_for_unsupported_options(scan_root):
     inv = inv_of(scan_root, "-cc.txt\n--constraint=c.txt\n--constraint c.txt\n")
     assert [e.status for e in inv.entries] == [Status.UNSUPPORTED] * 3
+
+
+TAINT_LINES = [
+    "--index-url=https://example.invalid/simple",
+    "--index-url https://example.invalid/simple",
+    "-i https://example.invalid/simple",
+    "-ihttps://example.invalid/simple",
+    "--extra-index-url=https://example.invalid/simple",
+    "--extra-index-url https://example.invalid/simple",
+    "--no-index",
+    "--find-links=https://example.invalid/wheels",
+    "--find-links https://example.invalid/wheels",
+    "-f https://example.invalid/wheels",
+    "-fhttps://example.invalid/wheels",
+]
+
+
+@pytest.mark.parametrize("opt", TAINT_LINES)
+def test_index_option_spellings_all_taint(scan_root, opt):
+    inv = inv_of(scan_root, f"{opt}\nfoo==1.0\nbar>=2\n")
+    assert [(e.dist, e.status) for e in inv.entries] == [
+        ("foo", Status.UNSUPPORTED),
+        ("bar", Status.UNSUPPORTED),
+    ]
+    assert any("original status: pinned" in n for n in inv.entries[0].notes)
+    assert any("original status: unpinned" in n for n in inv.entries[1].notes)
+
+
+def test_taint_applies_to_entries_before_the_option_line(scan_root):
+    inv = inv_of(scan_root, "foo==1.0\n--extra-index-url https://example.invalid/simple\n")
+    assert inv.entries[0].status is Status.UNSUPPORTED
+
+
+def test_tainted_tree_does_not_raise_hint_for_converted_unpinned(scan_root):
+    inv = inv_of(scan_root, "--index-url https://example.invalid/simple\nfoo>=1\n")
+    assert inv.hint is None
+
+
+def test_extra_index_url_marks_all_entries_unsupported_and_keeps_original_status_in_notes(scan_root):
+    inv = inv_of(scan_root, "--extra-index-url https://example.invalid/simple\nfoo==1.0\n")
+    e = inv.entries[0]
+    assert e.status is Status.UNSUPPORTED
+    assert e.version == "1.0"
+    assert any("original status: pinned" in n for n in e.notes)
+
+
+def test_trusted_host_is_unsupported_option_row_no_taint(scan_root):
+    inv = inv_of(scan_root, "--trusted-host example.invalid\nfoo==1.0\n")
+    assert inv.entries[0].dist is None and inv.entries[0].status is Status.UNSUPPORTED
+    assert inv.entries[1].status is Status.PINNED
