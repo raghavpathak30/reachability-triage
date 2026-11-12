@@ -353,8 +353,11 @@ These entries have no verdict and no evidence level. The UI and summary show
 them first, after the unpinned lead line when there is one. Malware records
 carrying neither signal (e.g. `PYSEC-2025-7`) are missed and fall through to a
 normal finding. Dropping the earlier "Malicious code in" summary rule loses
-**1** advisory group that has the summary but no `MAL-` alias (R §3.3). That
-is a known, documented gap; the normal finding never claims safety.
+**0** advisory groups on the reference snapshot (measured in A1a, `DECISIONS.md`
+§27). The research count of 1 (R §3.3) was the group with the summary but no
+`MAL-` alias, `GHSA-xmpw-2vmm-p4p6`; it carries `CWE-506`, so it is still
+classified malicious (`cwe_506`). Malware records carrying neither signal
+remain a known, documented gap; the normal finding never claims safety.
 
 ## 3. Units
 
@@ -420,6 +423,10 @@ Every gate includes:
 - **Gate:** G5 on new fixtures in both formats; the format precedence test
   (uv.lock > pylock.toml > poetry.lock > Pipfile.lock > requirements.txt) with
   several files present.
+- **Amendment (13 Nov 2026, after A1a):** uv workspace roots
+  (`editable = "<subdir>"`): select the workspace member that contains the app;
+  the FastAPI template research app uses this layout and is refused by A1a
+  (`UvLockRootError`). Not implemented.
 
 ### A2: Fetch and import-closure evidence (CLI)
 
@@ -706,8 +713,8 @@ calls" to the rule above (critique M1/M3), before any run, on 2026-11-12.
 - **The `named` heuristic** can miss names written in prose. A miss only lowers
   confidence; it never creates a target, because code form is required.
 - **The malicious classifier** uses structured fields only (`MAL-` prefix,
-  then CWE-506). It misses unsignalled records (§2.10), including 1 group found
-  only by the dropped summary-text rule; these fall through to normal findings.
+  then CWE-506). It misses unsignalled records (§2.10); these fall through to
+  normal findings. The dropped summary-text rule loses 0 groups (measured in A1a).
 - **Cost.** 13.2 s to index the FastAPI combined tree; 3.9–4.9 s per query
   before the D3 cache (R §5.3). A5's gate sets ≤ 1.0 s.
 - **Licence.** CC-BY-4.0 attribution for the committed advisory subset.
@@ -735,7 +742,7 @@ decided at the start of A7 in its own section, not in §26.
 
 ## 8. `DECISIONS.md` §26 (applied as `DECISIONS.md` §26 on 12 Nov 2026 with changes: the L3 exception is not granted yet, the eval rules include G8, and the title drops "(draft)")
 
-The quoted text below is the original draft, kept for history. Its "L3 exception (scoped)" paragraph was NOT applied: `DECISIONS.md` §26 says the L3 exception is not granted yet and is decided at the start of A7. It also had G1-G7 where §26 has G1-G8.
+The quoted text below is the original draft, kept for history, minus its "L3 exception (scoped)" paragraph, which was NOT applied and is struck (13 Nov 2026): `DECISIONS.md` §26 says the L3 exception is not granted yet and is decided at the start of A7. It also had G1-G7 where §26 has G1-G8.
 
 > ## 26. App scan: evidence levels instead of `not_reachable` (draft, 2026-11-12)
 >
@@ -763,15 +770,7 @@ The quoted text below is the original draft, kept for history. Its "L3 exception
 > changed between the installed version and the first fixed version above it.
 > Medium = one of the two. The model may only rank within that set.
 >
-> **L3 exception (scoped):** the L3 freeze is lifted for exactly three shapes:
-> - property/descriptor reads on a statically known class (new rule
->   `property_access`, medium);
-> - `self.method()` into linked dependency classes;
-> - module-attribute calls through `__init__` re-exports, and class
->   classmethod/staticmethod calls via from-imports.
->
-> The exception holds only while the 30 stub-eval verdicts are unchanged and no
-> corpus verdict moves to `not_reachable`. Everything else in L3 stays frozen.
+> *(The draft's "L3 exception (scoped)" paragraph is struck: it was not applied. See `DECISIONS.md` §26.)*
 >
 > **Frozen eval rules:** `PHASE_APP_SCAN.md` §4 (G1/G2/G3/G5/G6/G7 hard, G4
 > reported).
