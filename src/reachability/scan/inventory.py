@@ -311,8 +311,49 @@ def _parse_requirement_line(line: str, rel: str, lineno: int) -> InventoryEntry:
 
 
 _TAINT_OPTIONS = frozenset(
-    {"-i", "--index-url", "--extra-index-url", "--no-index", "-f", "--find-links"}
+    {"-i", "--index-url", "--pypi-url", "--extra-index-url", "--no-index", "-f", "--find-links"}
 )
+
+# Long options pip accepts in a requirements file, from pip 25.1.1
+# (pip/_internal/req/req_file.py SUPPORTED_OPTIONS + SUPPORTED_OPTIONS_REQ, defined in
+# cli/cmdoptions.py). pip's optparse accepts any unique prefix of these.
+_PIP_LONG_OPTIONS = (
+    "--config-settings",
+    "--constraint",
+    "--editable",
+    "--extra-index-url",
+    "--find-links",
+    "--global-option",
+    "--hash",
+    "--index-url",
+    "--no-binary",
+    "--no-index",
+    "--only-binary",
+    "--pre",
+    "--prefer-binary",
+    "--pypi-url",
+    "--require-hashes",
+    "--requirement",
+    "--trusted-host",
+    "--use-feature",
+)
+
+
+def _resolve_option(name: str) -> str:
+    """Resolve an abbreviated long option the way optparse does.
+
+    Exact match wins; a unique prefix resolves to that option; an ambiguous prefix
+    resolves to a taint option if any candidate is one (conservative), else is left as is.
+    """
+    if not name.startswith("--") or name in _PIP_LONG_OPTIONS:
+        return name
+    candidates = [o for o in _PIP_LONG_OPTIONS if o.startswith(name)]
+    if len(candidates) == 1:
+        return candidates[0]
+    for c in candidates:
+        if c in _TAINT_OPTIONS:
+            return c
+    return name
 
 
 _INCLUDE_OPTIONS = frozenset({"-r", "--requirement"})
@@ -368,6 +409,8 @@ class _RequirementsTree:
                 continue
             if line.startswith("-"):
                 opt = _split_option(line)
+                if opt:
+                    opt = (_resolve_option(opt[0]), opt[1])
                 if opt and opt[0] in _TAINT_OPTIONS:
                     self.taints.append(f"{opt[0]} at {rel}:{lineno}")
                     continue

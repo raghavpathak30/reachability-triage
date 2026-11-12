@@ -1,3 +1,5 @@
+import pytest
+
 from reachability.scan.inventory import Status, build_inventory
 
 
@@ -298,3 +300,37 @@ def test_hint_present_when_no_lockfile(scan_root):
     inv = build_inventory(scan_root)
     assert inv.lockfile is None and inv.entries == ()
     assert inv.hint == HINT_LITERAL
+
+
+# Fix round 1, F2: pip (optparse) accepts unique prefixes of long options.
+@pytest.mark.parametrize(
+    "opt",
+    [
+        "--index-u https://example.invalid/simple",
+        "--index-url=https://example.invalid/simple",
+        "--no-ind",
+        "--extra-index https://example.invalid/simple",
+        "--find https://example.invalid/wheels",
+        "--find-l=https://example.invalid/wheels",
+        "--pypi-url https://example.invalid/simple",
+        "--no-",  # ambiguous (--no-binary, --no-index), a candidate is a taint option
+    ],
+)
+def test_abbreviated_long_options_taint(scan_root, opt):
+    inv = inv_of(scan_root, f"foo==1.0\n{opt}\n")
+    assert [(e.dist, e.status) for e in inv.entries] == [("foo", Status.UNSUPPORTED)]
+
+
+def test_abbreviated_requirement_is_an_include_when_unique(scan_root):
+    (scan_root / "base.txt").write_text("shared==2.0\n")
+    inv = inv_of(scan_root, "--requirem base.txt\n")
+    assert [(e.dist, e.status) for e in inv.entries] == [("shared", Status.PINNED)]
+
+
+def test_ambiguous_non_taint_prefix_is_an_unsupported_row_without_taint(scan_root):
+    (scan_root / "base.txt").write_text("shared==2.0\n")
+    inv = inv_of(scan_root, "foo==1.0\n--req base.txt\n")  # --require-hashes / --requirement
+    assert [(e.dist, e.status) for e in inv.entries] == [
+        ("foo", Status.PINNED),
+        (None, Status.UNSUPPORTED),
+    ]
