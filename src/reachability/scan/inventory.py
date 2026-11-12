@@ -391,6 +391,35 @@ def _apply_taint(entries: list[InventoryEntry], taints: list[str]) -> list[Inven
     return out
 
 
+_CANDIDATES = ("uv.lock", "poetry.lock", "requirements.txt")
+_A1B_FORMATS = ("Pipfile.lock", "pylock.toml")
+
+
+def discover_lockfile(root: Path) -> tuple[str | None, Path | None, list[SkippedItem]]:
+    """Pick the lockfile by precedence; record every other candidate. Parses nothing."""
+    winner: tuple[str, Path] | None = None
+    skipped: list[SkippedItem] = []
+    for name in _CANDIDATES:
+        lexical = root / name
+        if not os.path.lexists(lexical):
+            continue
+        resolved, kind, detail = _check_path(root, lexical)
+        if resolved is None:
+            skipped.append(SkippedItem(kind or "symlink", name, None, None, detail))
+        elif winner is None:
+            winner = (name, resolved)
+        else:
+            skipped.append(
+                SkippedItem("ignored_lockfile", name, None, None, f"lower precedence than {winner[0]}")
+            )
+    for name in _A1B_FORMATS:
+        if os.path.lexists(root / name):
+            skipped.append(SkippedItem("ignored_lockfile", name, None, None, "format arrives in A1b"))
+    if winner is None:
+        return None, None, skipped
+    return winner[0], winner[1], skipped
+
+
 def build_inventory(root: Path) -> Inventory:
     try:
         resolved = Path(root).resolve(strict=True)
@@ -398,15 +427,9 @@ def build_inventory(root: Path) -> Inventory:
         raise ScanRootError(f"scan root not found: {root}") from exc
     if not resolved.is_dir():
         raise ScanRootError(f"scan root is not a directory: {root}")
+    lockfile, path, skipped = discover_lockfile(resolved)
     tree = _RequirementsTree(resolved)
-    lockfile: str | None = None
-    skipped: list[SkippedItem] = []
-    path, kind, detail = _check_path(resolved, resolved / "requirements.txt")
-    if path is None:
-        if kind != "include_missing":
-            skipped.append(SkippedItem(kind or "symlink", "requirements.txt", None, None, detail))
-    else:
-        lockfile = "requirements.txt"
+    if lockfile == "requirements.txt" and path is not None:
         tree.parse(path)
     entries = _apply_taint(tree.entries, tree.taints)
     hint = HINT if lockfile is None or any(e.status is Status.UNPINNED for e in entries) else None
