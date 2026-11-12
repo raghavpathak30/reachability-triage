@@ -238,3 +238,63 @@ def test_index_option_in_root_taints_included_entries(scan_root):
     (scan_root / "inc.txt").write_text("inc==1.0\n")
     inv = inv_of(scan_root, "--index-url https://example.invalid/simple\n-r inc.txt\n")
     assert inv.entries[0].status is Status.UNSUPPORTED
+
+
+from pathlib import Path  # noqa: E402
+
+from reachability.scan.inventory import HINT  # noqa: E402
+
+REPO = Path(__file__).resolve().parents[2]
+T9 = REPO / "tests" / "fixtures" / "app_scan" / "lockfiles" / "T9"
+
+HINT_LITERAL = (
+    "We need exact versions and never run a resolver. Create a lockfile where you run the app, "
+    "then scan again: `uv lock` (uv), `poetry lock` (Poetry), or `pip freeze > requirements.txt` "
+    "run inside the environment you deploy."
+)
+
+
+def test_t9_statuses_exact():
+    inv = build_inventory(T9)
+    assert [(e.dist, e.version, e.status.value) for e in inv.entries] == [
+        ("accelerate", None, "unpinned"),
+        (None, None, "unsupported"),
+        ("click", "8.1.7", "pinned"),
+        ("pywin32", "306", "marker_skipped"),
+    ]
+    assert sorted({e.status.value for e in inv.entries}) == ["marker_skipped", "pinned", "unpinned", "unsupported"]
+    assert len(inv.entries[2].hashes) == 2
+
+
+def test_t9_unpinned_line_number_recorded():
+    assert build_inventory(T9).entries[0].line == 2
+
+
+def test_t9_hint_present_and_verbatim():
+    assert build_inventory(T9).hint == HINT_LITERAL
+
+
+def test_hint_constant_is_literal():
+    assert HINT == HINT_LITERAL
+
+
+def test_hint_matches_spec_text():
+    lines = (REPO / "agent_docs" / "PHASE_APP_SCAN.md").read_text().splitlines()
+    start = next(i for i, line in enumerate(lines) if "We need exact versions" in line)
+    collected = []
+    for line in lines[start:]:
+        collected.append(line.removeprefix("> ").strip())
+        if line.rstrip().endswith('deploy."'):
+            break
+    text = " ".join(collected).strip().strip('"')
+    assert text == HINT
+
+
+def test_hint_absent_when_all_pinned(scan_root):
+    assert inv_of(scan_root, "foo==1.0\nbar==2.0\n").hint is None
+
+
+def test_hint_present_when_no_lockfile(scan_root):
+    inv = build_inventory(scan_root)
+    assert inv.lockfile is None and inv.entries == ()
+    assert inv.hint == HINT_LITERAL
