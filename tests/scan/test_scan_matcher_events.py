@@ -143,3 +143,81 @@ def test_fixed_in_min_across_matching_ranges_only():
     assert val == "5.0"  # `other` does not match 1.0, so its fixed 9.5 is not considered
     both = reduce_events([{"introduced": "0"}, {"fixed": "4.0"}])
     assert fixed_in_across([matching, both], Version("1.0"), "SYNTH-1")[0] == "4.0"
+
+
+from reachability.scan.advisories import AffectedEntry, entry_matches  # noqa: E402
+
+
+def entry(versions=(), ranges=(), lkavr=None, ignored=()):
+    return AffectedEntry(
+        dist="x",
+        versions=tuple(versions),
+        ranges=tuple(reduce_events(r) for r in ranges),
+        lkavr=lkavr,
+        ignored_range_types=tuple(ignored),
+    )
+
+
+def em(e, installed):
+    return entry_matches(e, installed, "SYNTH-1")
+
+
+def test_lkavr_le_matches_inclusive():
+    e = entry(lkavr="<= 1.2.3")
+    assert em(e, "1.2.3").matched is True
+    assert em(e, "1.2.4").matched is False
+    assert em(e, "0.1").matched is True
+
+
+def test_lkavr_lt_includes_prerelease_of_bound():
+    e = entry(lkavr="< 2.17.0")
+    assert em(e, "2.17.0rc1").matched is True
+    assert em(e, "2.17.0").matched is False
+
+
+def test_lkavr_range_expression_matches_only_inside():
+    e = entry(lkavr=">= 1.0, < 2.0")
+    assert [em(e, v).matched for v in ("0.9", "1.0", "1.9", "2.0")] == [False, True, True, False]
+
+
+def test_lkavr_unparseable_conservative_with_note():
+    for text in ("~= 1.2", "<= 1.0 || 2.0", "banana", "<= 1.0-stable", ""):
+        r = em(entry(lkavr=text), "9.9")
+        assert r.matched is True, text
+        assert any("last_known_affected_version_range" in n and "matched conservatively" in n for n in r.notes), text
+
+
+def test_lkavr_is_union_not_override():
+    # versions and range say no; lkavr says yes -> still a match (union)
+    e = entry(versions=["1.0"], ranges=[[{"introduced": "5.0"}, {"fixed": "6.0"}]], lkavr="<= 2.0")
+    r = em(e, "1.5")
+    assert r.matched is True
+    assert any("last_known_affected_version_range" in n for n in r.notes)
+    # lkavr says no but versions says yes -> still a match
+    assert em(entry(versions=["3.0"], lkavr="<= 2.0"), "3.0").matched is True
+
+
+def test_lkavr_note_only_when_it_is_the_sole_reason():
+    e = entry(ranges=[[{"introduced": "0"}, {"fixed": "3.0"}]], lkavr="<= 2.0")
+    assert not any("last_known_affected_version_range" in n for n in em(e, "1.0").notes)
+
+
+def test_lkavr_le_with_local_installed_uses_public():
+    r = em(entry(lkavr="<= 1.0"), "1.0+cpu")
+    assert r.matched is True
+
+
+def test_local_version_matches_public_versions_entry_with_note():
+    r = em(entry(versions=["1.0"]), "1.0+cpu")
+    assert r.matched is True
+    assert "local version segment +cpu ignored for matching" in r.notes
+
+
+def test_local_note_absent_without_local_segment():
+    assert not any("local version" in n for n in em(entry(versions=["1.0"]), "1.0").notes)
+
+
+def test_local_version_with_range_uses_public_part():
+    e = entry(ranges=[[{"introduced": "0"}, {"fixed": "1.0"}]])
+    assert em(e, "0.9+cpu").matched is True
+    assert em(e, "1.0+cpu").matched is False

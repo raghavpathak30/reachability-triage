@@ -36,10 +36,16 @@ class SnapshotFilenameError(SnapshotError):
     pass
 
 
+Events = tuple[tuple[str, str], ...]
+
+
 @dataclass(frozen=True)
 class AffectedEntry:
     dist: str
     versions: tuple[str, ...]
+    ranges: tuple[Events, ...] = ()
+    lkavr: str | None = None
+    ignored_range_types: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -47,6 +53,7 @@ class Record:
     id: str
     aliases: tuple[str, ...]
     affected: tuple[AffectedEntry, ...]
+    cwe_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -66,6 +73,8 @@ class Snapshot:
     withdrawn_excluded: int = 0
     groups: dict[str, AdvisoryGroup] = field(default_factory=dict, repr=False)
     group_of: dict[str, str] = field(default_factory=dict, repr=False)
+    by_dist: dict[str, list[tuple[str, AffectedEntry]]] = field(default_factory=dict, repr=False)
+    ignored_range_types: dict[str, int] = field(default_factory=dict)
 
 
 _EVENT_KINDS = ("introduced", "fixed", "last_affected", "limit")
@@ -171,6 +180,89 @@ def fixed_in_across(
     return (best[1] if best else NO_FIX), tuple(notes)
 
 
+_LKAVR_CLAUSE = re.compile(r"^\s*(<=|<|>=|>|==)\s*(\S+)\s*$")
+
+
+def lkavr_matches(text: str, installed: Version) -> bool | None:
+    """True/False for `<op> <version>[, ...]` clauses (all must hold); None if unparseable."""
+    clauses = text.split(",")
+    for clause in clauses:
+        m = _LKAVR_CLAUSE.match(clause)
+        if not m:
+            return None
+        bound = _parse_bound(m.group(2))
+        if bound is None:
+            return None
+    result = True
+    for clause in clauses:
+        m = _LKAVR_CLAUSE.match(clause)
+        bound = Version(m.group(2))
+        op = m.group(1)
+        ok = {
+            "<=": installed <= bound,
+            "<": installed < bound,
+            ">=": installed >= bound,
+            ">": installed > bound,
+            "==": installed == bound,
+        }[op]
+        result = result and ok
+    return result
+
+
+@dataclass(frozen=True)
+class EntryResult:
+    matched: bool
+    fixed_in: str
+    notes: tuple[str, ...]
+
+
+def entry_matches(entry: AffectedEntry, installed: str, label: str = "") -> EntryResult:
+    """Union of: `versions` list, ECOSYSTEM ranges, last_known_affected_version_range.
+
+    GIT and SEMVER ranges never contribute. Uses the public part of `installed`."""
+    full = Version(installed)
+    pub = Version(full.public)
+    notes: list[str] = []
+    matched = False
+
+    for item in entry.versions:
+        iv = _parse_bound(item)
+        if (iv is not None and iv == pub) or (iv is None and item in (installed, full.public)):
+            matched = True
+            break
+
+    for events in entry.ranges:
+        ok, n = range_matches(events, pub, label)
+        if ok:
+            matched = True
+        notes.extend(n)
+
+    lk_reason = False
+    if entry.lkavr is not None:
+        verdict = lkavr_matches(entry.lkavr, pub)
+        if verdict is None:
+            notes.append(
+                f"unparseable last_known_affected_version_range {entry.lkavr!r}"
+                + (f" in {label}" if label else "")
+                + "; matched conservatively"
+            )
+            matched = True
+        elif verdict and not matched:
+            matched = True
+            lk_reason = True
+    if lk_reason:
+        notes.append(f"last_known_affected_version_range {entry.lkavr!r} matched")
+    if not matched:
+        return EntryResult(False, NO_FIX, ())
+    for t in dict.fromkeys(entry.ignored_range_types):
+        notes.append(f"{t} range ignored")
+    if full.local:
+        notes.append(f"local version segment +{full.local} ignored for matching")
+    fixed, fixed_notes = fixed_in_across(list(entry.ranges), pub, label)
+    notes.extend(fixed_notes)
+    return EntryResult(True, fixed, tuple(dict.fromkeys(notes)))
+
+
 def _build_groups(records: dict[str, Record]) -> tuple[dict[str, AdvisoryGroup], dict[str, str]]:
     """Union-find over each record's id and aliases. `related` is never read."""
     parent: dict[str, str] = {}
@@ -212,17 +304,38 @@ def _build_groups(records: dict[str, Record]) -> tuple[dict[str, AdvisoryGroup],
 
 def _reduce(raw: dict) -> Record:
     entries = []
-    for a in raw.get("affected", []) or []:
-        pkg = a.get("package") or {}
-        if pkg.get("ecosystem") != "PyPI":
+    affected = raw.get("affected")
+    for a in affected if isinstance(affected, list) else []:
+        if not isinstance(a, dict):
             continue
+        pkg = a.get("package") or {}
+        if not isinstance(pkg, dict) or pkg.get("ecosystem") != "PyPI":
+            continue
+        ranges: list[Events] = []
+        ignored: list[str] = []
+        for rg in a.get("ranges") or []:
+            rtype = rg.get("type") if isinstance(rg, dict) else None
+            if rtype == "ECOSYSTEM":
+                ranges.append(reduce_events(rg.get("events")))
+            else:
+                ignored.append(str(rtype))
+        lk = (a.get("database_specific") or {}).get("last_known_affected_version_range")
         entries.append(
             AffectedEntry(
-                dist=str(canonicalize_name(pkg.get("name", ""))),
-                versions=tuple(a.get("versions") or ()),
+                dist=str(canonicalize_name(str(pkg.get("name", "")))),
+                versions=tuple(str(v) for v in (a.get("versions") or ())),
+                ranges=tuple(ranges),
+                lkavr=lk if lk is None or isinstance(lk, str) else repr(lk),
+                ignored_range_types=tuple(ignored),
             )
         )
-    return Record(raw["id"], tuple(raw.get("aliases") or ()), tuple(entries))
+    cwe = (raw.get("database_specific") or {}).get("cwe_ids") or ()
+    return Record(
+        raw["id"],
+        tuple(str(x) for x in (raw.get("aliases") or ())),
+        tuple(entries),
+        tuple(str(c) for c in cwe),
+    )
 
 
 def load_snapshot(path: Path, expected_sha256: str) -> Snapshot:
@@ -262,7 +375,16 @@ def load_snapshot(path: Path, expected_sha256: str) -> Snapshot:
     except zipfile.BadZipFile as exc:
         raise SnapshotError(f"snapshot is not a readable zip: {exc}") from exc
     groups, group_of = _build_groups(records)
-    return Snapshot(str(path), date, actual, len(records), records, withdrawn, groups, group_of)
+    by_dist: dict[str, list[tuple[str, AffectedEntry]]] = {}
+    ignored: dict[str, int] = {}
+    for rec in records.values():
+        for entry in rec.affected:
+            by_dist.setdefault(entry.dist, []).append((rec.id, entry))
+            for t in entry.ignored_range_types:
+                ignored[t] = ignored.get(t, 0) + 1
+    return Snapshot(
+        str(path), date, actual, len(records), records, withdrawn, groups, group_of, by_dist, ignored
+    )
 
 
 @dataclass(frozen=True)
