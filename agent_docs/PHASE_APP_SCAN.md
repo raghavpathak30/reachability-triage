@@ -1,41 +1,17 @@
 # Phase App Scan: which advisories in my dependencies can my app reach?
 
 Status: **spec only, nothing built.** Every component below is *proposed*.
-Research and measurements are in `agent_docs/research/APP_SCAN_RESEARCH.md`
-(cited here as "R §n"). Baseline: `main` at `2a540d5` (tag v0.3.5), pytest
-461 passed, 3 deselected.
-Target tag on completion: none proposed until the units are approved.
+Research and measurements are in `agent_docs/research/APP_SCAN_RESEARCH.md`,
+cited here as "R §n". Where R's design sections differ from this spec, this
+spec wins.
 
-> **Critique status (2026-11-12): REVISE, not yet applied.** The plan-mode
-> critique (`.agent/critique.md`, gitignored) found 7 BLOCKERs, all in the
-> `not_reachable` rule R1–R4 (§2.3), plus 10 MAJORs in the eval (§4). Verified
-> so far: the FastAPI template loads psycopg only through a
-> `postgresql+psycopg://` URL string (`backend/app/core/config.py:39`), and
-> SQLAlchemy imports dialects with `__import__(modulepath)`
-> (`sqlalchemy/util/langhelpers.py:351`). So R2's lock-graph taint direction
-> is unsound, and the "87 of 2,241 eligible" figure (§0, §8) includes code
-> that is loaded at runtime. **Until this is revised, §2.3 R1–R4, §2.4 step 3,
-> A3, A4 and §4 must not be implemented as written.** Agreed revision
-> direction:
-> - drop module-level R4;
-> - allow `not_reachable` at distribution scope only, and only when:
->   - every locked dist was fetched and parsed cleanly, with no skipped files;
->   - there is no non-literal import or stdlib string-loader anywhere in the
->     closure (corpus-wide, D1 precedent);
->   - the roots include every entry point, every dist's `__main__` and
->     `sitecustomize`;
->   - the dist has no module in the closure and has at least one Python module.
->
-> Under that rule both measured apps have **0** eligible dists, because both
-> contain import-reachable dynamic imports. Further changes:
-> - advisory-level `reachable` would require a high-confidence target;
->   otherwise `unknown` `REACHES_FIX_CANDIDATE`, with the path shown;
-> - diff the installed version against the first fixed version above it;
-> - G3 is pinned to a labelled true symbol;
-> - the phase gate runs on real wheels, with trap fixtures (uvicorn→httptools,
->   zoneinfo→tzdata, URL→psycopg, INSTALLED_APPS, NO_WHEEL ancestor,
->   SyntaxError, symlink);
-> - a closed reason-code registry.
+Baseline: `main` at `2a540d5` (tag v0.3.5). Bare `pytest` gives 461 passed,
+3 deselected. The 3 are deselected by `addopts -m "not real_llm"` in
+`pytest.ini`.
+
+Revision 2 (2026-11-12) applies the plan critique (`.agent/critique.md`) and
+Raghav's decisions D1–D5. The mapping from each critique item to a change is
+§9. No target tag is proposed yet.
 
 ## 0. Goal and non-goals
 
@@ -44,67 +20,72 @@ machine. The service would:
 1. read the app's lockfile;
 2. list the exact installed dependency versions;
 3. find every advisory in a pinned OSV snapshot that applies to them;
-4. work out where in each dependency the fix landed;
-5. return **one verdict per advisory, with evidence**.
+4. return **one finding per advisory**, each with:
+   - a **verdict**: one of the existing four values;
+   - a separate **evidence level** (§2.3) saying what was actually shown;
+   - a **reason code** (§2.5);
+   - a **plain-English sentence**.
 
-`reachable` would always carry a call path. `not_reachable` would always carry
-the import-closure argument that justifies it. `unknown` would always carry a
-reason code and a plain-English sentence.
+Malicious-package advisories are listed separately, first, with no verdict
+(D5).
 
-**What success looks like, stated honestly up front.** Measured on two real
-apps (R §5.5), a confident `not_reachable` is possible for **0 of 131**
-dependency modules (Flask tutorial) and **87 of 2,241 (3.9%)** (FastAPI
-template) under rules that survive the measured failure cases. This phase is
-therefore **not** a "how many advisories can I ignore" tool. Its value would be:
-- (i) `reachable` findings with a concrete path through the app into the
-  dependency;
-- (ii) a graded `unknown` that says *why*;
-- (iii) `not_reachable` for distributions and modules the app genuinely never
-  loads.
+**What success looks like.** Measured on two real apps, no dependency module
+can soundly be called `not_reachable`. Config-driven imports defeat every
+import-graph rule we tried. For example, the FastAPI template never imports
+psycopg; it builds the string `"postgresql+psycopg://"`
+(`backend/app/core/config.py:39`), and SQLAlchemy loads the driver with
+`__import__` (R §0.4). An earlier "87 of 2,241 eligible" figure is
+**withdrawn**. The corrected result is **0 eligible on both apps**. So this
+phase **never issues `not_reachable`** (D3). Its value is:
+- `reachable`, with a call path from the app into the dependency
+  (`path_proven`);
+- `unknown`, with an evidence level that says how far the analysis got:
+  `module_imported_by_app`, `package_installed_not_imported`, or
+  `no_target_symbol`.
 
 **Non-goals (do not build, do not describe as built):**
-- No change to `/v1/triage`, its request or response shape, or its job table.
-- No archive upload and no git URL input (R §1.2). `repo_url` stays NOT BUILT.
-- No dependency resolution. No resolver runs, no sdist is built, no package
-  code is imported or executed (R §2.2, R §10).
-- No call-graph-based `not_reachable` for a dependency symbol. A "no path"
-  result into a dependency is `unknown`, reason `NO_STATIC_PATH_IMPORTED`
-  (R §5.3: a measured false `not_reachable` via `request.form`).
-- No framework-aware analysis: properties, Django URLconf, signals, `Depends`,
-  template-text filter calls. No change to L3's resolution capability, which is
-  frozen (CLAUDE.md).
-- No live OSV query at scan time. No runtime fetch of fix commits unless
-  decision D4 says otherwise.
+- **No `not_reachable` from any scan, in any unit of this phase** (D3).
+- No change to `/v1/triage`, its request or response shape, or `triage_jobs`.
+- No archive upload or git URL in A1–A9. Archive upload is a later unit, A10
+  (D1). `repo_url` stays NOT BUILT.
+- No dependency resolution. No resolver runs, no sdist is built, and no
+  package or app code is imported or executed (D2, R §2.2, R §10).
+- No live OSV query and no fetch of advisory data by the worker. Fix-commit
+  fetching only in A8 (D4).
+- No framework-aware analysis beyond the bounded resolution unit A7: no Django
+  URLconf, signals, `Depends`, or template-text filter calls.
 - No severity scoring of our own. The record's severity is shown as given.
-- No web UI work. The UI redesign waits for this spec.
+- No web UI work; the UI redesign waits for this phase.
 - No real-model run by the agent. Real-model runs are Raghav's only.
-- No claim of exploitability or non-exploitability. `not_reachable` means "not
-  loaded", never "safe".
+- No claim of exploitability or non-exploitability anywhere.
 
 ## 1. Architecture (proposed)
 
 ```
 POST /v1/scans {path}
-      │  (api: validate path is relative; insert scans row, status=queued)
+      │  api: validate relative path; insert scans row (queued)
       ▼
-worker claim (scans, SKIP LOCKED; same claim/finalize/reaper contract as triage_jobs, DECISIONS §8)
+worker claim (scans; SKIP LOCKED; same claim/finalize/reaper contract as triage_jobs, DECISIONS §8)
       │
-      ├─ 1. locate:   /scan-inputs/<path>  (ro bind mount; resolve(strict) + is_relative_to; no symlinks followed)
-      ├─ 2. inventory: lockfile → [(dist, version, wheel url+hash | status)]          (scan/inventory.py)
-      ├─ 3. match:    pinned OSV snapshot → advisory groups per (dist, version)        (scan/advisories.py)
-      ├─ 4. fetch:    wheels for matched dists + their lock-graph ancestors; sha256-verified (existing wheel-only rule)
-      ├─ 5. index:    per-dist L1–L3 index, cached by (dist, version, wheel sha256, schema v) (scan/dist_index.py)
-      ├─ 6. targets:  wheel diff last-affected ↔ first-fixed → changed-module set + candidate symbols (scan/targets.py)
-      ├─ 7. decide:   import-closure rule R1–R4 → module/distribution not_reachable | unknown
-      │               linked call graph from app start points → reachable | reachable_only_from_tests | unknown
-      ├─ 8. rollup:   per advisory (§2.4)
-      └─ 9. finalize: scan_findings rows + summary
+      ├─ 1. locate     /scan-inputs/<path> (ro bind mount; resolve(strict) + is_relative_to; symlinks skipped and recorded)
+      ├─ 2. inventory  lockfile → [(dist, version, status, wheel url+hash?)]                  scan/inventory.py   (A1a/A1b)
+      ├─ 3. match      pinned OSV snapshot → malicious list + advisory groups per (dist, version) scan/advisories.py  (A1a)
+      ├─ 4. fetch      wheels for every pinned, marker-true dist; sha256-verified; wheel-only    scan/fetch.py       (A2)
+      ├─ 5. closure    app import closure C(A) over app + all fetched wheels (L1 tables)        scan/closure.py     (A2)
+      ├─ 6. targets    named-in-text ∪ changed-in-diff (installed ↔ first fixed above it)       scan/targets.py     (A4)
+      ├─ 7. paths      linked per-dist L1–L3 indexes; compute_reachability from app start points scan/dist_index.py  (A5)
+      ├─ 8. evidence   level + reason + sentence per advisory (§2.3, §2.5)                       scan/evidence.py
+      └─ 9. finalize   scans + scan_findings rows, snapshot {date, sha256} on the result
 ```
 
-New package `src/reachability/scan/`. The existing `index/` stays frozen,
-except for **no-new-capability** helpers that the units below name explicitly
-(a cross-version symbol key; computing D3 once per index). The LangGraph loop
-is **not** in this flow (§2.6).
+New package `src/reachability/scan/`. `src/reachability/index/` stays
+unchanged except in two places:
+- A5: a no-new-capability helper that computes the D3 name-escape set once per
+  index;
+- A7: the bounded resolution changes, which need the `DECISIONS.md` §26 text
+  that lifts the L3 freeze for exactly those shapes (§6).
+
+The LangGraph triage loop is not on the scan path (§2.7).
 
 ## 2. Data model and API (proposed)
 
@@ -112,357 +93,666 @@ is **not** in this flow (§2.6).
 
 | Call | Success | Errors |
 |---|---|---|
-| `POST /v1/scans` body `{path: str}` (1–512 chars, relative, no `..`) | 202 `ScanOut`, `Location: /v1/scans/{id}` | 422 envelope (existing) |
+| `POST /v1/scans` body `{path: str}` (1–512 chars, relative, no `..`, no leading `/`) | 202 `ScanOut`, `Location: /v1/scans/{id}` | 422 envelope (existing) |
 | `GET /v1/scans/{id}` | 200 `ScanOut` | 404 envelope |
 
 ```
 ScanOut = {
   id, status: queued|running|completed|failed, error|null, llm_mode|null,
-  snapshot: {sha256, date},
-  inventory: {source_file|null, target_env: "cp313-linux_x86_64",
-              packages: [{name, version|null, status: pinned|unpinned|no_wheel|marker_skipped}]},
-  summary: {reachable, reachable_only_from_tests, not_reachable, unknown, malicious_package?,
-            unknown_by_reason: {CODE: n}},
+  snapshot: {date, sha256},                      # always present once running (D4)
+  target_env: "cp313-manylinux_x86_64",
+  malicious: [MaliciousEntry],                   # shown first; verdict-independent (D5)
+  inventory: {source_file|null, hint|null,       # hint per D2 when no lockfile / unpinned lines
+              closure_complete: bool, closure_gaps: [Gap],
+              packages: [{name, version|null, status, advisories_any_version?: int}]},
+  summary: {verdicts: {reachable, reachable_only_from_tests, not_reachable: 0, unknown},
+            evidence: {path_proven, module_imported_by_app, package_installed_not_imported, no_target_symbol},
+            reasons: {CODE: n}},
   findings: [Finding]
 }
-Finding = {
-  advisory_id, aliases[], dist, version, verdict, scope: symbol|module|distribution,
-  reason_code|null, reason|null, sentence, path: CallEdge[]|null,
-  targets: [{node_id, source, source_confidence, exists_in_installed, file, lineno}],
-  changed_modules: [str]
-}
+MaliciousEntry = {advisory_id, aliases[], dist, version, summary, signal: mal_id|mal_alias|summary_prefix|cwe_506}
+Finding = {advisory_id, aliases[], dist, version, severity_as_given|null,
+           verdict, evidence_level, reason_code|null, sentence,
+           evidence: PathEvidence | ImportEvidence | NotImportedEvidence | NoTargetEvidence,
+           targets: [Target]}
+Target = {node_id, file, lineno, confidence: high|medium, named: bool, changed: changed|added|removed|null}
+Gap = {kind: no_wheel|unparsed_file|skipped_symlink|unresolved_relative_import|budget, detail}
 ```
+
+`not_reachable` stays in the verdict enum, because the verdict set is
+unchanged. The summary reports it, and in this phase it is always 0. A test
+asserts that no code path in `scan/` can produce it.
 
 ### 2.2 Tables (one migration, `0005_create_scans`)
 
-- `scans`: `id` uuid pk, `status`, `path`, `inventory_json`,
-  `snapshot_sha256`, `llm_mode`, `error`, `worker_id`, `attempt_count`,
-  `created_at`, `updated_at`.
+- `scans`: `id` uuid pk, `status`, `path`, `inventory_json`, `malicious_json`,
+  `snapshot_date`, `snapshot_sha256`, `target_env`, `llm_mode`, `error`,
+  `worker_id`, `attempt_count`, `created_at`, `updated_at`.
 - `scan_findings`: `id`, `scan_id` FK (on delete cascade), `advisory_id`,
-  `aliases` json, `dist`, `version`, `verdict`, `scope`, `reason_code`,
-  `reason`, `path_json`, `targets_json`, `changed_modules` json.
-- `dist_index_cache`: pk (`dist`, `version`, `wheel_sha256`,
-  `index_schema_version`), `blob` bytea, `created_at`.
-- `advisory_targets_cache`: pk (`advisory_id`, `last_affected`,
-  `first_fixed`, `method_version`), `changed_modules` json, `candidates` json.
+  `aliases` json, `dist`, `version`, `verdict`, `evidence_level`,
+  `reason_code`, `sentence`, `evidence_json`, `targets_json`.
+- `dist_index_cache` (A5): pk (`dist`, `version`, `wheel_sha256`,
+  `index_schema_version`), `blob` bytea.
+- `advisory_targets_cache` (A4): pk (`advisory_id`, `installed_version`,
+  `fixed_version`, `method_version`), `named` json, `changed` json.
 
-### 2.3 Verdict per target (R §7.1)
+### 2.3 Evidence levels (separate from the verdict)
 
-- `reachable` / `reachable_only_from_tests`: `compute_reachability` over the
-  linked index with **app start points only**. Library `__main__`, tests,
-  fixtures, routes and CLI are never start points (R §5.3: 900+ polluting
-  start points measured).
-- Dependency target with no path → **`unknown`, `NO_STATIC_PATH_IMPORTED`**,
-  never `not_reachable`.
-- `not_reachable` only from the import-closure rule:
+**Terms.** All of these are computed from the existing index data structures.
+- **A**: app modules. The modules `discover_modules` finds under the scan root.
+  The scan-side walker skips symlinked files and records them as `Gap`s.
+- **S**: app start points. `build_entrypoint_index` output restricted to
+  modules in A. Library `__main__`, tests, fixtures, routes and CLI are never
+  start points (R §5.3: 901 polluting start points measured). App tests keep
+  `is_test=True`.
+- **owners(d)**: every dotted prefix of `d` that is a discovered module.
+  Importing `a.b.c` executes `a` and `a.b`.
+- **C(A)**: the app import closure. The smallest module set containing A and
+  closed under the following, for each module `m` in the set:
+  - every `ImportAlias` in `import_tables[m]` with
+    `type_checking_only == False` adds `owners(resolved_absolute or
+    target_module)`. If `target_symbol` is set, it also adds
+    `owners(target + "." + target_symbol)`, so `from pkg import sub` counts
+    `pkg.sub` when that is a module;
+  - every `StarImport` adds `owners(resolved_absolute)`;
+  - conditional imports (`try/except ImportError`) count;
+  - an import whose target resolves to `None` (a relative import escaping
+    the root) is a `Gap` (`unresolved_relative_import`);
+  - imports inside function bodies must count. A2 checks whether L1 records
+    them. If it does not, a scan-side collector adds them, with no L1 change
+    and a test either way.
+- **dist_of(module)**: the distribution that owns the module's file, per the
+  wheel's `RECORD`. A namespace-package directory with no `__init__.py` is
+  owned by no distribution. Importing `ns.x` loads the owner of `ns/x`.
+- **T(adv)**: target symbols with confidence `high` or `medium` (§2.4) that
+  exist in the **installed** version's symbol table.
 
-> **R1** the module is outside the import closure from {app modules} ∪ {every
-> entry-point target declared by any installed distribution, any group}, where
-> importing `a.b.c` executes `a` and `a.b`.
-> **R2** no import-reachable non-literal `import_module`/`__import__` exists in
-> its distribution, or in any distribution that depends on it in the lock graph.
-> **R3** its distribution ships no `.pth` file.
-> **R4** (advisory scope) R1–R3 hold for **every** module in the wheel diff's
-> changed-module set, not just ranked symbols.
+**Levels.** Evaluated in this order; the first one that holds wins.
 
-### 2.4 Advisory rollup
+| # | Level | Holds when | Verdict | Evidence the API returns |
+|---|---|---|---|---|
+| 1 | `path_proven` | `compute_reachability` over the linked index (A5) with start points S returns `REACHABLE` or `REACHABLE_ONLY_FROM_TESTS` for some t ∈ T(adv). That means a path of high- and medium-confidence edges only (the existing engine rule). | `reachable` or `reachable_only_from_tests` (copied from the engine) | `PathEvidence = {start_point, path: CallEdge[], target: Target}`. The target with the highest confidence wins; ties go to the shortest path |
+| 2 | `package_installed_not_imported` | The dist's wheel was indexed and **no** module with `dist_of = dist` is in C(A). | `unknown` | `NotImportedEvidence = {closure_complete, closure_gaps, depended_on_by: [dist], dist_entry_points: [group:name]}`. The sentence always says a host, plugin or config string can still load it |
+| 3 | `module_imported_by_app` | T(adv) is non-empty, some module of the dist is in C(A), and level 1 did not hold. | `unknown` | `ImportEvidence = {import_chain: [{module, file, lineno}], target_modules_in_closure: [module], engine_reason_code, partial_path: CallEdge[]\|null}` |
+| 4 | `no_target_symbol` | T(adv) is empty, and either some module of the dist is in C(A) or the dist could not be indexed (`NO_WHEEL`). | `unknown` | `NoTargetEvidence = {why: reason_code, named_count, changed_count, import_chain\|null}` |
 
-1. Any target `reachable` → `reachable` (shown path: the highest-provenance
-   target).
-2. Else any `reachable_only_from_tests` → that.
-3. Else R1–R4 hold over the full changed-module set (or the whole distribution
-   when no diff exists) → `not_reachable`, scope `module`/`distribution`.
-4. Else `unknown`, most specific reason. Precedence:
-   `VERSION_UNPINNED` > `NO_WHEEL` > `NO_FIX_VERSION` > `NATIVE_ONLY_CHANGE` >
-   `DEPENDENCY_PIN_FIX` > `DYNAMIC_IMPORT` > `ENTRYPOINT_OR_PLUGIN` >
-   `PTH_FILE` > `NO_STATIC_PATH_IMPORTED` > existing engine reasons.
+The levels are total and mutually exclusive: every matched, non-malicious
+advisory on a pinned dist gets exactly one. Unpinned dists get no findings at
+all. They appear in the inventory with `status: unpinned` and
+`advisories_any_version` (D2).
 
-A target ranking (model or deterministic) can change which path is *shown*. It
-can never change steps 3–4.
+### 2.4 Target confidence
 
-### 2.5 Sentences
+- **changed(adv)**: symbols that differ between the **installed** version's
+  wheel and the **first fixed version above it**. That is the smallest `fixed`
+  event greater than the installed version. When the advisory has several
+  release lines, this picks the right backport (critique B5).
+  - The comparison key is `(module, qualname, ordinal among same-qualname
+    defs)`, not `node_id`. `node_id`s carry `@lineno` suffixes, which produced
+    15 phantom add/remove pairs in R §4.3.
+  - Symbols changed, added in fixed, or removed in fixed all count. A removed
+    symbol exists in the installed version, so it can be a target.
+  - Test modules (any dotted segment `tests`/`test`/`testing` or `test_*`) are
+    excluded.
+  - A **version-only module change** is dropped. Definition: the module's
+    non-def, non-import top-level statements differ *only* in `Assign` or
+    `AnnAssign` nodes whose single target is one of `__version__`, `VERSION`,
+    `version`, `version_info`, `__version_info__`, and whose value is a
+    constant or a tuple of constants. Any other difference keeps the module
+    (critique M9).
+  - Non-`.py` file changes (templates, `.so`, data) are recorded as a flag
+    `non_py_changes: [path]`. They never create targets.
+- **named(adv)**: installed-version symbols whose name appears in the
+  advisory's `summary` or `details` **in code form**:
+  - the text is first passed through `sandbox_untrusted_text`;
+  - code form means inside backticks, immediately followed by `(`, or part of
+    a dotted chain of at least two identifiers;
+  - a token matches a symbol if it equals the symbol's final qualname segment,
+    its `Class.method` qualname, or its full `module.qualname`;
+  - plain prose words never match, e.g. the “ask” in vanna's advisory
+    (GHSA-7735-w2jp-gvg6). The regex heuristic in R §4.2 (precision 0.78) is
+    why code form is required.
+- **high** = named ∩ changed. **medium** = (named ∪ changed) minus high.
+- **none** = both sets are empty. The finding falls back to the module-level
+  check, which yields level 2 or level 4.
+- Up to 20 targets are queried per advisory: every `high`, then `medium` in
+  stub-rank order. When targets are truncated, `targets_truncated: true` is
+  set.
+- **Model rule (A8):** the model may only **rank** symbols in named ∪ changed.
+  Any id outside that set is dropped and logged. The model never adds a symbol
+  and never sets a verdict or level.
 
-Fixed templates from R §7.3, one per verdict and per reason code. They are
-tested as constants; no model-written prose.
+### 2.5 Reason-code registry (closed)
 
-### 2.6 What the LangGraph agent does here
+`src/reachability/scan/reasons.py` would hold one `Enum` holding exactly
+these codes. A test asserts three things: every finding's code is in the
+enum; the code is allowed for that finding's level; every engine
+`termination_cause` for an engine `UNKNOWN` (DECISIONS §24) maps to exactly
+one code.
 
-Nothing on the verdict path. Targets come from the wheel diff, and queries are
-deterministic. The optional model use is ranking candidates (unit A7), behind
-`TRIAGE_LLM_MODE`, with a deterministic stub in CI.
-`run_triage_loop_langgraph` is not called by scans.
+| Code | Allowed level | Sentence (template) |
+|---|---|---|
+| *(none)* | `path_proven` | high: "Your code calls `{target}`, which the advisory names and the fix changed: `{path}`." medium, named only: "Your code calls `{target}`, which the advisory names (the fix did not change it): `{path}`." medium, changed only: "Your code calls `{target}`, which the fix changed; the advisory does not name it, so it may not be the vulnerable function: `{path}`." |
+| `NOT_IMPORTED_BY_APP_CODE` | `package_installed_not_imported` | "Your code never imports `{dist}`. It can still be loaded by the server that runs your app, a plugin, or a setting that names it as a string (for example a database URL), so we cannot say it is unreachable." |
+| `NO_PATH_FOUND` | `module_imported_by_app` | "Your app imports `{module}`, but we found no call path to `{target}`. Frameworks often call such code for you (for example when you read `request.form`), which we cannot see." |
+| `LOW_CONFIDENCE_PATH` | `module_imported_by_app` | "A path to `{target}` exists only through calls we could not resolve." |
+| `OPAQUE_CALL` | `module_imported_by_app` | "Code on the way to `{target}` makes a call whose target is computed at runtime." |
+| `NAME_ESCAPE` | `module_imported_by_app` | "`{target}` is passed around by name, so it may be called indirectly." |
+| `NO_APP_ENTRYPOINTS` | `module_imported_by_app` | "We found no start points in your app (no `__main__`, routes, CLI or console scripts)." |
+| `NO_FIX_VERSION` | `no_target_symbol` | "The advisory lists no fixed version, so we cannot tell which function it is about." |
+| `NO_WHEEL_FOR_FIX` | `no_target_symbol` | "The fixed version has no wheel to compare against." |
+| `NATIVE_ONLY_CHANGE` | `no_target_symbol` | "The fix changed only compiled or non-Python files." |
+| `DEPENDENCY_PIN_FIX` | `no_target_symbol` | "The fix only changed a dependency requirement, not code." |
+| `NO_CANDIDATE` | `no_target_symbol` | "Neither the advisory text nor the fix points to a Python function." |
+| `NO_WHEEL` | `no_target_symbol` | "`{dist}=={version}` has no wheel; we never build source packages." |
+| `TARGET_NOT_RESOLVED` | `no_target_symbol`, `package_installed_not_imported` | "Matched to your version; function-level analysis is not available yet." (A2–A3 only; removed in A4) |
+| `SCAN_BUDGET` | `module_imported_by_app`, `no_target_symbol` | "The scan hit its time or size budget before finishing this advisory." |
 
-### 2.7 Budgets (constants, each with a test)
+`not_reachable` has no code because it is never issued. The engine reasons map
+from `termination_cause.py` constants (`LOW_CONFIDENCE_PATH`, `OPAQUE_CALL`,
+`NAME_ESCAPE`, `NO_ENTRYPOINTS` → `NO_APP_ENTRYPOINTS`).
+
+### 2.6 Inventory statuses and the D2 hint
+
+`pinned`, `unpinned`, `unsupported` (a VCS, URL or editable line, `-e`, `-c`,
+or an unknown option), `marker_skipped` (its marker is false for
+`target_env`; listed, no findings), and `no_wheel` (found at fetch time).
+- An `--index-url` or `--extra-index-url` in a requirements file marks every
+  package in that file `unsupported`, because the package universe differs.
+- A dist listed at two versions that both survive marker evaluation produces
+  findings per (dist, version).
+- If no lockfile is found, or any line is unpinned, `inventory.hint` is set:
+
+> "We need exact versions and never run a resolver. Create a lockfile where you
+> run the app, then scan again: `uv lock` (uv), `poetry lock` (Poetry), or
+> `pip freeze > requirements.txt` run inside the environment you deploy."
+
+Each unpinned line is listed with its line number. `pip lock` (experimental
+since pip 25.1) is not suggested until it is stable (R §2.1).
+
+### 2.7 What the LangGraph agent does here
+
+Nothing. Targets come from §2.4 and the queries are deterministic. The only
+model use is A8 ranking, behind `TRIAGE_LLM_MODE`, with a deterministic stub in
+CI. Scans do not call `run_triage_loop_langgraph`.
+
+### 2.8 Budgets (constants, each with a test)
 
 | Budget | Value | When exceeded |
 |---|---|---|
-| Scan wall clock | 600 s | scan `failed`, error `"scan time budget exceeded"` |
-| Advisories per scan | 200 | the rest get `unknown` `SCAN_BUDGET` |
-| Target symbols per advisory | 20 | ranked first 20; R4 still uses the full module set |
-| Distributions indexed per scan | 100 | `unknown` `SCAN_BUDGET` for the rest |
-| Scan input | 20,000 files / 200 MB / depth 32 | scan `failed`, named limit |
-| Wheel download | 120 s each (as today) | `unknown` `NO_WHEEL` with the pip error |
-| Model calls | ≤ 1 per advisory (A7 only) | ranking falls back to the stub order |
+| Scan wall clock | 600 s | remaining advisories get `SCAN_BUDGET`; scan completes |
+| Advisories per scan | 200 | the rest get `SCAN_BUDGET` |
+| Targets per advisory | 20 | `targets_truncated: true` |
+| Distributions fetched per scan | 150 | the rest are `Gap{kind: budget}`; `closure_complete: false` |
+| Scan input | 20,000 files / 200 MB / depth 32 | scan `failed`, error names the limit |
+| Wheel download | 120 s each (as today) | `no_wheel` with the pip error |
+| Model calls (A8) | ≤ 1 per advisory | stub order |
+
+### 2.9 Snapshot (D4)
+
+- **Refresh** is operator-run and never done by the worker. It would be a new
+  script, `scripts/refresh_osv_snapshot.sh`:
+  ```
+  d=$(date -u +%F)
+  curl -sSf -o "osv-pypi-$d.zip" https://osv-vulnerabilities.storage.googleapis.com/PyPI/all.zip
+  sha256sum "osv-pypi-$d.zip" | cut -d' ' -f1 > "osv-pypi-$d.zip.sha256"
+  ```
+- **Configuration:** `OSV_SNAPSHOT_PATH` and `OSV_SNAPSHOT_SHA256`. The worker
+  verifies the sha256 at startup and refuses to start on a mismatch, in the
+  same fail-fast style as the `TRIAGE_LLM_MODE` check.
+- **Date** comes from the filename, `osv-pypi-YYYY-MM-DD.zip`. A filename that
+  does not match is a startup error.
+- **Every `ScanOut`** carries `snapshot: {date, sha256}`. The summary sentence
+  says "advisories as of {date}".
+- **Current reference snapshot:** 2026-11-12, sha256
+  `c7ea4e15b83912960fc5cbd42c6003dd630e422ec4dfbfc4ed19445573e1b08c`,
+  37,790,549 bytes (R §3.5).
+
+### 2.10 Malicious packages (D5)
+
+A matched record is classified as malicious, and moved to `ScanOut.malicious`,
+if any of these holds:
+- its id is `MAL-*`;
+- an alias is `MAL-*`;
+- its summary starts with "Malicious code in";
+- its `database_specific.cwe_ids` contains CWE-506.
+
+Measured over the export: 12,020 `MAL-*` records, plus 42 non-MAL groups by
+alias or summary, plus 9 by CWE-506 (R §0.6).
+
+These entries have no verdict and no evidence level. The UI and summary show
+them first. Malware records with none of these signals (e.g. `PYSEC-2025-7`)
+are missed and fall through to a normal finding. That is a known, documented
+gap; the normal finding never claims safety.
 
 ## 3. Units
 
 Each unit is one `/loop` cycle with its own [GATE]. Branch per unit:
-`app-scan-aN-<slug>`. Smallest shippable first. Every gate includes: full
-bare `pytest` (count reported against the previous unit), app starts clean, no
-debug prints, and `git diff --stat main -- src/reachability/index` is empty
-unless the unit names an index helper.
+`app-scan-<unit>-<slug>`. Smallest shippable first.
 
-### A1: Offline advisory inventory (useful on its own)
-- `src/reachability/scan/inventory.py`: strict parsers for `uv.lock`,
-  `pylock.toml`, `poetry.lock`, `Pipfile.lock`, and fully pinned
-  `requirements.txt` (`-r` within the root only). Precedence and status
-  values per R §2.3. Markers are evaluated for the fixed target env.
-- `src/reachability/scan/advisories.py`: load a snapshot zip (sha256-checked),
-  exclude withdrawn records, group aliases (union-find), match by `versions`
-  ∪ OSV-range evaluation (`introduced: "0"` means −∞; `last_affected`
-  inclusive), and honour `last_known_affected_version_range`. Malware is
-  classified per decision D5.
-- `scripts/scan_inventory.py <dir> --snapshot <zip>` prints a table: dist,
-  version, advisory, aliases, fixed-in.
-- New pinned dependency: `packaging` (Apache-2.0 OR BSD-2-Clause), added to the
+Every gate includes:
+- a full bare `pytest`, with the count reported against the previous unit;
+- the app starts clean, with no debug prints;
+- `git diff --stat main -- src/reachability/index` is empty unless the unit
+  names an index change (A5 helper, A7);
+- `scripts/run_eval_suite.py` 30/30 verdicts unchanged in any unit that
+  touches `src/reachability/index`.
+
+### A1a: Inventory (pinned requirements, uv.lock, poetry.lock) and OSV matcher. Useful on its own.
+
+- `scan/inventory.py`:
+  - `requirements.txt`: `name==version` lines; `-r` includes within the scan
+    root only; environment markers evaluated for `target_env`; `--hash`
+    recorded.
+  - `uv.lock`: runtime closure of the root member, extras followed.
+  - `poetry.lock`: all packages, with the `groups` field recorded.
+  - Statuses and the hint as in §2.6.
+- `scan/advisories.py`:
+  - loads the snapshot (sha256 checked) and excludes withdrawn records;
+  - groups aliases with union-find;
+  - an installed version matches if it is in `versions` ∪ the OSV-range
+    evaluation, where `introduced: "0"` means −∞ and `last_affected` is
+    inclusive;
+  - honours `last_known_affected_version_range`;
+  - an installed version that is not valid PEP 440 gets inventory status
+    `unsupported`, never a match or non-match guess. An unparseable *range
+    bound* in a record makes that advisory match conservatively (it is
+    reported), with a note in the finding;
+  - malicious classification per §2.10.
+- `scripts/scan_inventory.py <dir> --snapshot <zip>` prints:
+  - the malicious entries first;
+  - then dist / version / status / advisory ids / fixed-in;
+  - then the hint.
+- New pinned dependency `packaging` (Apache-2.0 OR BSD-2-Clause), added to the
   plan first.
-- Fixtures: `tests/fixtures/app_scan/advisories/` holds **the subset of OSV
-  records the tests need**, copied from the pinned snapshot (sha256 `c7ea4e15…`,
-  2026-11-12), plus a `NOTICE` (CC-BY-4.0 attribution). Lockfile fixtures are
-  hand-written miniatures in each format.
-- **Gate:**
-  - G5 inventory exact-match on every lockfile fixture;
-  - a matcher table test with ≥ 12 rows from real records: pre-release vs
+- Fixtures:
+  - `tests/fixtures/app_scan/advisories/`: the subset of real OSV records
+    the tests need, copied from the reference snapshot, plus a `NOTICE` with
+    CC-BY-4.0 attribution;
+  - lockfile miniatures in the three formats.
+- **Gate** (the original A1 items, applied to A1a):
+  - inventory exact match (dist, version, status) on every lockfile fixture
+    (G5);
+  - a matcher table of at least 12 rows from real records: pre-release vs
     `introduced: "0"`, `last_affected`, empty `versions`, a non-PEP 440
-    string → `unknown`, a withdrawn record excluded, an alias group collapsed;
-  - an unpinned line yields status `unpinned`, never a guessed version;
-  - no network in tests (a socket-blocking fixture).
+    string → `unsupported`, a withdrawn record excluded, an alias group
+    collapsed, a `MAL-*` alias → malicious;
+  - an unpinned line yields `unpinned` plus the hint, never a guessed version;
+  - no network in tests (socket-blocking fixture).
 
-### A2: Scan resource (API, table, worker), inventory-only verdicts
-- Migration `0005`. `POST/GET /v1/scans`. Worker claims scans in the same poll
-  loop. Reaper covers `scans`.
-- Compose: worker gets `- ${SCAN_INPUTS_DIR:-./scan-inputs}:/scan-inputs:ro`
-  and the snapshot as a read-only file mount. The API does not mount either.
-- Path rules from R §1.1 (b). Discovery for scans walks with
-  `followlinks=False` (a scan-side walker; `index/discovery.py` untouched).
-- Every matched advisory → `unknown`, `TARGET_NOT_RESOLVED`, sentence
-  *"Matched to your installed version; reachability not analysed yet."*
-- OpenAPI snapshot (`web/openapi.json`) regenerated. `/v1/triage` schema diff
-  must be empty.
+### A1b: Pipfile.lock and pylock.toml
+
+- `Pipfile.lock`: `default` only by default; no graph, so the whole set is
+  fetched.
+- `pylock.toml`: per PEP 751. A `packages` entry without `version` is
+  `unpinned`. `packages.dependencies` is ignored, as the PEP requires.
+- **Gate:** G5 on new fixtures in both formats; the format precedence test
+  (uv.lock > pylock.toml > poetry.lock > Pipfile.lock > requirements.txt) with
+  several files present.
+
+### A2: Fetch and import-closure evidence (CLI)
+
+- `scan/fetch.py`: wheel-only download of every `pinned`, marker-true dist,
+  sha256 against the lock's hash when present. `no_wheel` → `Gap`.
+- Archive safety on every extracted wheel: names that are absolute, contain
+  `..`, a drive or a backslash, or are symlink entries → reject the wheel
+  (`no_wheel` with reason).
+- `scan/closure.py`: C(A) per §2.3, `RECORD`-based `dist_of`, namespace
+  handling, `Gap`s.
+- Levels available in A2: `package_installed_not_imported` and
+  `no_target_symbol` (reason `TARGET_NOT_RESOLVED`, or `NO_WHEEL`).
 - **Gate:**
-  - claim/finalize/reaper tests mirror the `triage_jobs` ones;
-  - path-escape tests (`..`, absolute, symlink to outside, symlink inside →
-    skipped and listed);
+  - closure-semantics tests: `from pkg import submodule`, star import,
+    conditional import, a `TYPE_CHECKING`-only import (excluded),
+    function-level import (included), unresolved relative import → `Gap`,
+    namespace package split across two dists;
+  - evidence-level fixtures E2 and E4-wheel (§4);
+  - trap fixtures T1–T7 (§4) produce `package_installed_not_imported` or
+    `no_target_symbol` with `closure_complete` set as labelled, and never
+    `not_reachable`.
+
+### A3: Scan resource (API, table, worker, mount)
+
+- Migration `0005`, `POST`/`GET /v1/scans`, the worker claims scans in the
+  existing poll loop, and the reaper covers `scans`.
+- Compose:
+  - the worker gets `${SCAN_INPUTS_DIR:-./scan-inputs}:/scan-inputs:ro`;
+  - the snapshot is mounted as a read-only file;
+  - `OSV_SNAPSHOT_PATH` and `OSV_SNAPSHOT_SHA256` are set;
+  - the API mounts neither.
+- Path rules (R §1.1 (b)).
+- The OpenAPI snapshot is regenerated. The `/v1/triage` part of the schema
+  diff must be empty.
+- **Gate:**
+  - claim/finalize/reaper tests mirroring `triage_jobs`;
+  - path-escape tests (`..`, absolute, a symlink to outside, a symlink inside →
+    skipped plus a `Gap`);
+  - snapshot mismatch → the worker refuses to start;
   - `/v1/triage` OpenAPI unchanged;
-  - `scripts/smoke_compose.sh` run by Raghav.
+  - human-run item (F4 precedent): `scripts/smoke_compose.sh` is run by
+    Raghav, not the loop.
 
-### A3: Distribution-level verdict (import closure)
-- Fetch wheels for matched distributions and every lock-graph ancestor down to
-  the app's direct dependencies (whole pinned set for graph-less formats).
-  Fetch is wheel-only, with sha256 from the lock when present.
-- L1-only per-dist import tables; app + entry-point roots (R1); dynamic-import
-  taint over the lock graph (R2); `.pth` check (R3).
-- Distribution never loaded → `not_reachable`, scope `distribution`.
-  Otherwise `unknown` with the R-rule reason.
+### A4: Targets
+
+- `scan/targets.py` per §2.4: installed ↔ first-fixed-above diff on the stable
+  key, the version-only filter, `non_py_changes`, `NATIVE_ONLY_CHANGE`,
+  `DEPENDENCY_PIN_FIX` (only `Requires-Dist` differs), `named` extraction,
+  confidence, cache.
+- Adds level `module_imported_by_app` with reason `NO_PATH_FOUND` before A5
+  exists. In A4 every imported dist with targets gets this level.
+  `TARGET_NOT_RESOLVED` is removed.
 - **Gate:**
-  - the measured cases as fixtures: a uvicorn-hosted app where `httptools` is
-    never imported by app code must be **not** `not_reachable` (entry-point
-    roots); a dynamic-import-tainted dist must be `unknown`;
-  - eval G1 holds on every fixture added so far.
+  - the 5 diffs from R §4.3 reproduced on real wheels (real-wheel lane, §4):
+    the labelled true symbol is in `changed`; Django `module django` and
+    Starlette `module starlette` are filtered as version-only; jinja2 shows
+    no phantom pairs;
+  - unit tests for `named` on the R §4.2 sample texts: vanna's “ask” is not
+    named, and langchain-openai's `` `_url_to_size()` `` is named.
 
-### A4: Fix diff targets and module-level verdict
-- `scan/targets.py`: last-affected / first-fixed selection; wheel diff on a
-  **stable cross-version key** `(module, qualname, ordinal)` (fixes R §4.3
-  noise class iv, `@lineno` ids); drop version-string-only module changes; flag
-  `NATIVE_ONLY_CHANGE` (no `.py` changes) and `DEPENDENCY_PIN_FIX`
-  (`Requires-Dist` changed, no code change); cache in
-  `advisory_targets_cache`.
-- R4 over the full changed-module set → module-scope `not_reachable`, else
-  `unknown`.
+### A5: Linked call graph (`path_proven`)
+
+- `scan/dist_index.py`: per-dist L1–L3 with the wheel as its own root,
+  cached. A link step re-resolves `ext:<module>.<name>` callees across the
+  cached indexes. Same-file ownership collision → `Gap`.
+- An `index/` helper computes the D3 set once per index. Behaviour is
+  identical; the existing D3 tests stay unchanged.
 - **Gate:**
-  - the 5 measured diffs (R §4.3) reproduced as tests over committed
-    *miniature* wheels (no real wheels committed): the true symbol is in the
-    candidate set, and the version-string change is filtered;
-  - the jinja2-style overload shift yields no phantom add/remove pairs.
+  - **parity**: the linked edge set equals the single-root combined build (the
+    R §5.2 method) on the two measured apps, at the commits and locks in R §5.2;
+  - E1 is `path_proven` with a path ending at the labelled true symbol;
+  - per-query time on the FastAPI template is at most 1.0 s (measured baseline
+    3.9–4.9 s, R §5.3).
 
-### A5: Linked cross-distribution call graph (`reachable`)
-- `scan/dist_index.py`: per-dist L1–L3 with the wheel as its own root, cached.
-  Link step re-resolves `ext:<module>.<name>` callees across cached indexes.
-  The module → dist map comes from wheel `RECORD`; namespace-package merge;
-  same-file collisions → `unknown`.
-- D3 name-escape set computed once per linked index (no-new-capability helper
-  in `index/`; behaviour identical, tested by the existing D3 tests).
-- App start points only. A dependency "no path" → `NO_STATIC_PATH_IMPORTED`.
+### A6: Eval corpus and CI gate
+
+- The fixtures and labels frozen in §4, `scripts/run_scan_eval.py`, and the
+  CI job `scan-eval` (miniature lane).
+- **Gate:** the §4 rules applied verbatim on **both** lanes and reported.
+  The real-wheel lane is the phase gate.
+
+### A7: Resolution of unresolved app edges (measurable target)
+
+- **Metric U.** For an app, U = (edges whose caller module is in A and whose
+  callee id starts with `?:`) / (edges whose caller module is in A). It is
+  computed on the combined index built per R §5.2 at the pinned commits and
+  locks.
+- **Corrected baselines:** Flask tutorial **104/177 = 58.8%**, FastAPI
+  template **468/765 = 61.2%** `[measured]`. Earlier drafts said 55% for the
+  Flask tutorial; that was a miscount.
+- **Scope**, exactly three shapes:
+  1. **Property and descriptor reads.** An attribute *load* `recv.attr`
+     (not in call position) where `recv`'s class is statically known and
+     `attr` resolves through the class's MRO to a function decorated
+     `@property`, `@functools.cached_property`, or the dependency's own
+     `cached_property`. Statically known means one of:
+     - `recv` is `self` or `cls` in a method of that class;
+     - `recv` is a class name;
+     - `recv` is a module-level name whose annotation, or whose direct
+       `Class(...)` assignment, names the class in its defining module.
+     This adds a new edge to the getter, with a new resolution rule
+     `property_access` at confidence `medium`.
+  2. **`self.method()` through the class.** The existing `self_mro` rule,
+     extended to methods inherited from a dependency class once A5 has linked
+     the indexes. Measured: 0 app-side `self.` receivers are unresolved, so
+     the benefit is on the dependency side, which is reported separately.
+  3. **Module-attribute calls.** `imported_module.attr()` that today ends `?:`
+     because `attr` is re-exported in the module's `__init__` (e.g.
+     `jwt.decode`); and `Imported.attr()` where `Imported` is a class reached
+     through a from-import and `attr` is a classmethod or staticmethod defined
+     on it or its bases.
+- Out of scope: `local_var.method()` (49–71% of unresolved app edges, R §5.3),
+  which needs type inference.
 - **Gate:**
-  - **parity**: the linked index's edge set equals the single-root combined
-    build (R §5.2 method) on flaskr-style and FastAPI-style miniature fixtures;
-  - the `request.form` regression fixture is `unknown`, not `not_reachable`;
-  - per-query time on the largest fixture is reported.
+  - U before and after, reported on both measured apps, plus the
+    dependency-side U;
+  - **FastAPI U ≤ 51.2%** (at least a 10-point drop; the in-scope shapes cover
+    up to 185 of its 468 unresolved edges, R §5.3 table);
+  - Flask tutorial U ≤ 58.8% (no increase; only 9 of its 104 are in scope);
+  - a miniature fixture that copies the real declaration of flask's `request`
+    and werkzeug's `Request.form` produces a `property_access` edge to `form`.
+    If flask's real `request` declaration is not statically typed this way
+    (**ASSUMPTION**: unverified), the unit reports that and the fixture uses
+    the closest shape that is;
+  - `scripts/run_eval_suite.py`: the **30 stub-eval verdicts unchanged**;
+  - **no existing test's verdict moves from `unknown` to `not_reachable`** on
+    the L5 and Phase 4 corpora. More resolved edges can remove a
+    low-confidence bridge, so this is checked explicitly;
+  - full `pytest` green.
 
-### A6: Eval corpus and CI gate (stub lane)
-- The fixture set from §4, labels as frozen in §4, `scripts/run_scan_eval.py`,
-  and a new CI job `scan-eval` (no Postgres, no network: wheels and snapshot
-  subset are committed miniatures or test-built).
-- **Gate:** §4 decision rules applied verbatim and reported.
+### A8 (optional): Ranking and fix-commit narrowing
 
-### A7 (optional): Ranking
-- Deterministic stub ranker (symbol named in advisory text first, then
-  lexical). Optional `GroqLLMClient` ranker behind `TRIAGE_LLM_MODE=groq`:
-  advisory text through `sandbox_untrusted_text`; output ids must be in the
-  candidate set, or pass the existence check.
-- Fix-commit narrowing (`github.com/.../commit/<sha>.patch`) only if decision
-  D4 allows it; intersect only.
+- A deterministic stub ranker: high first, then named, then changed, then
+  lexical order.
+- Optional `GroqLLMClient` ranker behind `TRIAGE_LLM_MODE=groq`. The advisory
+  text goes through `sandbox_untrusted_text`, and ids outside named ∪ changed
+  are dropped (§2.4).
+- Fix-commit narrowing via `https://github.com/<o>/<r>/commit/<sha>.patch`,
+  off by default (`SCAN_FIX_COMMIT_FETCH=0`). It can only reorder within
+  named ∪ changed; it adds nothing.
 - **Gate:**
-  - property test: for every fixture, permuting the ranking never changes any
-    advisory verdict (§2.4);
+  - property test: permuting any ranking changes no verdict or evidence level,
+    only the order of targets and the displayed path;
   - real-model ranking run by Raghav only.
 
-### A8: Docs
+### A9: Docs
+
 - README section, `agent_docs/DEMO.md` scan walkthrough, `DECISIONS.md` §26
-  (final text from the draft below), CLAUDE.md NOT BUILT updates (§7).
+  (final text from §8), and the CLAUDE.md NOT BUILT changes (§7).
 - **Gate:** every doc claim has a file:line.
+
+### A10 (later, not in this phase's first units): Archive upload (D1)
+
+- `POST /v1/scans` multipart with a zip or tar.gz, written to a scratch root
+  that then follows the A3 directory path.
+- Rejected before extraction:
+  - any entry that is absolute, contains `..`, has a drive or backslash, or is
+    a symlink or hardlink (zip `external_attr` S_IFLNK; tar `issym`/`islnk`);
+  - device files.
+- tar is always extracted with `filter="data"`.
+- Limits: 50 MB compressed, 200 MB extracted (a streaming byte counter, not
+  the declared sizes), 20,000 files, 255-byte names, depth 32. nginx
+  `client_max_body_size` is aligned.
+- Only `.py`, `.toml`, `.lock`, `.txt`, `.cfg`, `.json` files are written.
+- **Gate:** a crafted-archive test set (zip-slip, absolute path, symlink, a
+  bomb measured at 49 KB → 50 MB per R §1.1, too many files, a deep tree), each
+  rejected with a named error; nothing written outside the scratch root.
 
 ## 4. Eval protocol (pre-registered; frozen at spec approval)
 
-These rules are part of this spec. They may not be amended after any A6 run
-starts. Changes before that need Raghav's approval, recorded as an amendment
-with its date.
-
-**Fixtures** (`tests/fixtures/app_scan/NN_name/`): an app tree, a lockfile,
-and `label.json` = `{advisory_id: [allowed verdicts]}`. Advisory records come
+These rules may not be amended after any A6 run starts. Changes before that
+need Raghav's approval, recorded as a dated amendment. Advisory records come
 from snapshot sha256 `c7ea4e15b83912960fc5cbd42c6003dd630e422ec4dfbfc4ed19445573e1b08c`.
-Every vulnerable distribution appears in a **calls** app and an **installed,
-not called** app:
 
-| # | Advisory | Pair | App | Allowed |
-|---|---|---|---|---|
-| 01 | GHSA-r7w7-9xr2-qq2r (langchain-openai `_url_to_size`) | 1.1.13/1.1.14 | calls `get_num_tokens_from_messages` | {reachable, unknown} |
-| 02 | same | same | installs, never imports | {not_reachable, unknown} |
-| 03 | GHSA-gmhf-gg8w-jw42 (signxml `XMLVerifier.verify`) | 4.0.3/4.0.4 | calls `XMLVerifier().verify` | {reachable, unknown} |
-| 04 | same | same | imports `signxml` for `XMLSigner` only | {unknown} |
-| 05 | GHSA-qg2p-9jwr-mmqf (Django urlize) | 4.2.13/4.2.14 | calls `django.utils.html.urlize` | {reachable, unknown} |
-| 06 | same | same | Django installed, urlize never called | {unknown} |
-| 07 | GHSA-wqp7-x3pw-xc5r (Starlette StaticFiles) | 1.0.1/1.1.0 | mounts `StaticFiles(...)` | {reachable, unknown} |
-| 08 | same | same | starlette app, no StaticFiles | {unknown} |
-| 09 | GHSA-q34m-jh98-gwm2 (Werkzeug form file parsing) | 3.0.5/3.0.6 | Flask view reads `request.form` | {unknown} *(regression guard: the true answer is reachable, which static analysis cannot show)* |
-| 10 | same | same | Flask app, never reads forms | {unknown} |
-| 11 | none | – | `requirements.txt` with an unpinned line | that dist's advisories: {unknown} with `VERSION_UNPINNED` |
-| 12 | none | – | lock with an sdist-only dist | {unknown} with `NO_WHEEL` |
+**Two lanes.**
+- **Real-wheel lane:** the phase gate. It is run by the loop locally, uses
+  pip wheel-only with sha256 pins, and has network access for wheels only.
+- **Miniature lane:** CI. No network; stand-in wheels with the same
+  module/symbol layout for the touched modules, plus every feature the trap
+  fixture depends on (dynamic import, entry points, a URL string).
+- A row passes the phase only if it passes on the real-wheel lane. A
+  difference between the lanes is reported, and the miniature is fixed to
+  match.
 
-"Reachable" here means the label author verified the call by reading the code.
-Fixtures carry miniature stand-in wheels whose module and symbol layout copies
-the real distribution's for the touched modules. **ASSUMPTION**: miniatures are
-faithful enough. The A6 gate also runs fixtures 01, 03 and 05 once against the
-real wheels locally, outside CI, and reports the result.
+**Label schema** (`label.json`):
+```
+{"advisories": {"<id>": {"verdict": [..], "evidence_level": [..], "reason_code": [..],
+                          "true_symbols": ["module:qualname", ..]?}},
+ "inventory":  {"<dist>": {"version": "..."|null, "status": "..."}},
+ "closure_complete": true|false,
+ "malicious": ["<id>", ..]}
+```
+Synthetic advisories, used where no real advisory exists for a trap dist, live
+in `tests/fixtures/app_scan/advisories/synthetic/`. Their ids start
+`SYNTH-`. They are counted separately and never reported as real coverage.
+
+**Evidence-level fixtures** (one per level, plus contrasts):
+
+| # | Advisory | Installed | App | verdict | evidence_level | reason_code | true_symbols |
+|---|---|---|---|---|---|---|---|
+| E1 | GHSA-r7w7-9xr2-qq2r | langchain-openai 1.1.13 | imports `langchain_openai.chat_models.base` and calls `_url_to_size(url)` directly *(synthetic call shape, real advisory)* | reachable | path_proven | – | `langchain_openai.chat_models.base:_url_to_size` |
+| E1r | same | same | calls `ChatOpenAI(...).get_num_tokens_from_messages(...)` (realistic) | reachable, unknown | path_proven, module_imported_by_app | –, NO_PATH_FOUND, LOW_CONFIDENCE_PATH | same |
+| E2 | same | same | lock has langchain-openai, app never imports it | unknown | package_installed_not_imported | NOT_IMPORTED_BY_APP_CODE | – |
+| E3 | GHSA-gmhf-gg8w-jw42 | signxml 4.0.3 | imports `signxml` and uses only `XMLSigner` | unknown | module_imported_by_app | NO_PATH_FOUND, LOW_CONFIDENCE_PATH, OPAQUE_CALL, NAME_ESCAPE | `signxml.verifier:XMLVerifier.verify` |
+| E3r | same | same | calls `XMLVerifier().verify(...)` | reachable, unknown | path_proven, module_imported_by_app | any allowed for the level | same |
+| E4 | GHSA-7735-w2jp-gvg6 (vanna, no fixed version) | vanna 0.5.5 | imports `vanna` and calls `ask` | unknown | no_target_symbol | NO_FIX_VERSION | – |
+| E4w | SYNTH-0001 on dkimpy | dkimpy 1.1.8 (sdist only, R §2.1) | imports `dkim` | unknown | no_target_symbol | NO_WHEEL | – |
+| E5 | GHSA-qg2p-9jwr-mmqf | Django 4.2.13 | calls `django.utils.html.urlize` | reachable, unknown | path_proven, module_imported_by_app | any allowed | `django.utils.html:Urlizer.trim_punctuation`, `django.utils.html:urlize` |
+| E6 | GHSA-wqp7-x3pw-xc5r | Starlette 1.0.1 | mounts `StaticFiles(...)` (framework calls it) | unknown | module_imported_by_app | NO_PATH_FOUND | – |
+| M1 | a `MAL-*` record from the snapshot (picked by the A1a plan, recorded before any run) | that version | lock lists it | – (in `malicious`) | – | – | – |
+
+**Trap fixtures** (measured failure classes; none may ever produce
+`not_reachable`, and each checks that the evidence wording does not overclaim):
+
+| # | Trap | Setup | Expected |
+|---|---|---|---|
+| T1 | host loads deps (R §5.5) | FastAPI-style app, uvicorn in the lock, SYNTH-0002 on httptools | package_installed_not_imported; evidence `depended_on_by` contains `uvicorn`; `dist_entry_points` of uvicorn listed |
+| T2 | stdlib loader | app uses `zoneinfo.ZoneInfo`, tzdata in the lock, SYNTH-0003 on tzdata | package_installed_not_imported |
+| T3 | URL-string driver (`config.py:39`) | SQLAlchemy `create_engine("postgresql+psycopg://…")`, psycopg in the lock, SYNTH-0004 on psycopg | package_installed_not_imported |
+| T4 | settings-string import | Django `INSTALLED_APPS = ["rest_framework"]`, SYNTH-0005 on djangorestframework | package_installed_not_imported |
+| T5 | unseen code | a lock dist that is sdist-only (dkimpy) and is a dependency of an imported dist | `closure_complete: false`, `Gap{no_wheel}`; E4w level for its own advisory |
+| T6 | unparseable app file | one app module with a SyntaxError | `closure_complete: false`, `Gap{unparsed_file}` |
+| T7 | symlinked app file | an app file that is a symlink | skipped, `Gap{skipped_symlink}`, `closure_complete: false` |
+| T8 | property read (R §5.3) | Flask view reads `request.form`, GHSA-q34m-jh98-gwm2 on Werkzeug 3.0.5 | verdict {unknown, reachable}; evidence {module_imported_by_app, path_proven}; reachable only with a path ending in `true_symbols` = werkzeug form-parsing functions changed in 3.0.5→3.0.6 (listed by the A4 plan from the diff, before any A6 run) |
+| T9 | inventory | `requirements.txt` with one unpinned line, one `-e` line, `--hash` lines, and a marker false for `target_env` | statuses `unpinned`, `unsupported`, `pinned`, `marker_skipped`; hint present; no findings for the unpinned dist |
 
 **Decision rules:**
-- **G1 (hard)**: zero `not_reachable` on any row whose label set excludes it
-  (rows 01, 03–10). One violation fails the phase gate.
-- **G2 (hard)**: every row's verdict is in its allowed set, and every
-  `unknown` carries the reason code named in the row where one is named.
-- **G3 (hard)**: of rows 01, 03, 05, 07, at least **3 of 4** are `reachable`,
-  with a path whose final callee is in the A4 candidate set.
-- **G4 (reported only)**: `unknown` rate over all rows; distribution of reason
-  codes.
-- **G5 (hard)**: inventory exact match (dist, version, status) on every
-  fixture lockfile.
-- **G6 (hard)**: zero network access during the CI eval.
-- Budget exhaustion is never counted as a pass for any row (§13 precedent).
-- The stub lane runs in CI as job `scan-eval`. Model-ranked runs (A7) are
-  Raghav's only and are reported against the same rules, never gating CI.
+- **G1 (hard):** zero `not_reachable` in any finding on any fixture, on either
+  lane. This is a code invariant as well as an eval rule.
+- **G2 (hard):** every row's verdict, evidence level and reason code are each
+  in the row's allowed set. A row without a listed reason set allows any code
+  the registry permits for the level.
+- **G3 (hard):** E1 is `path_proven`, and its path's final callee is in
+  `true_symbols`. **Reported, not gating:** E1r, E3r, E5 and T8. For each, say
+  whether it is `path_proven`, and if so whether the path ends in
+  `true_symbols`. Any `path_proven` row whose final callee is *not* in
+  `true_symbols` is a **G3 failure**: a reachable claim about the wrong
+  function.
+- **G4 (reported):** distribution of evidence levels and reason codes.
+- **G5 (hard):** inventory exact match on every fixture.
+- **G6 (hard):** zero network access in the miniature lane.
+- **G7 (hard):** malicious rows are in `malicious`, and nowhere in `findings`.
+- **If G3 fails:** the phase does not close. Raghav decides between fixing and
+  re-running (a new dated run, both runs reported) and amending E1.
+- Budget exhaustion never counts as a pass for any row (DECISIONS §13).
 
-## 5. Decisions for Raghav (the GATE)
+**Amendment record:** G3 changed from R §9's "≥ 4 of 5 direct import-resolved
+calls" to the rule above (critique M1/M3), before any run, on 2026-11-12.
 
-| # | Decision | Options | Recommendation |
-|---|---|---|---|
-| D1 | Input | (a) archive upload · (b) ro bind-mounted directory · (c) git URL | **(b)**: no new network or archive parser; (a)/(c) can be added later as front ends (R §1) |
-| D2 | Inventory | (i) lockfile or fully pinned only · (ii) also allow `pip --dry-run --only-binary=:all:` resolution, labelled "resolved by scanner" | **(i)**: (ii) does not execute code (measured) but is not reproducible and not what the user runs (R §2.2) |
-| D3 | What may be `not_reachable` | (α) import-closure only (R1–R4) · (β) α + call-graph no-path for "leaf" libraries · (γ) never in this phase | **(α)**: (β) fails on the measured `request.form` case; (γ) throws away the distribution-level answers that are sound |
-| D4 | Advisory data and network | (p) mounted pinned OSV snapshot only · (q) p + optional github.com fix-commit fetch (off by default) · (r) live OSV API | **(p) for A1–A6, (q) only in A7**: offline, reproducible, no new egress on the verdict path |
-| D5 | Malicious-package records (MAL-* and PYSEC malware, 6.1% of groups) and app-kind advisories | (m1) a fifth finding category `malicious_package`, outside the four verdicts · (m2) excluded from findings, listed in inventory warnings · (m3) treated like any advisory | **(m1)**: hiding them (m2) is worse than any reachability answer; (m3) makes a meaningless call-graph query. App-kind advisories go through the normal path. They usually end `unknown` or `not_reachable` (distribution) and are not special-cased |
+## 5. Decisions (recorded 2026-11-12, Raghav)
+
+| # | Decision |
+|---|---|
+| D1 | **Read-only folder mount** for A1–A9. Archive upload is the later unit A10, with zip-slip, symlink, size and file-count limits. No git URL. |
+| D2 | **A lockfile or fully pinned requirements file is required.** Unpinned → status `unpinned`, never a guessed version. A user-facing hint tells the user to generate a lockfile locally (§2.6). |
+| D3 | **Never issue `not_reachable` in this phase.** |
+| D4 | **Pinned OSV snapshot only** for A1–A7. GitHub fix-commit fetch only in A8 (off by default). The refresh command is documented (§2.9). The snapshot date and sha256 are in every scan result. |
+| D5 | **Malicious-package advisories are a separate category, shown first, verdict-independent** (§2.10). |
 
 ## 6. Risks
 
-- **The headline number disappoints.** A measured 0% and 3.9% eligibility for
-  `not_reachable`. Mitigation: the spec states it in §0, and the UI/README
-  must lead with `reachable` paths and reasons, not with a "safe" count.
-- **Inversion of control.** Servers and frameworks call the app, so any
-  call-graph negative into a framework is unsafe (measured). It is contained
-  by D3 (α) and the `NO_STATIC_PATH_IMPORTED` mapping. Fixture 09 guards it.
-- **Re-export gap** (`jwt.decode` → `?:decode`, measured). This loses
-  `reachable` answers and is safe. Fixing it is new L3 resolution capability,
-  which is out of scope (L3 frozen); a later phase can take it up.
-- **Corpus-wide D1/D3 over dependency code** turn most answers into `unknown`
-  (6 of 6 FastAPI probes). Accepted for this phase; scoping D1/D3 to the
-  linked path is a separate decision with its own fixtures.
-- **Bundled fixes** in one release (Django) give low symbol precision. The
-  module-set rule (R4) is unaffected; displayed "primary symbol" may be wrong.
-  The UI must show all candidates with provenance.
-- **Snapshot staleness.** A pinned snapshot misses new advisories. Each scan
-  records the snapshot date, and the summary says "advisories as of <date>".
-- **Lock-graph incompleteness** (vendored or undeclared imports). R1's import
-  closure is computed over all indexed dists, not over the lock graph, so a
-  missing lock edge can only *add* `unknown`. **ASSUMPTION** that undeclared
-  imports resolve to an installed dist at all; if not, they are `ext:` and
-  unfollowed.
-- **Cost.** 13.2 s to index the FastAPI combined tree, 3.9–4.9 s per query
-  before the D3 cache (measured). Budgets in §2.7.
-- **Licence.** CC-BY-4.0 attribution for any committed advisory subset (NOTICE
-  file). Chainguard/Wolfi records are non-commercial, but they are not in the
-  PyPI export (**ASSUMPTION**: not checked record by record).
+- **The output is mostly `unknown`.** That is by design (D3). The evidence
+  level and sentence carry the information, and the README must lead with
+  `path_proven` findings and the levels, not with counts.
+- **A wrong `reachable`.** A `path_proven` finding to a medium,
+  changed-only target may point at a function that is not the vulnerable one.
+  Measured: Django 4.2.14 bundles fixes for several advisories into one diff
+  (R §4.3). This is contained by the sentence wording (§2.5), by showing the
+  confidence, and by G3 treating a path to a non-true symbol as a failure.
+- **L3 freeze (CLAUDE.md, L5 paragraph).** A7 adds new resolution capability,
+  which CLAUDE.md forbids today. A7 may only start after `DECISIONS.md` §26 is
+  applied with the scoped exception (§8). More resolved edges can also remove
+  a low-confidence bridge that today forces `unknown` in `/v1/triage`. A7's
+  gate checks that no corpus verdict moves to `not_reachable`.
+- **Config-driven and host loading** (psycopg via URL, uvicorn → httptools,
+  INSTALLED_APPS). Handled by D3. T1–T4 check the wording.
+- **Snapshot staleness.** Every result carries the date (D4).
+- **The `named` heuristic** can miss names written in prose. A miss only lowers
+  confidence; it never creates a target, because code form is required.
+- **The malicious classifier** misses unsignalled records (§2.10); they fall
+  through to normal findings.
+- **Cost.** 13.2 s to index the FastAPI combined tree; 3.9–4.9 s per query
+  before the D3 cache (R §5.3). A5's gate sets ≤ 1.0 s.
+- **Licence.** CC-BY-4.0 attribution for the committed advisory subset.
+  Chainguard records are non-commercial, but are believed absent from the PyPI
+  export (**ASSUMPTION**: not checked record by record).
 
-## 7. NOT BUILT lines this phase would change
+## 7. NOT BUILT lines this phase would change (at A9)
 
-This would be added to CLAUDE.md NOT BUILT when A8 lands, and stay true after
-the phase:
-- App scan input by archive upload or git URL (scans take a relative path under
-  a read-only mount only).
-- Dependency resolution for unpinned requirements (an unpinned dist is
-  reported `VERSION_UNPINNED`).
-- Call-graph-based `not_reachable` for dependency symbols. A "no path" result
-  into a dependency is `unknown` (`NO_STATIC_PATH_IMPORTED`).
-- Framework-aware edges (property/descriptor access, Django URLconf, signals,
-  FastAPI `Depends`, template-text filter calls).
+**Added** (true after the phase):
+- `not_reachable` from an app scan. Scans never issue it. Evidence levels are
+  carried on `unknown` instead.
+- App scan input by archive upload (until A10) or git URL.
+- Dependency resolution for unpinned requirements.
+- Framework-aware edges beyond A7's three shapes: Django URLconf, signals,
+  `Depends`, template-text filter calls, `local_var.method()` type inference.
 - Live OSV queries; automatic snapshot refresh.
-- Fix-commit fetching, unless A7 ships with D4 = (q).
+- Fix-commit fetching on by default.
 - Severity scoring of our own.
 
-Removed from NOT BUILT: nothing. `repo_url` acquisition stays NOT BUILT.
+**Changed:** the L3 "frozen against new resolution capability" statement gets
+the A7 exception, scoped to its three shapes.
+
+**Removed:** nothing. `repo_url` acquisition stays NOT BUILT.
 
 ## 8. Draft `DECISIONS.md` §26 (draft only; not applied to DECISIONS.md)
 
-> ## 26. App scan: dependency advisories, verdicts by import closure (draft, 2026-11-12)
+> ## 26. App scan: evidence levels instead of `not_reachable` (draft, 2026-11-12)
 >
-> **Decision.** A new resource, `/v1/scans`, would take a relative path under a
-> read-only mount, read a lockfile, match a pinned OSV PyPI snapshot, and
-> return one verdict per advisory. `/v1/triage` is unchanged.
+> **Decision.** `/v1/scans` takes a relative path under a read-only mount,
+> requires a lockfile or fully pinned requirements, matches a pinned OSV PyPI
+> snapshot (date and sha256 in every result), and returns one finding per
+> advisory. Each finding carries one of the four existing verdicts plus an
+> evidence level: `path_proven`, `module_imported_by_app`,
+> `package_installed_not_imported` or `no_target_symbol`. Malicious-package
+> records are listed separately and first, with no verdict. `/v1/triage` is
+> unchanged.
 >
-> **`not_reachable` comes only from the import closure (R1–R4), never from a
-> call-graph negative into a dependency.** Measured on the Flask tutorial: the
-> combined app+dependency call graph reports `not_reachable` for werkzeug's
-> multipart parser, which `request.form` runs at runtime
-> (`APP_SCAN_RESEARCH.md` §5.3). Attribute loads that run code and
-> servers that call the app are outside L3's model, and L3 is frozen. A call-graph
-> "no path" into a dependency is therefore `unknown`
-> (`NO_STATIC_PATH_IMPORTED`).
+> **Scans never issue `not_reachable`.** Two measured results:
+> - A call graph over the Flask tutorial plus its wheels answered
+>   `not_reachable` for werkzeug's multipart parser, which `request.form` runs
+>   at runtime.
+> - An import-graph rule looked sound until the FastAPI template showed
+>   psycopg loaded from a URL string (`backend/app/core/config.py:39`, via
+>   SQLAlchemy's `__import__`). With dynamic imports treated corpus-wide (the
+>   D1 precedent), 0 dependency modules were eligible on either app.
 >
-> **The import closure starts from every installed entry point, not only the
-> app**, because the process host (uvicorn under `fastapi run`) and plugins
-> load modules the app never imports. Without those roots, `httptools` and
-> `websockets` appeared "never imported" in the FastAPI template.
+> The earlier "87 of 2,241" figure is withdrawn (`APP_SCAN_RESEARCH.md` §0.4).
 >
-> **Advisory scope uses the full changed-module set of the wheel diff**, so no
-> ranking (deterministic or model) can turn `unknown` into `not_reachable`. The
-> model never sets a verdict; it orders candidates only.
+> **Target confidence:** high = named in the advisory text (code form) and
+> changed between the installed version and the first fixed version above it.
+> Medium = one of the two. The model may only rank within that set.
 >
-> **Inventory needs a lockfile or a fully pinned requirements file.** No
-> resolver runs. Unpinned → `unknown` (`VERSION_UNPINNED`). No wheel → `unknown`
-> (`NO_WHEEL`). This is the same wheel-only rule as `acquisition.py`.
+> **L3 exception (scoped):** the L3 freeze is lifted for exactly three shapes:
+> - property/descriptor reads on a statically known class (new rule
+>   `property_access`, medium);
+> - `self.method()` into linked dependency classes;
+> - module-attribute calls through `__init__` re-exports, and class
+>   classmethod/staticmethod calls via from-imports.
 >
-> **Accepted consequence.** Under these rules 0 of 131 (Flask tutorial) and 87
-> of 2,241 (FastAPI template) dependency modules can ever be `not_reachable`. The
-> phase's value is `reachable` with a path, plus a graded `unknown`. This is
-> stated in the README and is not presented as a "safe to ignore" count.
+> The exception holds only while the 30 stub-eval verdicts are unchanged and no
+> corpus verdict moves to `not_reachable`. Everything else in L3 stays frozen.
 >
-> **Frozen eval rules:** `PHASE_APP_SCAN.md` §4 (G1/G2/G3/G5/G6 hard, G4
+> **Frozen eval rules:** `PHASE_APP_SCAN.md` §4 (G1/G2/G3/G5/G6/G7 hard, G4
 > reported).
+
+## 9. Critique resolution (`.agent/critique.md`)
+
+| Item | Resolution |
+|---|---|
+| B1 taint direction | Moot: no `not_reachable` (D3). Config-driven loading appears as wording on `package_installed_not_imported`, checked by T3/T4 |
+| B2 eligible set wrong | 87 figure withdrawn in R §0.4, §4.3, §5.5 and here; corrected result is 0 on both apps (psycopg URL string, `config.py:39`) |
+| B3 incomplete closure | `closure_complete` and `closure_gaps` on every result; T5–T7 |
+| B4 R4 modules only | R4 dropped; `non_py_changes` flag; targets only |
+| B5 wrong diff pair | installed ↔ first fixed above installed (§2.4) |
+| B6 roots incomplete | No `not_reachable`, so roots only shape evidence; host/plugin wording on level 2; T1 |
+| B7 closure semantics | Defined in §2.3, with tests in A2's gate |
+| M1 G3 candidate set | G3 pinned to `true_symbols`; a path to another symbol is a failure |
+| M2 miniatures | Real-wheel lane is the phase gate; miniatures must copy trap features |
+| M3 G3 rows and amendment | Only E1 is hard; realistic rows reported; amendment recorded in §4 |
+| M4 traps and circular gate | T1–T9 added; A2's gate uses named fixtures, not G1 "so far" |
+| M5 label keys | Label schema includes inventory and reason sets |
+| M6 markers and multi-version | §2.6 statuses; per-(dist, version) findings |
+| M7 reason drift | Closed registry, §2.5 |
+| M8 unit size and checkability | A1 split into A1a/A1b; fetch and closure (A2) separate from API (A3); A5 timing threshold; smoke is a human-run item |
+| M9 version filter | Exact definition in §2.4 |
+| M10 namespace packages | `RECORD`-based `dist_of`; namespace dirs owned by no dist (§2.3) |
