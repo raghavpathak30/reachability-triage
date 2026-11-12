@@ -296,7 +296,13 @@ def _build_groups(records: dict[str, Record]) -> tuple[dict[str, AdvisoryGroup],
         ids = tuple(sorted(record_ids.get(root, [])))
         if not ids:
             continue
-        groups[rep] = AdvisoryGroup(rep, ids)
+        if any(m.startswith("MAL-") for m in members):
+            signal: str | None = "mal_prefix"
+        elif any("CWE-506" in records[rid].cwe_ids for rid in ids):
+            signal = "cwe_506"
+        else:
+            signal = None
+        groups[rep] = AdvisoryGroup(rep, ids, signal)
         for rid in ids:
             group_of[rid] = rep
     return dict(sorted(groups.items())), group_of
@@ -398,14 +404,25 @@ class MatchResult:
 
 
 @dataclass(frozen=True)
+class MaliciousEntry:
+    id: str
+    group_id: str
+    dist: str
+    version: str
+    signal: str
+
+
+@dataclass(frozen=True)
 class ScanReport:
     snapshot: Snapshot
     inventory: Inventory
     findings: tuple[MatchResult, ...]
+    malicious: tuple[MaliciousEntry, ...] = ()
 
 
 def build_report(inventory: Inventory, snapshot: Snapshot) -> ScanReport:
     findings: list[MatchResult] = []
+    malicious: list[MaliciousEntry] = []
     seen: set[tuple[str, str]] = set()
     for entry in inventory.entries:
         if entry.status is not Status.PINNED or entry.dist is None or entry.version is None:
@@ -421,6 +438,12 @@ def build_report(inventory: Inventory, snapshot: Snapshot) -> ScanReport:
                 by_group.setdefault(snapshot.group_of[rec_id], []).append((rec_id, res))
         for group_id in sorted(by_group):
             members = by_group[group_id]
+            signal = snapshot.groups[group_id].malicious_signal
+            if signal:
+                matched_ids = sorted({rid for rid, _ in members})
+                chosen = next((i for i in matched_ids if i.startswith("MAL-")), matched_ids[0])
+                malicious.append(MaliciousEntry(chosen, group_id, entry.dist, entry.version, signal))
+                continue
             fixes = [Version(r.fixed_in) for _, r in members if r.fixed_in != NO_FIX]
             fixed = NO_FIX
             if fixes:
@@ -429,4 +452,4 @@ def build_report(inventory: Inventory, snapshot: Snapshot) -> ScanReport:
             notes = tuple(dict.fromkeys(n for _, r in members for n in r.notes))
             ids = tuple(sorted({rid for rid, _ in members}))
             findings.append(MatchResult(entry.dist, entry.version, group_id, ids, fixed, notes))
-    return ScanReport(snapshot, inventory, tuple(findings))
+    return ScanReport(snapshot, inventory, tuple(findings), tuple(malicious))
