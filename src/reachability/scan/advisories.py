@@ -49,6 +49,13 @@ class Record:
 
 
 @dataclass(frozen=True)
+class AdvisoryGroup:
+    group_id: str
+    ids: tuple[str, ...]
+    malicious_signal: str | None = None
+
+
+@dataclass(frozen=True)
 class Snapshot:
     path: str
     date: datetime.date
@@ -56,6 +63,47 @@ class Snapshot:
     records_loaded: int
     records: dict[str, Record] = field(default_factory=dict, repr=False)
     withdrawn_excluded: int = 0
+    groups: dict[str, AdvisoryGroup] = field(default_factory=dict, repr=False)
+    group_of: dict[str, str] = field(default_factory=dict, repr=False)
+
+
+def _build_groups(records: dict[str, Record]) -> tuple[dict[str, AdvisoryGroup], dict[str, str]]:
+    """Union-find over each record's id and aliases. `related` is never read."""
+    parent: dict[str, str] = {}
+
+    def find(x: str) -> str:
+        parent.setdefault(x, x)
+        root = x
+        while parent[root] != root:
+            root = parent[root]
+        while parent[x] != root:
+            parent[x], x = root, parent[x]
+        return root
+
+    for rec in records.values():
+        for alias in rec.aliases:
+            ra, rb = find(rec.id), find(alias)
+            if ra != rb:
+                parent[max(ra, rb)] = min(ra, rb)
+        find(rec.id)
+    nodes: dict[str, set[str]] = {}
+    record_ids: dict[str, list[str]] = {}
+    for node in list(parent):
+        nodes.setdefault(find(node), set()).add(node)
+    for rid in records:
+        record_ids.setdefault(find(rid), []).append(rid)
+    groups: dict[str, AdvisoryGroup] = {}
+    group_of: dict[str, str] = {}
+    for root, members in nodes.items():
+        ghsa = sorted(m for m in members if m.startswith("GHSA-"))
+        rep = ghsa[0] if ghsa else sorted(members)[0]
+        ids = tuple(sorted(record_ids.get(root, [])))
+        if not ids:
+            continue
+        groups[rep] = AdvisoryGroup(rep, ids)
+        for rid in ids:
+            group_of[rid] = rep
+    return dict(sorted(groups.items())), group_of
 
 
 def _reduce(raw: dict) -> Record:
@@ -109,7 +157,8 @@ def load_snapshot(path: Path, expected_sha256: str) -> Snapshot:
                 records[raw["id"]] = _reduce(raw)
     except zipfile.BadZipFile as exc:
         raise SnapshotError(f"snapshot is not a readable zip: {exc}") from exc
-    return Snapshot(str(path), date, actual, len(records), records, withdrawn)
+    groups, group_of = _build_groups(records)
+    return Snapshot(str(path), date, actual, len(records), records, withdrawn, groups, group_of)
 
 
 @dataclass(frozen=True)
