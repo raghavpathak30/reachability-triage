@@ -1,0 +1,8 @@
+{"inventory": {
+  "pywin32": {"version": "306", "status": "marker_skipped"},
+  "uvloop": {"version": "0.19.0", "status": "pinned"},
+  "old-backport": {"version": "1.0", "status": "marker_skipped"},
+  "needs-new": {"version": "2.0", "status": "pinned"},
+  "ext": {"version": "1.0", "status": "marker_skipped"},
+  "rel": {"version": "1.0", "status": "pinned"}
+}}

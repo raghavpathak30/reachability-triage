@@ -15,6 +15,8 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 
+from packaging._parser import Variable
+from packaging.markers import Marker, UndefinedComparison, UndefinedEnvironmentName
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
@@ -28,6 +30,22 @@ HINT = (
     "run the app, then scan again: `uv lock` (uv), `poetry lock` (Poetry), or "
     "`pip freeze > requirements.txt` run inside the environment you deploy."
 )
+
+
+TARGET_ENV = "cp313-manylinux_x86_64"
+
+# Python 3.13.15 is the deployed interpreter (Dockerfile:3), not the dev venv.
+MARKER_ENV: dict[str, str] = {
+    "python_version": "3.13",
+    "python_full_version": "3.13.15",
+    "sys_platform": "linux",
+    "platform_system": "Linux",
+    "platform_machine": "x86_64",
+    "os_name": "posix",
+    "implementation_name": "cpython",
+    "platform_python_implementation": "CPython",
+}
+_MARKER_KEYS = frozenset(MARKER_ENV) | {"extra"}
 
 
 class ScanError(Exception):
@@ -77,6 +95,42 @@ class Inventory:
     entries: tuple[InventoryEntry, ...]
     skipped: tuple[SkippedItem, ...]
     hint: str | None
+
+
+def _marker_variables(marker: Marker) -> set[str]:
+    """Collect every variable name in the parsed marker tree (packaging 26.3 shape)."""
+    found: set[str] = set()
+
+    def walk(node: object) -> None:
+        if isinstance(node, str):
+            if node not in ("and", "or"):
+                raise LockfileParseError(f"unexpected marker token {node!r}")
+        elif isinstance(node, tuple) and len(node) == 3:
+            for part in (node[0], node[2]):
+                if isinstance(part, Variable):
+                    found.add(part.value)
+        elif isinstance(node, list):
+            for child in node:
+                walk(child)
+        else:
+            raise LockfileParseError(f"unexpected marker tree node {type(node).__name__}")
+
+    walk(marker._markers)
+    return found
+
+
+def marker_applies(marker: Marker | None) -> tuple[bool, tuple[str, ...]]:
+    """Evaluate `marker` for TARGET_ENV. Unmapped keys keep the entry, with a note."""
+    if marker is None:
+        return True, ()
+    unmapped = sorted(_marker_variables(marker) - _MARKER_KEYS)
+    if unmapped:
+        return True, (f"marker uses unmapped key {unmapped[0]}; kept",)
+    env = dict(MARKER_ENV, extra="")
+    try:
+        return marker.evaluate(env), ()
+    except (UndefinedComparison, UndefinedEnvironmentName) as exc:
+        return True, (f"marker could not be evaluated ({exc}); kept",)
 
 
 _COMMENT_LINE = re.compile(r"\s*#")
@@ -200,8 +254,19 @@ def _parse_requirement_line(line: str, rel: str, lineno: int) -> InventoryEntry:
     notes: list[str] = []
     if req.extras:
         notes.append("extras: " + ",".join(sorted(req.extras)))
+    applies, marker_notes = marker_applies(req.marker)
+    notes.extend(marker_notes)
     if req.url:
-        return replace(_unsupported(rel, lineno, line, "direct URL requirement", dist), hashes=tuple(hashes))
+        notes.append("direct URL requirement")
+        return InventoryEntry(
+            dist=dist,
+            version=None,
+            status=Status.UNSUPPORTED if applies else Status.MARKER_SKIPPED,
+            source_file=rel,
+            line=lineno,
+            hashes=tuple(hashes),
+            notes=tuple(notes) + (f"raw: {line}",),
+        )
     specs = list(req.specifier)
     status = Status.UNPINNED
     version: str | None = None
@@ -217,6 +282,9 @@ def _parse_requirement_line(line: str, rel: str, lineno: int) -> InventoryEntry:
         else:
             status = Status.PINNED
             version = specs[0].version
+    if not applies:
+        notes.append(f"marker false for {TARGET_ENV}: {req.marker}")
+        status = Status.MARKER_SKIPPED
     return InventoryEntry(
         dist=dist,
         version=version,
