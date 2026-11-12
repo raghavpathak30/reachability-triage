@@ -92,3 +92,54 @@ def test_non_dict_event_conservative():
 def test_empty_events_conservative():
     matched, notes = m([], "1.0")
     assert matched is True and notes
+
+
+from reachability.scan.advisories import NO_FIX, fixed_in_for  # noqa: E402
+
+
+def f(events, installed, label="SYNTH-1"):
+    return fixed_in_for(reduce_events(events), Version(installed), label)
+
+
+def test_fixed_in_lowest_fixed_above_installed():
+    ev = [{"introduced": "1.0"}, {"fixed": "1.5"}, {"introduced": "2.0"}, {"fixed": "2.5"}]
+    assert f(ev, "1.2")[0] == "1.5"
+    assert f(ev, "2.2")[0] == "2.5"
+
+
+def test_fixed_in_none_when_only_last_affected():
+    assert f([{"introduced": "0"}, {"last_affected": "2.0"}], "1.0")[0] == NO_FIX == "none"
+
+
+def test_fixed_in_ignores_limit():
+    assert f([{"introduced": "0"}, {"limit": "3.0"}], "1.0")[0] == NO_FIX
+
+
+def test_fixed_in_is_strictly_above_installed():
+    assert f([{"introduced": "0"}, {"fixed": "2.0"}, {"fixed": "3.0"}], "2.0")[0] == "3.0"
+
+
+def test_fixed_in_returns_original_spelling():
+    assert f([{"introduced": "0"}, {"fixed": "1.5.0"}], "1.0")[0] == "1.5.0"
+
+
+def test_fixed_in_ignores_unparseable_fixed_with_note():
+    val, notes = f([{"introduced": "0"}, {"fixed": "0.9-stable"}, {"fixed": "3.0"}], "1.0")
+    assert val == "3.0"
+    assert any("0.9-stable" in n for n in notes)
+
+
+def test_fixed_in_none_when_only_unparseable_fixed():
+    val, notes = f([{"introduced": "0"}, {"fixed": "0.9-stable"}], "1.0")
+    assert val == NO_FIX and notes
+
+
+def test_fixed_in_min_across_matching_ranges_only():
+    from reachability.scan.advisories import fixed_in_across
+
+    matching = reduce_events([{"introduced": "0"}, {"fixed": "5.0"}])
+    other = reduce_events([{"introduced": "9.0"}, {"fixed": "9.5"}])
+    val, _ = fixed_in_across([matching, other], Version("1.0"), "SYNTH-1")
+    assert val == "5.0"  # `other` does not match 1.0, so its fixed 9.5 is not considered
+    both = reduce_events([{"introduced": "0"}, {"fixed": "4.0"}])
+    assert fixed_in_across([matching, both], Version("1.0"), "SYNTH-1")[0] == "4.0"

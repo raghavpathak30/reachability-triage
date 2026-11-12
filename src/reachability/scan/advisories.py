@@ -133,6 +133,44 @@ def range_matches(
     return affected, ()
 
 
+def fixed_in_for(
+    events: tuple[tuple[str, str], ...], installed: Version, label: str = ""
+) -> tuple[str, tuple[str, ...]]:
+    """Lowest valid `fixed` strictly above `installed`, else NO_FIX. `limit` is never a fix."""
+    where = f" in {label}" if label else ""
+    best: tuple[Version, str] | None = None
+    notes: list[str] = []
+    for kind, value in events:
+        if kind != "fixed":
+            continue
+        bound = _parse_bound(value)
+        if bound is None:
+            notes.append(f"unparseable fixed {value!r}{where} ignored for fixed-in")
+            continue
+        if bound > installed and (best is None or bound < best[0]):
+            best = (bound, value)
+    return (best[1] if best else NO_FIX), tuple(notes)
+
+
+def fixed_in_across(
+    ranges: list[tuple[tuple[str, str], ...]], installed: Version, label: str = ""
+) -> tuple[str, tuple[str, ...]]:
+    """Minimum fixed-in over the ranges that match `installed`; non-matching ranges are skipped."""
+    best: tuple[Version, str] | None = None
+    notes: list[str] = []
+    for events in ranges:
+        matched, _ = range_matches(events, installed, label)
+        if not matched:
+            continue
+        val, n = fixed_in_for(events, installed, label)
+        notes.extend(n)
+        if val != NO_FIX:
+            v = Version(val)
+            if best is None or v < best[0]:
+                best = (v, val)
+    return (best[1] if best else NO_FIX), tuple(notes)
+
+
 def _build_groups(records: dict[str, Record]) -> tuple[dict[str, AdvisoryGroup], dict[str, str]]:
     """Union-find over each record's id and aliases. `related` is never read."""
     parent: dict[str, str] = {}
