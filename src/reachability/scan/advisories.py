@@ -227,7 +227,7 @@ def entry_matches(entry: AffectedEntry, installed: str, label: str = "") -> Entr
 
     for item in entry.versions:
         iv = _parse_bound(item)
-        if (iv is not None and iv == pub) or (iv is None and item in (installed, full.public)):
+        if iv is not None and iv == pub:
             matched = True
             break
 
@@ -406,13 +406,27 @@ class ScanReport:
 
 def build_report(inventory: Inventory, snapshot: Snapshot) -> ScanReport:
     findings: list[MatchResult] = []
+    seen: set[tuple[str, str]] = set()
     for entry in inventory.entries:
-        if entry.status is not Status.PINNED:
+        if entry.status is not Status.PINNED or entry.dist is None or entry.version is None:
             continue
-        for rec in snapshot.records.values():
-            for aff in rec.affected:
-                if aff.dist == entry.dist and entry.version in aff.versions:
-                    findings.append(
-                        MatchResult(entry.dist, entry.version, rec.id, (rec.id,), NO_FIX)
-                    )
+        key = (entry.dist, entry.version)
+        if key in seen:
+            continue
+        seen.add(key)
+        by_group: dict[str, list[tuple[str, EntryResult]]] = {}
+        for rec_id, aff in snapshot.by_dist.get(entry.dist, []):
+            res = entry_matches(aff, entry.version, rec_id)
+            if res.matched:
+                by_group.setdefault(snapshot.group_of[rec_id], []).append((rec_id, res))
+        for group_id in sorted(by_group):
+            members = by_group[group_id]
+            fixes = [Version(r.fixed_in) for _, r in members if r.fixed_in != NO_FIX]
+            fixed = NO_FIX
+            if fixes:
+                low = min(fixes)
+                fixed = next(r.fixed_in for _, r in members if r.fixed_in != NO_FIX and Version(r.fixed_in) == low)
+            notes = tuple(dict.fromkeys(n for _, r in members for n in r.notes))
+            ids = tuple(sorted({rid for rid, _ in members}))
+            findings.append(MatchResult(entry.dist, entry.version, group_id, ids, fixed, notes))
     return ScanReport(snapshot, inventory, tuple(findings))
