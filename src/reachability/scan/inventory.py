@@ -144,7 +144,7 @@ def marker_applies(marker: Marker | None) -> tuple[bool, tuple[str, ...]]:
     env = dict(MARKER_ENV, extra="")
     try:
         return marker.evaluate(env), ()
-    except (UndefinedComparison, UndefinedEnvironmentName) as exc:
+    except (UndefinedComparison, UndefinedEnvironmentName, ValueError) as exc:
         return True, (f"marker could not be evaluated ({exc}); kept",)
 
 
@@ -291,7 +291,7 @@ def _parse_requirement_line(line: str, rel: str, lineno: int) -> InventoryEntry:
     elif len(specs) == 1 and specs[0].operator == "==" and "*" not in specs[0].version:
         try:
             Version(specs[0].version)
-        except InvalidVersion:
+        except (InvalidVersion, ValueError):
             status = Status.UNSUPPORTED
             notes.append(f"version {specs[0].version!r} is not valid PEP 440")
         else:
@@ -472,7 +472,7 @@ def _version_status(version: object) -> tuple[Status, str | None, str | None]:
         return Status.UNSUPPORTED, None, "no version in lock"
     try:
         Version(version)
-    except InvalidVersion:
+    except (InvalidVersion, ValueError):
         return Status.UNSUPPORTED, version, f"version {version!r} is not valid PEP 440"
     return Status.PINNED, version, None
 

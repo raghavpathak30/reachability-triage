@@ -100,7 +100,7 @@ def reduce_events(events: object) -> tuple[tuple[str, str], ...]:
 def _parse_bound(value: str) -> Version | None:
     try:
         return Version(value)
-    except InvalidVersion:
+    except (InvalidVersion, ValueError):
         return None
 
 

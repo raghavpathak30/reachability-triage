@@ -50,3 +50,63 @@ def test_600_file_include_chain_raises_and_cli_exits_1(scan_root, snapshot_facto
     with pytest.raises(LockfileParseError):
         build_inventory(scan_root)
     assert_named_exit(run_cli(scan_root, snapshot_factory))
+
+
+# ---- F8: huge-digit versions (Python's int-string limit makes Version() raise ValueError)
+
+BIG = "9" * 5000
+
+
+def test_requirements_huge_version_is_unsupported(scan_root):
+    (scan_root / "requirements.txt").write_text(f"foo=={BIG}\n")
+    e = build_inventory(scan_root).entries[0]
+    assert e.status.value == "unsupported"
+    assert any("not valid PEP 440" in n for n in e.notes)
+
+
+def test_poetry_huge_version_is_unsupported(scan_root):
+    (scan_root / "poetry.lock").write_text(f'[[package]]\nname = "foo"\nversion = "{BIG}"\ngroups = ["main"]\n')
+    e = build_inventory(scan_root).entries[0]
+    assert e.status.value == "unsupported"
+
+
+def test_uv_huge_version_is_unsupported(scan_root):
+    (scan_root / "uv.lock").write_text(
+        'version = 1\n[[package]]\nname = "app"\nversion = "0.1"\nsource = {virtual = "."}\n'
+        'dependencies = [{name = "foo"}]\n'
+        f'[[package]]\nname = "foo"\nversion = "{BIG}"\nsource = {{registry = "https://pypi.org/simple"}}\n'
+    )
+    e = [x for x in build_inventory(scan_root).entries if x.dist == "foo"][0]
+    assert e.status.value == "unsupported"
+
+
+def test_requirements_marker_huge_version_keeps_entry_with_note(scan_root):
+    (scan_root / "requirements.txt").write_text(f"foo==1.0; python_version >= '{BIG}'\n")
+    e = build_inventory(scan_root).entries[0]
+    assert e.status.value == "pinned"
+    assert any("could not be evaluated" in n for n in e.notes)
+
+
+def test_poetry_marker_huge_version_keeps_entry_with_note(scan_root):
+    (scan_root / "poetry.lock").write_text(
+        f'[[package]]\nname = "foo"\nversion = "1.0"\ngroups = ["main"]\nmarkers = "python_version >= \'{BIG}\'"\n'
+    )
+    e = build_inventory(scan_root).entries[0]
+    assert any("could not be evaluated" in n for n in e.notes)
+
+
+@pytest.mark.parametrize("where", ["fixed", "versions", "lkavr"])
+def test_snapshot_huge_bound_matches_conservatively(scan_root, snapshot_factory, where):
+    from tests.scan.test_scan_matcher_assembly import aff, rec, report_for  # noqa: PLC0415
+
+    if where == "fixed":
+        a = aff("foo", ranges=[[{"introduced": "0"}, {"fixed": BIG}]])
+    elif where == "versions":
+        a = aff("foo", versions=[BIG])
+    else:
+        a = aff("foo", database_specific={"last_known_affected_version_range": f"<= {BIG}"})
+    r = report_for(snapshot_factory, scan_root, "foo==1.0\n", rec("S-1", [a]))
+    if where == "versions":
+        assert r.findings == ()
+    else:
+        assert len(r.findings) == 1
