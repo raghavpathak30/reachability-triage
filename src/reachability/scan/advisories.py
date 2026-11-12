@@ -413,11 +413,39 @@ class MaliciousEntry:
 
 
 @dataclass(frozen=True)
+class UnpinnedSummary:
+    packages: int
+    advisories_any_version: int
+    per_dist: dict[str, int] = field(default_factory=dict)
+
+
+LEAD_TEMPLATE = "{n} packages are not pinned; they have {m} known advisories (any version). Pin them to check."
+
+
+def summarise_unpinned(inventory: Inventory, snapshot: Snapshot) -> UnpinnedSummary:
+    """Count, never match: distinct non-malicious groups with any PyPI entry for an unpinned dist."""
+    unpinned = [e for e in inventory.entries if e.status is Status.UNPINNED and e.dist is not None]
+    dists = {e.dist for e in unpinned}
+    groups: set[str] = set()
+    per_dist: dict[str, set[str]] = {}
+    for dist in sorted(dists):
+        for rec_id, _ in snapshot.by_dist.get(dist, []):
+            gid = snapshot.group_of[rec_id]
+            if snapshot.groups[gid].malicious_signal:
+                continue
+            groups.add(gid)
+            per_dist.setdefault(dist, set()).add(gid)
+    return UnpinnedSummary(len(unpinned), len(groups), {d: len(g) for d, g in per_dist.items()})
+
+
+@dataclass(frozen=True)
 class ScanReport:
     snapshot: Snapshot
     inventory: Inventory
     findings: tuple[MatchResult, ...]
     malicious: tuple[MaliciousEntry, ...] = ()
+    unpinned: UnpinnedSummary = field(default_factory=lambda: UnpinnedSummary(0, 0))
+    lead: str | None = None
 
 
 def build_report(inventory: Inventory, snapshot: Snapshot) -> ScanReport:
@@ -452,4 +480,10 @@ def build_report(inventory: Inventory, snapshot: Snapshot) -> ScanReport:
             notes = tuple(dict.fromkeys(n for _, r in members for n in r.notes))
             ids = tuple(sorted({rid for rid, _ in members}))
             findings.append(MatchResult(entry.dist, entry.version, group_id, ids, fixed, notes))
-    return ScanReport(snapshot, inventory, tuple(findings), tuple(malicious))
+    summary = summarise_unpinned(inventory, snapshot)
+    lead = (
+        LEAD_TEMPLATE.format(n=summary.packages, m=summary.advisories_any_version)
+        if summary.packages > 0
+        else None
+    )
+    return ScanReport(snapshot, inventory, tuple(findings), tuple(malicious), summary, lead)
