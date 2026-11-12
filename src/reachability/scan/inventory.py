@@ -8,12 +8,14 @@ from __future__ import annotations
 import codecs
 import logging
 import re
-from dataclasses import dataclass
+import shlex
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 
-from packaging.requirements import Requirement
+from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
+from packaging.version import InvalidVersion, Version
 
 logger = logging.getLogger(__name__)
 
@@ -121,21 +123,100 @@ def _logical_lines(text: str) -> list[tuple[int, str]]:
     return out
 
 
+_URL_LIKE = re.compile(r"^([A-Za-z][A-Za-z0-9+.-]*://|file:)")
+_PATH_LIKE = ("./", "../", "/", "~", ".\\")
+_EQ_PIN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\s*(\[[^\]]*\])?\s*={2,3}\s*([^\s;,]+)")
+_SHORT_VALUE_OPTIONS = ("-r", "-i", "-f", "-c", "-e")
+
+
+def _split_option(line: str) -> tuple[str, str | None] | None:
+    """Return (option, value) for a whole-line option, else None.
+
+    Accepts `--opt=V`, `--opt V`, `-xV` and `-x V`.
+    """
+    try:
+        tokens = shlex.split(line)
+    except ValueError:
+        tokens = line.split()
+    if not tokens:
+        return None
+    first = tokens[0]
+    if first.startswith("--"):
+        if "=" in first:
+            name, _, value = first.partition("=")
+            return name, value
+        return first, " ".join(tokens[1:]) if len(tokens) > 1 else None
+    if first.startswith("-"):
+        if len(first) > 2 and first[:2] in _SHORT_VALUE_OPTIONS:
+            return first[:2], first[2:]
+        return first, " ".join(tokens[1:]) if len(tokens) > 1 else None
+    return None
+
+
+def _unsupported(rel: str, lineno: int, raw: str, why: str, dist: str | None = None) -> InventoryEntry:
+    return InventoryEntry(
+        dist=dist,
+        version=None,
+        status=Status.UNSUPPORTED,
+        source_file=rel,
+        line=lineno,
+        notes=(why, f"raw: {raw}"),
+    )
+
+
 def _parse_requirement_line(line: str, rel: str, lineno: int) -> InventoryEntry:
+    if line.startswith("-"):
+        opt = _split_option(line)
+        name = opt[0] if opt else line
+        return _unsupported(rel, lineno, line, f"unsupported option {name}")
     req_text, *rest = _PER_REQ_SPLIT.split(line, maxsplit=1)
+    req_text = req_text.strip()
     hashes: list[str] = []
     if rest:
         for m in re.finditer(r"--hash(?:=|\s+)(\S+)", "--" + rest[0]):
             hashes.append(m.group(1))
-    req = Requirement(req_text.strip())
+    if _URL_LIKE.match(req_text) or req_text.startswith(_PATH_LIKE) or re.match(
+        r"^(git|hg|svn|bzr)\+", req_text
+    ):
+        return _unsupported(rel, lineno, line, "URL, VCS or path requirement")
+    try:
+        req = Requirement(req_text)
+    except InvalidRequirement as exc:
+        salvage = _EQ_PIN.match(req_text)
+        if salvage:
+            return _unsupported(
+                rel,
+                lineno,
+                line,
+                f"version {salvage.group(3)!r} is not valid PEP 440",
+                canonicalize_name(salvage.group(1)),
+            )
+        return _unsupported(rel, lineno, line, f"invalid requirement: {exc}")
+    dist = canonicalize_name(req.name)
     notes: list[str] = []
     if req.extras:
         notes.append("extras: " + ",".join(sorted(req.extras)))
-    spec = next(iter(req.specifier))
+    if req.url:
+        return replace(_unsupported(rel, lineno, line, "direct URL requirement", dist), hashes=tuple(hashes))
+    specs = list(req.specifier)
+    status = Status.UNPINNED
+    version: str | None = None
+    if len(specs) == 1 and specs[0].operator == "===":
+        status = Status.UNSUPPORTED
+        notes.append("=== arbitrary equality is not supported")
+    elif len(specs) == 1 and specs[0].operator == "==" and "*" not in specs[0].version:
+        try:
+            Version(specs[0].version)
+        except InvalidVersion:
+            status = Status.UNSUPPORTED
+            notes.append(f"version {specs[0].version!r} is not valid PEP 440")
+        else:
+            status = Status.PINNED
+            version = specs[0].version
     return InventoryEntry(
-        dist=canonicalize_name(req.name),
-        version=spec.version,
-        status=Status.PINNED,
+        dist=dist,
+        version=version,
+        status=status,
         source_file=rel,
         line=lineno,
         hashes=tuple(hashes),
