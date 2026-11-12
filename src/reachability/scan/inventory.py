@@ -474,6 +474,77 @@ def _version_status(version: object) -> tuple[Status, str | None, str | None]:
     return Status.PINNED, version, None
 
 
+def _shape_error(rel: str, where: str, expected: str, value: object) -> LockfileParseError:
+    return LockfileParseError(f"{rel}: {where} must be {expected}, got {type(value).__name__}")
+
+
+def _check_str_list(rel: str, where: str, value: object) -> None:
+    if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
+        raise _shape_error(rel, where, "a list of strings", value)
+
+
+def _package_tables(data: dict, rel: str) -> list[dict]:
+    packages = data.get("package", [])
+    if not isinstance(packages, list):
+        raise _shape_error(rel, "'package'", "a list of tables", packages)
+    for i, pkg in enumerate(packages):
+        if not isinstance(pkg, dict):
+            raise _shape_error(rel, f"package #{i + 1}", "a table", pkg)
+        where = f"package #{i + 1}"
+        for field in ("name", "version"):
+            if field in pkg and not isinstance(pkg[field], str):
+                raise _shape_error(rel, f"{where} field {field!r}", "a string", pkg[field])
+        if "source" in pkg and not isinstance(pkg["source"], dict):
+            raise _shape_error(rel, f"{where} field 'source'", "a table", pkg["source"])
+    return packages
+
+
+def _check_poetry_shapes(packages: list[dict], rel: str) -> None:
+    for i, pkg in enumerate(packages):
+        where = f"package #{i + 1}"
+        if "groups" in pkg:
+            _check_str_list(rel, f"{where} field 'groups'", pkg["groups"])
+        if "category" in pkg and not isinstance(pkg["category"], str):
+            raise _shape_error(rel, f"{where} field 'category'", "a string", pkg["category"])
+        markers = pkg.get("markers")
+        if markers is not None:
+            if isinstance(markers, dict):
+                for g, text in markers.items():
+                    if not isinstance(text, str):
+                        raise _shape_error(rel, f"{where} markers[{g!r}]", "a string", text)
+            elif not isinstance(markers, str):
+                raise _shape_error(rel, f"{where} field 'markers'", "a string or table", markers)
+
+
+def _check_uv_edges(rel: str, where: str, edges: object) -> None:
+    if not isinstance(edges, list):
+        raise _shape_error(rel, where, "a list of tables", edges)
+    for j, edge in enumerate(edges):
+        ewhere = f"{where}[{j}]"
+        if not isinstance(edge, dict):
+            raise _shape_error(rel, ewhere, "a table", edge)
+        for field in ("name", "version", "marker"):
+            if field in edge and not isinstance(edge[field], str):
+                raise _shape_error(rel, f"{ewhere} field {field!r}", "a string", edge[field])
+        if "source" in edge and not isinstance(edge["source"], dict):
+            raise _shape_error(rel, f"{ewhere} field 'source'", "a table", edge["source"])
+        if "extra" in edge:
+            _check_str_list(rel, f"{ewhere} field 'extra'", edge["extra"])
+
+
+def _check_uv_shapes(packages: list[dict], rel: str) -> None:
+    for i, pkg in enumerate(packages):
+        where = f"package #{i + 1}"
+        if "dependencies" in pkg:
+            _check_uv_edges(rel, f"{where} field 'dependencies'", pkg["dependencies"])
+        if "optional-dependencies" in pkg:
+            opt = pkg["optional-dependencies"]
+            if not isinstance(opt, dict):
+                raise _shape_error(rel, f"{where} field 'optional-dependencies'", "a table", opt)
+            for extra, edges in opt.items():
+                _check_uv_edges(rel, f"{where} optional-dependencies[{extra!r}]", edges)
+
+
 _POETRY_OK_SOURCES = frozenset({None, "pypi"})
 
 
@@ -501,7 +572,9 @@ def _poetry_applies(pkg: dict, groups: tuple[str, ...], rel: str) -> tuple[bool,
 def _parse_poetry_lock(path: Path, rel: str) -> list[InventoryEntry]:
     data = _load_toml(path, rel)
     out: list[InventoryEntry] = []
-    for pkg in data.get("package", []) or []:
+    packages = _package_tables(data, rel)
+    _check_poetry_shapes(packages, rel)
+    for pkg in packages:
         name = pkg.get("name")
         if not isinstance(name, str):
             raise LockfileParseError(f"{rel}: a [[package]] has no name")
@@ -606,7 +679,8 @@ def _parse_uv_lock(path: Path, rel: str) -> tuple[list[InventoryEntry], list[str
     version = data.get("version")
     if version != 1 or isinstance(version, bool):
         raise UvLockFormatError(f"{rel}: unsupported uv.lock version {version!r}; only version 1 is read")
-    packages = data.get("package", []) or []
+    packages = _package_tables(data, rel)
+    _check_uv_shapes(packages, rel)
     root = find_uv_root(packages)
     root_idx = next(i for i, p in enumerate(packages) if p is root)
     by_name: dict[str, list[int]] = {}
