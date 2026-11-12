@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import shlex
+import stat
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
@@ -19,6 +20,8 @@ from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
 logger = logging.getLogger(__name__)
+
+MAX_LOCKFILE_BYTES = 5 * 1024 * 1024
 
 HINT = (
     "We need exact versions and never run a resolver. Create a lockfile where you "
@@ -234,13 +237,34 @@ _INCLUDE_OPTIONS = frozenset({"-r", "--requirement"})
 
 
 def _check_path(root: Path, lexical: Path) -> tuple[Path | None, str | None, str]:
-    """Return (resolved, None, "") if safe to open, else (None, kind, detail)."""
+    """Return (resolved, None, "") if safe to open, else (None, kind, detail).
+
+    `lexical` is already normalised and absolute. A symlink (the path itself or
+    any directory component), a path outside `root`, a non-regular file and a
+    file over MAX_LOCKFILE_BYTES are all refused without being opened.
+    """
+    if not lexical.is_relative_to(root):
+        return None, "include_outside_root", "path is outside the scan root"
+    if lexical.is_symlink():
+        return None, "symlink", "symlinks are never followed"
     try:
         resolved = lexical.resolve(strict=True)
     except FileNotFoundError:
         return None, "include_missing", "file does not exist"
+    except (OSError, RuntimeError):
+        return None, "symlink", "symlink loop or unresolvable path"
+    if resolved != lexical:
+        return None, "symlink", "a path component is a symlink; not followed"
     if not resolved.is_relative_to(root):
         return None, "include_outside_root", "resolves outside the scan root"
+    try:
+        st = os.stat(resolved)
+    except OSError as exc:
+        return None, "include_missing", f"cannot stat: {exc}"
+    if not stat.S_ISREG(st.st_mode):
+        return None, "not_regular_file", "not a regular file; not opened"
+    if st.st_size > MAX_LOCKFILE_BYTES:
+        return None, "too_large", f"{st.st_size} bytes exceeds {MAX_LOCKFILE_BYTES}"
     return resolved, None, ""
 
 
@@ -307,6 +331,15 @@ def build_inventory(root: Path) -> Inventory:
     if not resolved.is_dir():
         raise ScanRootError(f"scan root is not a directory: {root}")
     tree = _RequirementsTree(resolved)
-    tree.parse(resolved / "requirements.txt")
+    lockfile: str | None = None
+    skipped: list[SkippedItem] = []
+    path, kind, detail = _check_path(resolved, resolved / "requirements.txt")
+    if path is None:
+        if kind != "include_missing":
+            skipped.append(SkippedItem(kind or "symlink", "requirements.txt", None, None, detail))
+    else:
+        lockfile = "requirements.txt"
+        tree.parse(path)
     entries = _apply_taint(tree.entries, tree.taints)
-    return Inventory(str(resolved), "requirements.txt", tuple(entries), tuple(tree.skipped), None)
+    hint = HINT if lockfile is None or any(e.status is Status.UNPINNED for e in entries) else None
+    return Inventory(str(resolved), lockfile, tuple(entries), tuple(skipped) + tuple(tree.skipped), hint)
