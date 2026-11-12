@@ -14,7 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from reachability.scan.advisories import ScanReport, build_report, load_snapshot  # noqa: E402
-from reachability.scan.inventory import build_inventory, ScanError  # noqa: E402
+from reachability.scan.inventory import ScanError, Status, build_inventory  # noqa: E402
 
 REFERENCE_SHA256 = "c7ea4e15b83912960fc5cbd42c6003dd630e422ec4dfbfc4ed19445573e1b08c"
 
@@ -34,9 +34,12 @@ def render(report: ScanReport) -> list[str]:
     out.append("== Inventory ==")
     out.append("dist | version | status | advisory ids | fixed-in")
     for e in inv.entries:
-        found = [f for f in report.findings if f.dist == e.dist and f.version == e.version]
-        ids = ",".join(i for f in found for i in f.ids) or "-"
-        fixed = ";".join(f.fixed_in for f in found) or "-"
+        found = sorted(
+            (f for f in report.findings if e.status is Status.PINNED and f.dist == e.dist and f.version == e.version),
+            key=lambda f: f.group_id,
+        )
+        ids = "; ".join("[" + ",".join(f.ids) + "]" for f in found) or "-"
+        fixed = "; ".join(f.fixed_in for f in found) or "-"
         out.append(f"{e.dist or '-'} | {e.version or '-'} | {e.status.value} | {ids} | {fixed}")
         if e.status.value != "pinned":
             out.append(f"    at {e.source_file}" + (f":{e.line}" if e.line is not None else ""))

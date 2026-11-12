@@ -95,8 +95,8 @@ def test_cli_table_columns_and_fixed_in_none_explicit(snapshot_factory, scan_roo
     inv = section_index(lines, "== Inventory ==")
     assert lines[inv + 1] == "dist | version | status | advisory ids | fixed-in"
     rows = lines[inv + 2 : section_index(lines, "== Skipped and ignored ==")]
-    assert "foo | 1.0 | pinned | A-1 | none" in rows
-    assert "bar | 2.0 | pinned | B-1 | 3.0" in rows
+    assert "foo | 1.0 | pinned | [A-1] | none" in rows
+    assert "bar | 2.0 | pinned | [B-1] | 3.0" in rows
     assert "baz | 1.0 | pinned | - | -" in rows
 
 
@@ -251,3 +251,31 @@ def test_scan_package_has_no_network_or_exec_imports():
         text = p.read_text()
         for b in banned:
             assert b not in text, (p, b)
+
+
+def _fixed_range(name, fixed=None):
+    events = [{"introduced": "0"}] + ([{"fixed": fixed}] if fixed else [])
+    return {"package": {"name": name, "ecosystem": "PyPI"}, "ranges": [{"type": "ECOSYSTEM", "events": events}]}
+
+
+def test_cli_two_groups_render_per_group_ids_and_fixed_in_in_group_order(snapshot_factory, scan_root):
+    path, sha = snapshot_factory(
+        [
+            {"id": "PYSEC-1", "aliases": ["GHSA-a"], "affected": [_fixed_range("foo", "1.2")]},
+            {"id": "GHSA-a", "aliases": ["PYSEC-1"], "affected": [_fixed_range("foo", "1.2")]},
+            {"id": "GHSA-b", "aliases": [], "affected": [_fixed_range("foo")]},
+        ]
+    )
+    (scan_root / "requirements.txt").write_text("foo==1.0\n")
+    rows = cli(scan_root, path, sha).stdout.splitlines()
+    assert "foo | 1.0 | pinned | [GHSA-a,PYSEC-1]; [GHSA-b] | 1.2; none" in rows
+
+
+def test_cli_marker_skipped_row_with_same_dist_version_shows_no_findings(snapshot_factory, scan_root):
+    path, sha = snapshot_factory([{"id": "A-1", "aliases": [], "affected": [aff("foo", ["1.0"])]}])
+    (scan_root / "requirements.txt").write_text(
+        'foo==1.0 ; sys_platform == "linux"\nfoo==1.0 ; sys_platform == "win32"\n'
+    )
+    rows = cli(scan_root, path, sha).stdout.splitlines()
+    assert "foo | 1.0 | pinned | [A-1] | none" in rows
+    assert "foo | 1.0 | marker_skipped | - | -" in rows
