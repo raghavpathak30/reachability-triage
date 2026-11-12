@@ -55,6 +55,7 @@ class Snapshot:
     sha256: str
     records_loaded: int
     records: dict[str, Record] = field(default_factory=dict, repr=False)
+    withdrawn_excluded: int = 0
 
 
 def _reduce(raw: dict) -> Record:
@@ -90,12 +91,25 @@ def load_snapshot(path: Path, expected_sha256: str) -> Snapshot:
             f"snapshot sha256 {actual} does not match expected {expected_sha256}"
         )
     records: dict[str, Record] = {}
-    with zipfile.ZipFile(io.BytesIO(data)) as z:
-        for name in z.namelist():
-            if name.endswith(".json"):
-                raw = json.loads(z.read(name))
+    withdrawn = 0
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            for name in z.namelist():
+                if not name.endswith(".json"):
+                    continue
+                try:
+                    raw = json.loads(z.read(name))
+                except (ValueError, zipfile.BadZipFile) as exc:
+                    raise SnapshotError(f"snapshot member {name!r} is not valid JSON: {exc}") from exc
+                if not isinstance(raw, dict) or not isinstance(raw.get("id"), str):
+                    raise SnapshotError(f"snapshot member {name!r} is not an OSV record with an id")
+                if "withdrawn" in raw:
+                    withdrawn += 1
+                    continue
                 records[raw["id"]] = _reduce(raw)
-    return Snapshot(str(path), date, actual, len(records), records)
+    except zipfile.BadZipFile as exc:
+        raise SnapshotError(f"snapshot is not a readable zip: {exc}") from exc
+    return Snapshot(str(path), date, actual, len(records), records, withdrawn)
 
 
 @dataclass(frozen=True)
