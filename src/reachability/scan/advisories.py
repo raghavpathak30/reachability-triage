@@ -9,6 +9,7 @@ import json
 import logging
 import re
 import zipfile
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -320,39 +321,75 @@ def _build_groups(records: dict[str, Record]) -> tuple[dict[str, AdvisoryGroup],
     return dict(sorted(groups.items())), group_of
 
 
-def _reduce(raw: dict) -> Record:
+def _bad_shape(member: str, field: str, expected: str, value: object) -> SnapshotError:
+    return SnapshotError(
+        f"snapshot member {member!r}: {field} must be {expected}, got {type(value).__name__}"
+    )
+
+
+def _opt_str_list(member: str, field: str, value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
+        raise _bad_shape(member, field, "a list of strings", value)
+    return tuple(value)
+
+
+def _opt_dict(member: str, field: str, value: object) -> dict:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise _bad_shape(member, field, "an object", value)
+    return value
+
+
+def _reduce(raw: dict, member: str = "?") -> Record:
+    """Reduce an OSV record. A wrong-shaped field raises SnapshotError naming the member;
+    nothing is silently dropped. Unparseable range *contents* still match conservatively."""
     entries = []
     affected = raw.get("affected")
-    for a in affected if isinstance(affected, list) else []:
+    if affected is not None and not isinstance(affected, list):
+        raise _bad_shape(member, "'affected'", "a list", affected)
+    for a in affected or []:
         if not isinstance(a, dict):
+            raise _bad_shape(member, "an 'affected' entry", "an object", a)
+        pkg = _opt_dict(member, "'affected[].package'", a.get("package"))
+        if pkg.get("ecosystem") != "PyPI":
             continue
-        pkg = a.get("package") or {}
-        if not isinstance(pkg, dict) or pkg.get("ecosystem") != "PyPI":
-            continue
+        raw_ranges = a.get("ranges")
+        if raw_ranges is not None and not isinstance(raw_ranges, list):
+            raise _bad_shape(member, "'affected[].ranges'", "a list", raw_ranges)
         ranges: list[Events] = []
         ignored: list[str] = []
-        for rg in a.get("ranges") or []:
-            rtype = rg.get("type") if isinstance(rg, dict) else None
+        for rg in raw_ranges or []:
+            if not isinstance(rg, dict):
+                raise _bad_shape(member, "a 'ranges' entry", "an object", rg)
+            rtype = rg.get("type")
             if rtype == "ECOSYSTEM":
                 ranges.append(reduce_events(rg.get("events")))
             else:
                 ignored.append(str(rtype))
-        lk = (a.get("database_specific") or {}).get("last_known_affected_version_range")
+        versions = _opt_str_list(member, "'affected[].versions'", a.get("versions"))
+        dbs = _opt_dict(member, "'affected[].database_specific'", a.get("database_specific"))
+        lk = dbs.get("last_known_affected_version_range")
         entries.append(
             AffectedEntry(
                 dist=str(canonicalize_name(str(pkg.get("name", "")))),
-                versions=tuple(str(v) for v in (a.get("versions") or ())),
+                versions=versions,
                 ranges=tuple(ranges),
                 lkavr=lk if lk is None or isinstance(lk, str) else repr(lk),
                 ignored_range_types=tuple(ignored),
             )
         )
-    cwe = (raw.get("database_specific") or {}).get("cwe_ids") or ()
+    cwe = _opt_str_list(
+        member, "'database_specific.cwe_ids'",
+        _opt_dict(member, "'database_specific'", raw.get("database_specific")).get("cwe_ids"),
+    )
     return Record(
         raw["id"],
-        tuple(str(x) for x in (raw.get("aliases") or ())),
+        _opt_str_list(member, "'aliases'", raw.get("aliases")),
         tuple(entries),
-        tuple(str(c) for c in cwe),
+        cwe,
     )
 
 
@@ -377,6 +414,7 @@ def load_snapshot(path: Path, expected_sha256: str) -> Snapshot:
             f"snapshot sha256 {actual} does not match expected {expected_sha256}"
         )
     records: dict[str, Record] = {}
+    seen_ids: dict[str, str] = {}
     withdrawn = 0
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as z:
@@ -385,14 +423,30 @@ def load_snapshot(path: Path, expected_sha256: str) -> Snapshot:
                     continue
                 try:
                     raw = json.loads(z.read(name))
-                except (ValueError, zipfile.BadZipFile) as exc:
-                    raise SnapshotError(f"snapshot member {name!r} is not valid JSON: {exc}") from exc
+                except (
+                    ValueError,
+                    zipfile.BadZipFile,
+                    zlib.error,
+                    RuntimeError,  # encrypted member; RecursionError is a RuntimeError
+                    NotImplementedError,  # unsupported compression method
+                    EOFError,
+                    OSError,
+                ) as exc:
+                    raise SnapshotError(
+                        f"snapshot member {name!r} cannot be read as JSON ({type(exc).__name__}): {exc}"
+                    ) from exc
                 if not isinstance(raw, dict) or not isinstance(raw.get("id"), str):
                     raise SnapshotError(f"snapshot member {name!r} is not an OSV record with an id")
+                if raw["id"] in seen_ids:
+                    raise SnapshotError(
+                        f"snapshot member {name!r} repeats record id {raw['id']!r} "
+                        f"already read from {seen_ids[raw['id']]!r}"
+                    )
+                seen_ids[raw["id"]] = name
                 if "withdrawn" in raw:
                     withdrawn += 1
                     continue
-                records[raw["id"]] = _reduce(raw)
+                records[raw["id"]] = _reduce(raw, name)
     except zipfile.BadZipFile as exc:
         raise SnapshotError(f"snapshot is not a readable zip: {exc}") from exc
     groups, group_of = _build_groups(records)

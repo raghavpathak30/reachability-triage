@@ -120,3 +120,60 @@ def _only_bytesio(real_init):
         return real_init(self, file, *a, **k)
 
     return init
+
+
+# Fix round 1, F4: record shapes and member read errors after a valid sha256 are SnapshotError.
+@pytest.mark.parametrize(
+    "rec, field",
+    [
+        ({"id": "SYNTH-2", "database_specific": ["x"]}, "database_specific"),
+        ({"id": "SYNTH-2", "database_specific": {"cwe_ids": "CWE-506"}}, "cwe_ids"),
+        ({"id": "SYNTH-2", "database_specific": {"cwe_ids": 5}}, "cwe_ids"),
+        ({"id": "SYNTH-2", "aliases": "GHSA-x"}, "aliases"),
+        ({"id": "SYNTH-2", "affected": {"package": {}}}, "affected"),
+        ({"id": "SYNTH-2", "affected": ["x"]}, "affected"),
+        ({"id": "SYNTH-2", "affected": [{"package": {"ecosystem": "PyPI", "name": "a"}, "ranges": 3}]}, "ranges"),
+        ({"id": "SYNTH-2", "affected": [{"package": {"ecosystem": "PyPI", "name": "a"}, "ranges": [3]}]}, "ranges"),
+        ({"id": "SYNTH-2", "affected": [{"package": {"ecosystem": "PyPI", "name": "a"}, "versions": "1.0"}]}, "versions"),
+        ({"id": "SYNTH-2", "affected": [{"package": {"ecosystem": "PyPI", "name": "a"}, "database_specific": []}]}, "database_specific"),
+    ],
+)
+def test_wrong_shaped_record_field_raises_snapshot_error_naming_member(snapshot_factory, rec, field):
+    path, sha = snapshot_factory([REC, rec])
+    with pytest.raises(SnapshotError) as ei:
+        load_snapshot(path, sha)
+    assert "SYNTH-2.json" in str(ei.value) and field in str(ei.value)
+
+
+def test_duplicate_record_id_across_members_raises(snapshot_factory):
+    path, sha = snapshot_factory([("a.json", b'{"id": "DUP-1"}'), ("b.json", b'{"id": "DUP-1"}')])
+    with pytest.raises(SnapshotError, match="DUP-1"):
+        load_snapshot(path, sha)
+
+
+def test_corrupt_deflate_member_raises_snapshot_error(tmp_path):
+    path = tmp_path / "osv-pypi-2026-11-12.zip"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("A.json", '{"id": "A-1", "aliases": ["' + "x" * 2000 + '"]}')
+    data = bytearray(path.read_bytes())
+    for i in range(40, 60):  # inside the deflate stream of the only member
+        data[i] ^= 0xFF
+    path.write_bytes(bytes(data))
+    sha = hashlib.sha256(path.read_bytes()).hexdigest()
+    with pytest.raises(SnapshotError):
+        load_snapshot(path, sha)
+
+
+def test_unsupported_compression_member_raises_snapshot_error(tmp_path):
+    path = tmp_path / "osv-pypi-2026-11-12.zip"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_STORED) as z:
+        z.writestr("A.json", '{"id": "A-1"}')
+    data = bytearray(path.read_bytes())
+    # method field: local header offset 8 and central directory entry offset 10 (from its signature)
+    data[8:10] = (99).to_bytes(2, "little")
+    cd = data.index(b"PK\x01\x02")
+    data[cd + 10 : cd + 12] = (99).to_bytes(2, "little")
+    path.write_bytes(bytes(data))
+    sha = hashlib.sha256(path.read_bytes()).hexdigest()
+    with pytest.raises(SnapshotError):
+        load_snapshot(path, sha)
