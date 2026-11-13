@@ -1,0 +1,161 @@
+ROW R1 prerelease installed vs introduced 0
+  record GHSA-226f-f24g-524w | aliases ['CVE-2026-54008', 'PYSEC-2026-2690'] | withdrawn None
+  cwe_ids ['CWE-918']
+  package.name open-webui | canonical open-webui
+  installed '0.0.0rc1' | installed in versions list: False
+  versions count 157 first5 ['0.1.124', '0.1.125', '0.2.0', '0.2.1', '0.2.2'] last2 ['0.9.4', '0.9.5']
+  range ECOSYSTEM [{"introduced": "0"}, {"fixed": "0.9.6"}]
+  last_known_affected_version_range <= 0.9.5
+  n_pypi_affected_entries_in_record 1 n_affected_total 1
+ROW R2 last_affected boundary (inclusive)
+  record GHSA-2cf3-g243-hhfx | aliases ['CVE-2017-3590', 'PYSEC-2026-682'] | withdrawn None
+  cwe_ids []
+  package.name mysql-connector-python | canonical mysql-connector-python
+  installed '2.1.5' | installed in versions list: False
+  versions count 0 first5 [] last2 []
+  range ECOSYSTEM [{"introduced": "0"}, {"last_affected": "2.1.5"}]
+  last_known_affected_version_range None
+  n_pypi_affected_entries_in_record 1 n_affected_total 1
+ROW R3 one above last_affected
+  record GHSA-2cf3-g243-hhfx | aliases ['CVE-2017-3590', 'PYSEC-2026-682'] | withdrawn None
+  cwe_ids []
+  package.name mysql-connector-python | canonical mysql-connector-python
+  installed '2.1.5.post1' | installed in versions list: False
+  versions count 0 first5 [] last2 []
+  range ECOSYSTEM [{"introduced": "0"}, {"last_affected": "2.1.5"}]
+  last_known_affected_version_range None
+  n_pypi_affected_entries_in_record 1 n_affected_total 1
+ROW R4 fixed exclusive at the boundary
+  record GHSA-227r-w5j2-6243 | aliases ['CVE-2024-11042', 'PYSEC-2026-358'] | withdrawn None
+  cwe_ids ['CWE-20', 'CWE-22', 'CWE-73']
+  package.name invokeai | canonical invokeai
+  installed '5.3.0rc1' | installed in versions list: False
+  versions count 145 first5 ['2.2.4.5', '2.2.4.6', '2.2.4.7', '2.2.5', '2.3.0'] last2 ['5.2.0rc1', '5.2.0rc2']
+  range ECOSYSTEM [{"introduced": "0"}, {"fixed": "5.3.0rc1"}]
+  last_known_affected_version_range None
+  n_pypi_affected_entries_in_record 1 n_affected_total 1
+ROW R5 empty versions with a range, installed inside
+  record GHSA-22q6-wwq7-2jj9 | aliases ['CVE-2013-1865', 'PYSEC-2013-39'] | withdrawn None
+  cwe_ids ['CWE-287']
+  package.name keystone | canonical keystone
+  installed '2012.2' | installed in versions list: False
+  versions count 0 first5 [] last2 []
+  range ECOSYSTEM [{"introduced": "2012.2"}, {"fixed": "2012.2.4"}]
+  last_known_affected_version_range None
+  n_pypi_affected_entries_in_record 1 n_affected_total 1
+ROW R6 versions only, no range
+  record GHSA-9p73-x86v-jw57 | aliases ['CVE-2024-4330', 'PYSEC-2026-1589'] | withdrawn None
+  cwe_ids ['CWE-23']
+  package.name lollms | canonical lollms
+  installed '9.6' | installed in versions list: True
+  versions count 1 first5 ['9.6'] last2 ['9.6']
+  last_known_affected_version_range None
+  n_pypi_affected_entries_in_record 1 n_affected_total 1
+ROW R7 non-PEP440 installed in versions
+  record GHSA-29gw-9793-fvw7 | aliases ['CVE-2023-24816', 'PYSEC-2023-17'] | withdrawn None
+  cwe_ids ['CWE-20', 'CWE-78']
+  package.name ipython | canonical ipython
+  installed '0.7.1.fix1' | installed in versions list: True
+  versions count 158 first5 ['0.10', '0.10.1', '0.10.2', '0.11', '0.12'] last2 ['8.8.0', '8.9.0']
+  range ECOSYSTEM [{"introduced": "0"}, {"fixed": "8.10.0"}]
+  last_known_affected_version_range None
+  n_pypi_affected_entries_in_record 1 n_affected_total 1
+ROW R8 withdrawn record
+  record GHSA-39mj-fpg2-3jrg | aliases ['CVE-2021-28667'] | withdrawn 2023-08-07T20:56:50Z
+  cwe_ids ['CWE-835']
+  package.name st2client | canonical st2client
+  installed '0.11.5.13' | installed in versions list: True
+  versions count 55 first5 ['0.11.5.13', '0.12.0.3', '0.12.1.5', '0.12.2.6', '0.13.0.3'] last2 ['3.3.0', '3.4.0']
+  range ECOSYSTEM [{"introduced": "0"}, {"fixed": "3.4.1"}]
+  last_known_affected_version_range None
+  n_pypi_affected_entries_in_record 1 n_affected_total 1
+  note no non-withdrawn record in the snapshot names this dist
+ROW R9 alias group, record A
+  record GHSA-c33m-22cr-j9x4 | aliases ['CVE-2015-5694', 'PYSEC-2019-243'] | withdrawn None
+  cwe_ids ['CWE-835']
+  package.name designate | canonical designate
+  installed '2015.1.0b2' | installed in versions list: True
+  versions count 1 first5 ['2015.1.0b2'] last2 ['2015.1.0b2']
+  last_known_affected_version_range None
+  n_pypi_affected_entries_in_record 1 n_affected_total 1
+ROW R9 alias group, record B
+  record PYSEC-2019-243 | aliases ['CVE-2015-5694', 'GHSA-c33m-22cr-j9x4'] | withdrawn None
+  cwe_ids []
+  package.name designate | canonical designate
+  installed '2015.1.0b2' | installed in versions list: True
+  versions count 1 first5 ['2015.1.0b2'] last2 ['2015.1.0b2']
+  last_known_affected_version_range None
+  n_pypi_affected_entries_in_record 1 n_affected_total 1
+ROW R10 MAL- alias
+  record GHSA-jxr6-qrxx-2ph2 | aliases ['MAL-2025-6794', 'PYSEC-2025-72'] | withdrawn None
+  cwe_ids ['CWE-506']
+  package.name num2words | canonical num2words
+  installed '0.5.15' | installed in versions list: True
+  versions count 1 first5 ['0.5.15'] last2 ['0.5.15']
+  last_known_affected_version_range None
+  n_pypi_affected_entries_in_record 3 n_affected_total 3
+ROW R11 CWE-506 only
+  record GHSA-4f84-67cv-qrv3 | aliases [] | withdrawn None
+  cwe_ids ['CWE-506']
+  package.name dydx-v4-client | canonical dydx-v4-client
+  installed '1.1.5.post1' | installed in versions list: True
+  versions count 2 first5 ['1.1.5.post1', '1.1.6'] last2 ['1.1.5.post1', '1.1.6']
+  range ECOSYSTEM [{"introduced": "1.1.5.post1"}, {"fixed": "1.1.5"}]
+  last_known_affected_version_range None
+  n_pypi_affected_entries_in_record 1 n_affected_total 1
+# R12 NOTE: the snapshot has no PyPI record whose raw name differs from its canonical form (see q-check in plan.md); the requirement is written as Jinja2==<installed> against the record name jinja2.
+ROW R12 name normalisation (requirement spelled Jinja2)
+  record GHSA-462w-v97r-4m45 | aliases ['CVE-2019-10906', 'PYSEC-2019-217'] | withdrawn None
+  cwe_ids ['CWE-693']
+  package.name jinja2 | canonical jinja2
+  installed '2.0' | installed in versions list: True
+  versions count 31 first5 ['2.0', '2.0rc1', '2.1', '2.1.1', '2.10'] last2 ['2.9.5', '2.9.6']
+  range ECOSYSTEM [{"introduced": "0"}, {"fixed": "2.10.1"}]
+  last_known_affected_version_range None
+  n_pypi_affected_entries_in_record 1 n_affected_total 1
+ROW R13 unparseable bound
+  record GHSA-6vhp-hp77-6w52 | aliases ['CVE-2005-4644', 'PYSEC-2005-1'] | withdrawn None
+  cwe_ids ['CWE-79']
+  package.name trac | canonical trac
+  installed '0.0.1' | installed in versions list: False
+  versions count 0 first5 [] last2 []
+  range ECOSYSTEM [{"introduced": "0"}, {"fixed": "0.9-stable"}]
+  last_known_affected_version_range None
+  n_pypi_affected_entries_in_record 1 n_affected_total 1
+# R14 NOTE: in this snapshot every record with last_known_affected_version_range also has an ECOSYSTEM range (survey q2 in plan.md), so a real record cannot isolate lkavr as the only reason to match; lkavr-as-union is tested synthetically in step 25a. This row checks that a real lkavr record matches at its bound.
+ROW R14 lkavr (versions empty), installed at the lkavr bound
+  record GHSA-4vg5-rp28-gvjf | aliases ['CVE-2026-44567', 'PYSEC-2026-2703'] | withdrawn None
+  cwe_ids ['CWE-602', 'CWE-862']
+  package.name open-webui | canonical open-webui
+  installed '0.1.123' | installed in versions list: False
+  versions count 0 first5 [] last2 []
+  range ECOSYSTEM [{"introduced": "0"}, {"fixed": "0.1.124"}]
+  last_known_affected_version_range <= 0.1.123
+  n_pypi_affected_entries_in_record 1 n_affected_total 1
+ROW R15 GIT/SEMVER range ignored
+  record OSV-2021-1809 | aliases [] | withdrawn None
+  cwe_ids []
+  package.name ujson | canonical ujson
+  installed '5.1.0' | installed in versions list: True
+  versions count 1 first5 ['5.1.0'] last2 ['5.1.0']
+  range GIT [{"introduced": "b9275f7b001da11495040f1332f6c3adf3daa57b"}, {"fixed": "f6860f1f3d8d4e92b9be0e5815355a8976c6e75b"}, {"fixed": "550ba4d77294e61597a5259d00769c61281e0042"}]
+  last_known_affected_version_range None
+  n_pypi_affected_entries_in_record 1 n_affected_total 1
+ROW R16 last_affected only, fixed_in none
+  record GHSA-3cm8-v4mc-gppg | aliases ['CVE-2022-4510', 'PYSEC-2026-787'] | withdrawn None
+  cwe_ids ['CWE-22']
+  package.name binwalk | canonical binwalk
+  installed '2.3.3' | installed in versions list: False
+  versions count 0 first5 [] last2 []
+  range ECOSYSTEM [{"introduced": "2.1.2b"}, {"last_affected": "2.3.3"}]
+  last_known_affected_version_range None
+  n_pypi_affected_entries_in_record 1 n_affected_total 1
+ROW R17 two fixed events, installed below both
+  record PYSEC-2007-4 | aliases ['CVE-2007-5741', 'GHSA-hf26-vvmx-x8c8'] | withdrawn None
+  cwe_ids []
+  package.name plone | canonical plone
+  installed '2.5' | installed in versions list: False
+  versions count 0 first5 [] last2 []
+  range ECOSYSTEM [{"introduced": "2.5"}, {"fixed": "2.5.5"}, {"introduced": "3.0"}, {"fixed": "3.0.3"}]
+  last_known_affected_version_range None
+  n_pypi_affected_entries_in_record 1 n_affected_total 1

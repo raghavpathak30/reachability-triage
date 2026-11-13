@@ -1,0 +1,17 @@
+a1==1.*
+a2==1.0.*
+a3>=1
+a4~=1.4
+a5
+a6>=1,<2
+a7!=1.0
+b1===1.0
+-e ./x
+-c constraints.txt
+git+https://example.invalid/y.git#egg=y
+https://example.invalid/p.whl
+c1 @ https://example.invalid/p.whl
+--no-binary :all:
+d1==1.0-custom
+e1==1.0+cpu
+this is not valid !!!

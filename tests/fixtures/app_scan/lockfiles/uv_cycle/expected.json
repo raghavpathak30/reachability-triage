@@ -1,0 +1,4 @@
+{"inventory": {
+  "a": {"version": "1.0", "status": "pinned"},
+  "b": {"version": "2.0", "status": "pinned"}
+}}

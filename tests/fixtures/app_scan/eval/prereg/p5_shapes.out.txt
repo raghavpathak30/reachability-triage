@@ -1,0 +1,40 @@
+pypi_affected_entries_non_malicious 19320
+(a) GIT 1528 SEMVER 0 both 0
+    GIT with ECOSYSTEM 1517 GIT without ECOSYSTEM 11
+    SEMVER with ECOSYSTEM 0 SEMVER without ECOSYSTEM 0
+(b) unparseable ECOSYSTEM event values 46
+    ('GHSA-6vhp-hp77-6w52', 'fixed', '0.9-stable')
+    ('GHSA-75jv-vfxf-3865', 'fixed', '4.6.0.stable11')
+    ('GHSA-hvxr-2fvv-c3wq', 'fixed', '7.2.0-12.1')
+    ('GHSA-hvxr-2fvv-c3wq', 'fixed', '8.3.0-11.1')
+    ('GHSA-hvxr-2fvv-c3wq', 'fixed', '9.3.1-2.1')
+    ('GHSA-hvxr-2fvv-c3wq', 'fixed', '10.0.2-1.1')
+    ('GHSA-jqqh-999x-w26w', 'fixed', '0.7.11p3')
+    ('GHSA-mj3x-wprp-mvj9', 'fixed', '0.7.11p3')
+    ('GHSA-pj65-3pf6-c5q4', 'fixed', '0.8.3ubuntu7.5')
+    ('GHSA-pj65-3pf6-c5q4', 'fixed', '0.9.3.5ubuntu3')
+(c) lkavr entries 1341 clause-unparseable entries (own comparator regex) 0
+    1148 '<= N.N.N'
+    85 '<= N.N.N.N'
+    38 '<= N.N'
+    22 '< N.N.N'
+    10 '<= N.N.NbN.devN'
+    8 '<= N.N.NrcN'
+    7 '<= N.NaN'
+    5 '<= N.N.NbN'
+    4 '<= N.N.NaN'
+    4 '<= N.N.N.devN'
+    2 '< N.N.NaN'
+    1 '< N.N.N.NbN'
+    1 '<= N.N.Na'
+    1 '< N.N.N.N'
+    1 '<= N.NrcN'
+    1 '<= N.N.N-devN'
+    1 '< N.NaN'
+    1 '<= N.N.N-N'
+    1 '<= N.N.N.postN'
+(d) ECOSYSTEM ranges with no introduced event 0
+(e) versions items not valid PEP 440 2444
+(f) entries with neither ECOSYSTEM range nor versions: GIT-only 2 empty 11
+(g) distinct records with >=1 unparseable ECOSYSTEM bound 33
+(h) groups mixing malicious and non-malicious records 2

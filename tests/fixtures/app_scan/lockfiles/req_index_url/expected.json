@@ -1,0 +1,5 @@
+{"inventory": {
+  "foo": {"version": "1.0", "status": "unsupported"},
+  "bar": {"version": null, "status": "unsupported"},
+  "baz": {"version": "3.0", "status": "unsupported"}
+}}

@@ -1,0 +1,4 @@
+--extra-index-url https://example.invalid/simple
+foo==1.0
+bar>=2
+baz==3.0; sys_platform == "win32"

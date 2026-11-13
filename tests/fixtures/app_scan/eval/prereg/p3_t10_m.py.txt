@@ -1,0 +1,115 @@
+import json
+import re
+import sys
+import zipfile
+
+from packaging.version import InvalidVersion, Version
+
+
+def canon(name):
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def load(path):
+    z = zipfile.ZipFile(path)
+    recs = {}
+    for n in sorted(z.namelist()):
+        if n.endswith(".json"):
+            recs[n[:-5]] = json.loads(z.read(n))
+    return recs
+
+
+def valid(v):
+    try:
+        Version(v)
+        return True
+    except InvalidVersion:
+        return False
+
+
+def pypi_affected(rec):
+    out = []
+    for i, a in enumerate(rec.get("affected", [])):
+        p = a.get("package", {})
+        if p.get("ecosystem") == "PyPI":
+            out.append((i, p.get("name", ""), a))
+    return out
+
+
+def groups(recs):
+    """union-find over id + aliases of non-withdrawn records; never `related`."""
+    parent = {}
+
+    def find(x):
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[max(ra, rb)] = min(ra, rb)
+
+    live = {k: r for k, r in recs.items() if "withdrawn" not in r}
+    for k, r in live.items():
+        find(r["id"])
+        for al in r.get("aliases", []):
+            union(r["id"], al)
+    members = {}
+    for k, r in live.items():
+        members.setdefault(find(r["id"]), []).append(k)
+    return live, members
+
+
+def is_malicious(live, member_ids):
+    for k in member_ids:
+        r = live[k]
+        names = [r["id"]] + list(r.get("aliases", []))
+        if any(n.startswith("MAL-") for n in names):
+            return True
+        if "CWE-506" in (r.get("database_specific") or {}).get("cwe_ids", []):
+            return True
+    return False
+
+
+def rep(live, member_ids):
+    names = set()
+    for k in member_ids:
+        names.add(live[k]["id"])
+        names.update(live[k].get("aliases", []))
+    ghsa = sorted(n for n in names if n.startswith("GHSA-"))
+    return ghsa[0] if ghsa else sorted(names)[0]
+
+
+def m_for(live, members, dists):
+    out = set()
+    for gid, mem in members.items():
+        if is_malicious(live, mem):
+            continue
+        for k in mem:
+            if any(canon(n) in dists for _, n, _ in pypi_affected(live[k])):
+                out.add(gid)
+                break
+    return out
+
+
+def main(argv):
+    path = argv[0]
+    dists = ["jinja2", "werkzeug"]
+    if "--dists" in argv:
+        dists = argv[argv.index("--dists") + 1].split(",")
+    recs = load(path)
+    live, members = groups(recs)
+    per = {}
+    for d in dists:
+        per[d] = m_for(live, members, {d})
+        print("M", d, len(per[d]))
+    union = m_for(live, members, set(dists))
+    print("M union", sorted(dists), len(union))
+    n = len(dists)
+    print("lead", f"{n} packages are not pinned; they have {len(union)} known advisories (any version). Pin them to check.")
+
+
+main(sys.argv[1:])

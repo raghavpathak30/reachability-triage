@@ -1,0 +1,5 @@
+{"inventory": {
+  "shared": {"version": "2.0", "status": "pinned"},
+  "extra-dep": {"version": null, "status": "unpinned"},
+  "app-only": {"version": "1.0", "status": "pinned"}
+}}

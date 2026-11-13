@@ -1,0 +1,6 @@
+{"inventory": {
+  "flask": {"version": "3.0.3", "status": "pinned"},
+  "click": {"version": "8.1.7", "status": "pinned"},
+  "requests": {"version": "2.32.3", "status": "pinned"},
+  "pyyaml": {"version": "6.0.2", "status": "pinned"}
+}}

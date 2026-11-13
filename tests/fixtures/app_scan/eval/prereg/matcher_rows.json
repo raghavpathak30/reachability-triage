@@ -1,0 +1,573 @@
+{
+ "snapshot_sha256": "c7ea4e15b83912960fc5cbd42c6003dd630e422ec4dfbfc4ed19445573e1b08c",
+ "derived_from": "p6_rows.out.txt raw data; expectations written by hand from the raw events, not computed",
+ "rows": [
+  {
+   "row": "R1",
+   "description": "pre-release installed vs introduced 0",
+   "record_id": "GHSA-226f-f24g-524w",
+   "extra_record_ids": [],
+   "dist": "open-webui",
+   "requirement": "open-webui==0.0.0rc1",
+   "installed": "0.0.0rc1",
+   "raw": {
+    "versions": "157 items, first 0.1.124, last 0.9.5, 0.0.0rc1 not listed",
+    "ranges": [
+     [
+      {
+       "introduced": "0"
+      },
+      {
+       "fixed": "0.9.6"
+      }
+     ]
+    ],
+    "lkavr": "<= 0.9.5"
+   },
+   "expect": {
+    "inventory_status": "pinned",
+    "matched": true,
+    "fixed_in": "0.9.6",
+    "malicious_signal": null,
+    "notes_contain": [],
+    "finding_ids": [
+     "GHSA-226f-f24g-524w"
+    ]
+   }
+  },
+  {
+   "row": "R2",
+   "description": "last_affected boundary is inclusive",
+   "record_id": "GHSA-2cf3-g243-hhfx",
+   "extra_record_ids": [],
+   "dist": "mysql-connector-python",
+   "requirement": "mysql-connector-python==2.1.5",
+   "installed": "2.1.5",
+   "raw": {
+    "versions": "none",
+    "ranges": [
+     [
+      {
+       "introduced": "0"
+      },
+      {
+       "last_affected": "2.1.5"
+      }
+     ]
+    ],
+    "lkavr": null
+   },
+   "expect": {
+    "inventory_status": "pinned",
+    "matched": true,
+    "fixed_in": "none",
+    "malicious_signal": null,
+    "notes_contain": [],
+    "finding_ids": [
+     "GHSA-2cf3-g243-hhfx"
+    ]
+   }
+  },
+  {
+   "row": "R3",
+   "description": "one above last_affected does not match",
+   "record_id": "GHSA-2cf3-g243-hhfx",
+   "extra_record_ids": [],
+   "dist": "mysql-connector-python",
+   "requirement": "mysql-connector-python==2.1.5.post1",
+   "installed": "2.1.5.post1",
+   "raw": {
+    "versions": "none",
+    "ranges": [
+     [
+      {
+       "introduced": "0"
+      },
+      {
+       "last_affected": "2.1.5"
+      }
+     ]
+    ],
+    "lkavr": null
+   },
+   "expect": {
+    "inventory_status": "pinned",
+    "matched": false,
+    "fixed_in": null,
+    "malicious_signal": null,
+    "notes_contain": [],
+    "finding_ids": []
+   }
+  },
+  {
+   "row": "R4",
+   "description": "fixed is exclusive at the boundary",
+   "record_id": "GHSA-227r-w5j2-6243",
+   "extra_record_ids": [],
+   "dist": "invokeai",
+   "requirement": "invokeai==5.3.0rc1",
+   "installed": "5.3.0rc1",
+   "raw": {
+    "versions": "145 items, 5.3.0rc1 not listed",
+    "ranges": [
+     [
+      {
+       "introduced": "0"
+      },
+      {
+       "fixed": "5.3.0rc1"
+      }
+     ]
+    ],
+    "lkavr": null
+   },
+   "expect": {
+    "inventory_status": "pinned",
+    "matched": false,
+    "fixed_in": null,
+    "malicious_signal": null,
+    "notes_contain": [],
+    "finding_ids": []
+   }
+  },
+  {
+   "row": "R5",
+   "description": "empty versions with a range, installed at introduced",
+   "record_id": "GHSA-22q6-wwq7-2jj9",
+   "extra_record_ids": [],
+   "dist": "keystone",
+   "requirement": "keystone==2012.2",
+   "installed": "2012.2",
+   "raw": {
+    "versions": "none",
+    "ranges": [
+     [
+      {
+       "introduced": "2012.2"
+      },
+      {
+       "fixed": "2012.2.4"
+      }
+     ]
+    ],
+    "lkavr": null
+   },
+   "expect": {
+    "inventory_status": "pinned",
+    "matched": true,
+    "fixed_in": "2012.2.4",
+    "malicious_signal": null,
+    "notes_contain": [],
+    "finding_ids": [
+     "GHSA-22q6-wwq7-2jj9"
+    ]
+   }
+  },
+  {
+   "row": "R6",
+   "description": "versions only, no range",
+   "record_id": "GHSA-9p73-x86v-jw57",
+   "extra_record_ids": [],
+   "dist": "lollms",
+   "requirement": "lollms==9.6",
+   "installed": "9.6",
+   "raw": {
+    "versions": [
+     "9.6"
+    ],
+    "ranges": [],
+    "lkavr": null
+   },
+   "expect": {
+    "inventory_status": "pinned",
+    "matched": true,
+    "fixed_in": "none",
+    "malicious_signal": null,
+    "notes_contain": [],
+    "finding_ids": [
+     "GHSA-9p73-x86v-jw57"
+    ]
+   }
+  },
+  {
+   "row": "R7",
+   "description": "non-PEP 440 installed version is unsupported and never matched",
+   "record_id": "GHSA-29gw-9793-fvw7",
+   "extra_record_ids": [],
+   "dist": "ipython",
+   "requirement": "ipython==0.7.1.fix1",
+   "installed": "0.7.1.fix1",
+   "raw": {
+    "versions": "158 items including the non-PEP 440 string 0.7.1.fix1",
+    "ranges": [
+     [
+      {
+       "introduced": "0"
+      },
+      {
+       "fixed": "8.10.0"
+      }
+     ]
+    ],
+    "lkavr": null
+   },
+   "expect": {
+    "inventory_status": "unsupported",
+    "matched": false,
+    "fixed_in": null,
+    "malicious_signal": null,
+    "notes_contain": [],
+    "finding_ids": []
+   }
+  },
+  {
+   "row": "R8",
+   "description": "withdrawn record is excluded",
+   "record_id": "GHSA-39mj-fpg2-3jrg",
+   "extra_record_ids": [],
+   "dist": "st2client",
+   "requirement": "st2client==0.11.5.13",
+   "installed": "0.11.5.13",
+   "raw": {
+    "versions": "55 items, first 0.11.5.13",
+    "ranges": [
+     [
+      {
+       "introduced": "0"
+      },
+      {
+       "fixed": "3.4.1"
+      }
+     ]
+    ],
+    "lkavr": null,
+    "withdrawn": "2023-08-07T20:56:50Z"
+   },
+   "expect": {
+    "inventory_status": "pinned",
+    "matched": false,
+    "fixed_in": null,
+    "malicious_signal": null,
+    "notes_contain": [],
+    "finding_ids": []
+   }
+  },
+  {
+   "row": "R9",
+   "description": "alias group collapsed to one finding",
+   "record_id": "GHSA-c33m-22cr-j9x4",
+   "extra_record_ids": [
+    "PYSEC-2019-243"
+   ],
+   "dist": "designate",
+   "requirement": "designate==2015.1.0b2",
+   "installed": "2015.1.0b2",
+   "raw": {
+    "versions": [
+     "2015.1.0b2"
+    ],
+    "ranges": [],
+    "lkavr": null,
+    "other_record": "PYSEC-2019-243 lists the same version and the alias CVE-2015-5694 and GHSA-c33m-22cr-j9x4"
+   },
+   "expect": {
+    "inventory_status": "pinned",
+    "matched": true,
+    "fixed_in": "none",
+    "malicious_signal": null,
+    "notes_contain": [],
+    "finding_ids": [
+     "GHSA-c33m-22cr-j9x4",
+     "PYSEC-2019-243"
+    ]
+   }
+  },
+  {
+   "row": "R10",
+   "description": "MAL- alias gives malicious mal_prefix",
+   "record_id": "GHSA-jxr6-qrxx-2ph2",
+   "extra_record_ids": [],
+   "dist": "num2words",
+   "requirement": "num2words==0.5.15",
+   "installed": "0.5.15",
+   "raw": {
+    "versions": [
+     "0.5.15"
+    ],
+    "ranges": [],
+    "lkavr": null,
+    "aliases": [
+     "MAL-2025-6794",
+     "PYSEC-2025-72"
+    ],
+    "cwe_ids": [
+     "CWE-506"
+    ],
+    "note": "record has 3 affected entries, only num2words is queried"
+   },
+   "expect": {
+    "inventory_status": "pinned",
+    "matched": false,
+    "fixed_in": null,
+    "malicious_signal": "mal_prefix",
+    "notes_contain": [],
+    "finding_ids": []
+   }
+  },
+  {
+   "row": "R11",
+   "description": "CWE-506-only record gives malicious cwe_506",
+   "record_id": "GHSA-4f84-67cv-qrv3",
+   "extra_record_ids": [],
+   "dist": "dydx-v4-client",
+   "requirement": "dydx-v4-client==1.1.5.post1",
+   "installed": "1.1.5.post1",
+   "raw": {
+    "versions": [
+     "1.1.5.post1",
+     "1.1.6"
+    ],
+    "ranges": [
+     [
+      {
+       "introduced": "1.1.5.post1"
+      },
+      {
+       "fixed": "1.1.5"
+      }
+     ]
+    ],
+    "lkavr": null,
+    "aliases": [],
+    "cwe_ids": [
+     "CWE-506"
+    ]
+   },
+   "expect": {
+    "inventory_status": "pinned",
+    "matched": false,
+    "fixed_in": null,
+    "malicious_signal": "cwe_506",
+    "notes_contain": [],
+    "finding_ids": []
+   }
+  },
+  {
+   "row": "R12",
+   "description": "name normalisation: requirement spelled Jinja2, record named jinja2",
+   "record_id": "GHSA-462w-v97r-4m45",
+   "extra_record_ids": [],
+   "dist": "jinja2",
+   "requirement": "Jinja2==2.0",
+   "installed": "2.0",
+   "raw": {
+    "versions": "31 items, first 2.0",
+    "ranges": [
+     [
+      {
+       "introduced": "0"
+      },
+      {
+       "fixed": "2.10.1"
+      }
+     ]
+    ],
+    "lkavr": null,
+    "note": "no PyPI record in the snapshot has a raw name that differs from its canonical form (q1: 0), so the spelling difference is on the requirement side"
+   },
+   "expect": {
+    "inventory_status": "pinned",
+    "matched": true,
+    "fixed_in": "2.10.1",
+    "malicious_signal": null,
+    "notes_contain": [],
+    "finding_ids": [
+     "GHSA-462w-v97r-4m45"
+    ]
+   }
+  },
+  {
+   "row": "R13",
+   "description": "unparseable range bound matches conservatively with a note",
+   "record_id": "GHSA-6vhp-hp77-6w52",
+   "extra_record_ids": [],
+   "dist": "trac",
+   "requirement": "trac==0.0.1",
+   "installed": "0.0.1",
+   "raw": {
+    "versions": "none",
+    "ranges": [
+     [
+      {
+       "introduced": "0"
+      },
+      {
+       "fixed": "0.9-stable"
+      }
+     ]
+    ],
+    "lkavr": null
+   },
+   "expect": {
+    "inventory_status": "pinned",
+    "matched": true,
+    "fixed_in": "none",
+    "malicious_signal": null,
+    "notes_contain": [
+     "unparseable range bound"
+    ],
+    "finding_ids": [
+     "GHSA-6vhp-hp77-6w52"
+    ]
+   }
+  },
+  {
+   "row": "R14",
+   "description": "real lkavr record matches at its bound (lkavr cannot be isolated with real data, q2)",
+   "record_id": "GHSA-4vg5-rp28-gvjf",
+   "extra_record_ids": [],
+   "dist": "open-webui",
+   "requirement": "open-webui==0.1.123",
+   "installed": "0.1.123",
+   "raw": {
+    "versions": "none",
+    "ranges": [
+     [
+      {
+       "introduced": "0"
+      },
+      {
+       "fixed": "0.1.124"
+      }
+     ]
+    ],
+    "lkavr": "<= 0.1.123"
+   },
+   "expect": {
+    "inventory_status": "pinned",
+    "matched": true,
+    "fixed_in": "0.1.124",
+    "malicious_signal": null,
+    "notes_contain": [],
+    "finding_ids": [
+     "GHSA-4vg5-rp28-gvjf"
+    ]
+   }
+  },
+  {
+   "row": "R15",
+   "description": "GIT range ignored, match comes from versions, with a note",
+   "record_id": "OSV-2021-1809",
+   "extra_record_ids": [],
+   "dist": "ujson",
+   "requirement": "ujson==5.1.0",
+   "installed": "5.1.0",
+   "raw": {
+    "versions": [
+     "5.1.0"
+    ],
+    "ranges": [
+     [
+      "GIT",
+      [
+       {
+        "introduced": "b9275f7b001da11495040f1332f6c3adf3daa57b"
+       },
+       {
+        "fixed": "f6860f1f3d8d4e92b9be0e5815355a8976c6e75b"
+       },
+       {
+        "fixed": "550ba4d77294e61597a5259d00769c61281e0042"
+       }
+      ]
+     ]
+    ],
+    "lkavr": null
+   },
+   "expect": {
+    "inventory_status": "pinned",
+    "matched": true,
+    "fixed_in": "none",
+    "malicious_signal": null,
+    "notes_contain": [
+     "GIT range ignored"
+    ],
+    "finding_ids": [
+     "OSV-2021-1809"
+    ]
+   }
+  },
+  {
+   "row": "R16",
+   "description": "last_affected-only range: fixed_in is the literal none",
+   "record_id": "GHSA-3cm8-v4mc-gppg",
+   "extra_record_ids": [],
+   "dist": "binwalk",
+   "requirement": "binwalk==2.3.3",
+   "installed": "2.3.3",
+   "raw": {
+    "versions": "none",
+    "ranges": [
+     [
+      {
+       "introduced": "2.1.2b"
+      },
+      {
+       "last_affected": "2.3.3"
+      }
+     ]
+    ],
+    "lkavr": null
+   },
+   "expect": {
+    "inventory_status": "pinned",
+    "matched": true,
+    "fixed_in": "none",
+    "malicious_signal": null,
+    "notes_contain": [],
+    "finding_ids": [
+     "GHSA-3cm8-v4mc-gppg"
+    ]
+   }
+  },
+  {
+   "row": "R17",
+   "description": "two fixed events, installed below both: lowest fixed above installed",
+   "record_id": "PYSEC-2007-4",
+   "extra_record_ids": [],
+   "dist": "plone",
+   "requirement": "plone==2.5",
+   "installed": "2.5",
+   "raw": {
+    "versions": "none",
+    "ranges": [
+     [
+      {
+       "introduced": "2.5"
+      },
+      {
+       "fixed": "2.5.5"
+      },
+      {
+       "introduced": "3.0"
+      },
+      {
+       "fixed": "3.0.3"
+      }
+     ]
+    ],
+    "lkavr": null
+   },
+   "expect": {
+    "inventory_status": "pinned",
+    "matched": true,
+    "fixed_in": "2.5.5",
+    "malicious_signal": null,
+    "notes_contain": [],
+    "finding_ids": [
+     "PYSEC-2007-4"
+    ]
+   }
+  }
+ ]
+}

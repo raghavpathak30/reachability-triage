@@ -1,0 +1,19 @@
+import sys, zipfile, json, re
+from collections import Counter
+z=zipfile.ZipFile(sys.argv[1])
+c=Counter(); ex={}
+for name in sorted(z.namelist()):
+    r=json.loads(z.read(name))
+    if 'withdrawn' in r or r['id'].startswith('MAL-'): continue
+    for a in r.get('affected',[]):
+        p=a.get('package',{})
+        lk=(a.get('database_specific') or {}).get('last_known_affected_version_range')
+        if p.get('ecosystem')=='PyPI' and lk:
+            ev=[rg.get('events') for rg in a.get('ranges',[]) if rg.get('type')=='ECOSYSTEM']
+            terms=any(('fixed' in e or 'last_affected' in e) for evs in ev for e in evs)
+            k=(bool(a.get('versions')), bool(ev), terms)
+            c[k]+=1
+            ex.setdefault(k,[]).append((r['id'],p['name'],lk,json.dumps(ev)[:150]))
+print(c)
+for k,v in ex.items():
+    print(k, v[:3])

@@ -1,0 +1,7 @@
+# T9: one unpinned line, one -e line, --hash lines, one false marker (target_env cp313-manylinux_x86_64)
+accelerate>=0
+-e ./local_pkg
+click==8.1.7 \
+    --hash=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+    --hash=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+pywin32==306; sys_platform == "win32"

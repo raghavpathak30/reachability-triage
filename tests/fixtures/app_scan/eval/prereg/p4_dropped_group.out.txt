@@ -1,0 +1,5 @@
+records 26863 withdrawn 632 non_withdrawn 26231
+record-level signal (all records) {'cwe506': 8, 'alias_mal': 42, 'id_mal': 12020}
+record-level signal (non-withdrawn) {'cwe506': 8, 'alias_mal': 42, 'id_mal': 11995}
+non_malicious_groups_with_summary_Malicious_code_in 0
+groups_mixing_malicious_and_nonmalicious_records 2

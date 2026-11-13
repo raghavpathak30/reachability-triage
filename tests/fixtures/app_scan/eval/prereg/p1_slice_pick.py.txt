@@ -1,0 +1,119 @@
+import json
+import re
+import sys
+import zipfile
+
+from packaging.version import InvalidVersion, Version
+
+
+def canon(name):
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def load(path):
+    z = zipfile.ZipFile(path)
+    recs = {}
+    for n in sorted(z.namelist()):
+        if n.endswith(".json"):
+            recs[n[:-5]] = json.loads(z.read(n))
+    return recs
+
+
+def valid(v):
+    try:
+        Version(v)
+        return True
+    except InvalidVersion:
+        return False
+
+
+def pypi_affected(rec):
+    out = []
+    for i, a in enumerate(rec.get("affected", [])):
+        p = a.get("package", {})
+        if p.get("ecosystem") == "PyPI":
+            out.append((i, p.get("name", ""), a))
+    return out
+
+
+def groups(recs):
+    """union-find over id + aliases of non-withdrawn records; never `related`."""
+    parent = {}
+
+    def find(x):
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[max(ra, rb)] = min(ra, rb)
+
+    live = {k: r for k, r in recs.items() if "withdrawn" not in r}
+    for k, r in live.items():
+        find(r["id"])
+        for al in r.get("aliases", []):
+            union(r["id"], al)
+    members = {}
+    for k, r in live.items():
+        members.setdefault(find(r["id"]), []).append(k)
+    return live, members
+
+
+def is_malicious(live, member_ids):
+    for k in member_ids:
+        r = live[k]
+        names = [r["id"]] + list(r.get("aliases", []))
+        if any(n.startswith("MAL-") for n in names):
+            return True
+        if "CWE-506" in (r.get("database_specific") or {}).get("cwe_ids", []):
+            return True
+    return False
+
+
+def rep(live, member_ids):
+    names = set()
+    for k in member_ids:
+        names.add(live[k]["id"])
+        names.update(live[k].get("aliases", []))
+    ghsa = sorted(n for n in names if n.startswith("GHSA-"))
+    return ghsa[0] if ghsa else sorted(names)[0]
+
+
+def main(path):
+    recs = load(path)
+    for k in sorted(recs):
+        r = recs[k]
+        if "withdrawn" in r:
+            continue
+        names = [r["id"]] + list(r.get("aliases", []))
+        if any(n.startswith("MAL-") for n in names):
+            continue
+        if "CWE-506" in (r.get("database_specific") or {}).get("cwe_ids", []):
+            continue
+        pa = pypi_affected(r)
+        if len(pa) != 1 or len(r.get("affected", [])) != 1:
+            continue
+        i, raw, a = pa[0]
+        vs = a.get("versions") or []
+        if not vs or not all(valid(v) for v in vs):
+            continue
+        if any(rg.get("type") == "ECOSYSTEM" for rg in a.get("ranges", [])):
+            continue
+        A = vs[0]
+        B = A + ".99"
+        if B in vs or not valid(B):
+            continue
+        print("id", r["id"])
+        print("raw_name", raw)
+        print("dist", canon(raw))
+        print("versions_first_two", vs[:2])
+        print("A_matched", A)
+        print("B_unmatched", B)
+        return
+
+
+main(sys.argv[1])

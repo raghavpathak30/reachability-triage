@@ -1,0 +1,5 @@
+sha256 c7ea4e15b83912960fc5cbd42c6003dd630e422ec4dfbfc4ed19445573e1b08c
+bytes 37790549
+members 26863
+first3 ['GHSA-226f-f24g-524w.json', 'GHSA-227r-w5j2-6243.json', 'GHSA-22c2-9gwg-mj59.json']
+non_json_members 0

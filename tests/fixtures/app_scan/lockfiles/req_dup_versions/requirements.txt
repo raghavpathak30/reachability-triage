@@ -1,0 +1,5 @@
+foo==1.0; python_version >= "3.8"
+foo==2.0; sys_platform == "linux"
+foo==3.0; sys_platform == "win32"
+Typing_Extensions==4.12.2
+zope.interface==6.0

@@ -1439,3 +1439,121 @@ Version 0.3.5. `POST /v1/triage` accepted any string for `target_module` and `ta
 3. **`target_symbol=""` is now 422** (it was accepted before). Absent or null stays valid.
 4. **Tests.** `tests/test_main.py` (valid module and `Class.method` give 202; newline, NUL, space, empty segment, leading dot, colon and 257 characters give 422; stored non-conforming targets are echoed by GET), `tests/test_worker.py::test_worker_does_not_fail_queued_row_for_target_format`.
 5. **Cleanup in the same version.** `termination_cause.py` cite and the "ten paths / nine prefixes" comment; the truncated-reason input in `tests/test_engine_unknown_causes.py` now carries the whole head literal and all but the last character of the tail; stale `reachability.py` cites in `CLAUDE.md`, `agent_docs/DEMO.md` and `agent_docs/PHASE2_TRIAGE_AGENT.md`; the README no longer says the target is hidden for unfinished jobs (§21). Historical cites in §22-§24 are left as written.
+
+## 26. App scan: evidence levels instead of `not_reachable` (12 Nov 2026)
+
+**Decision.** `/v1/scans` takes a relative path under a read-only mount,
+requires a lockfile or fully pinned requirements, matches a pinned OSV PyPI
+snapshot (date and sha256 in every result), and returns one finding per
+advisory. Each finding carries one of the four existing verdicts plus an
+evidence level: `path_proven`, `module_imported_by_app`,
+`package_installed_not_imported` or `no_target_symbol`. Malicious-package
+records are listed separately and first, with no verdict. `/v1/triage` is
+unchanged.
+
+**Scans never issue `not_reachable`.** Two measured results:
+- A call graph over the Flask tutorial plus its wheels answered
+  `not_reachable` for werkzeug's multipart parser, which `request.form` runs
+  at runtime.
+- An import-graph rule looked sound until the FastAPI template showed
+  psycopg loaded from a URL string (`backend/app/core/config.py:39`, via
+  SQLAlchemy's `__import__`). With dynamic imports treated corpus-wide (the
+  D1 precedent), 0 dependency modules were eligible on either app.
+
+The earlier "87 of 2,241" figure is withdrawn (`APP_SCAN_RESEARCH.md` §0.4).
+
+**Target confidence:** high = named in the advisory text (code form) and
+changed between the installed version and the first fixed version above it.
+Medium = one of the two. The model may only rank within that set.
+
+**L3 exception:** not granted yet. It is decided at the start of A7, in its own section. Until then the L3 freeze in CLAUDE.md stands unchanged.
+
+**Frozen eval rules:** `PHASE_APP_SCAN.md` §4 (G1/G2/G3/G5/G6/G7/G8 hard, G4 reported).
+
+**Applied with changes (12 Nov 2026).** Copied from `agent_docs/PHASE_APP_SCAN.md` §8 with three changes:
+1. The "L3 exception (scoped)" paragraph is removed and replaced with the "L3 exception: not granted yet" paragraph above. The L3 freeze in CLAUDE.md is unchanged by this section.
+2. The frozen eval rules line is now G1/G2/G3/G5/G6/G7/G8 hard, G4 reported. G8 was added to the spec after the draft was written.
+3. "(draft)" is dropped from the title.
+
+
+## 27. App scan A1a: inventory and matcher (12 Nov 2026)
+
+Unit A1a of `agent_docs/PHASE_APP_SCAN.md` §3. A CLI reads an app's lockfile, lists exact dependency versions with a status, and matches the pinned ones against the pinned OSV PyPI snapshot. There is no API, table, worker, wheel fetch, call graph or verdict. Nothing scanned is built, installed or imported; only text files are read. Every number below carries a `(P<n>)` marker that points to a command output pasted in `.agent/plan.md` (and saved under `tests/fixtures/app_scan/eval/prereg/`).
+
+**1. What was built.**
+- `src/reachability/scan/inventory.py`: lockfile discovery, `requirements.txt` / `poetry.lock` / `uv.lock` parsers, marker evaluation, path safety, the `InventoryEntry` statuses `pinned` / `unpinned` / `unsupported` / `marker_skipped`, and the verbatim hint.
+- `src/reachability/scan/advisories.py`: the hash-checked snapshot loader, union-find advisory groups, the ordered-event OSV matcher, malicious classification, the unpinned counts and `summary.lead`.
+- `scripts/scan_inventory.py <dir> --snapshot <zip> [--snapshot-sha256 <hex>]`. Output order: lead (only if set), `advisories as of ...`, malicious packages, the inventory table, skipped and ignored items, hint (only if set). Exit 0 whenever the inventory completes (advisories found, unpinned packages and no lockfile at all included); `error: <Class>: <msg>` on stderr and exit 1 on a named error; argparse errors exit 2.
+- Tests under `tests/scan/` (network blocked for every test: `connect`, `connect_ex`, `create_connection`, `getaddrinfo`), fixtures under `tests/fixtures/app_scan/`.
+
+**2. Dependency.** `packaging==26.3`, licence `Apache-2.0 OR BSD-2-Clause` (METADATA `License-Expression`, P-S1). It was already present transitively (pytest); the pin makes it explicit. `pip check` was clean (P-S1). TOML is stdlib `tomllib`.
+
+**3. `target_env` marker values** (`cp313-manylinux_x86_64`; one constant, `MARKER_ENV`; `extra` is always `""`):
+
+| Key | Value |
+|---|---|
+| `python_version` | `3.13` |
+| `python_full_version` | `3.13.15` (the deployed interpreter, `Dockerfile:3`; the dev venv is not the target) |
+| `sys_platform` | `linux` |
+| `platform_system` | `Linux` |
+| `platform_machine` | `x86_64` |
+| `os_name` | `posix` |
+| `implementation_name` | `cpython` |
+| `platform_python_implementation` | `CPython` |
+
+Unmapped keys: before evaluating, the parsed marker tree is walked and every variable name collected. If any name is outside these eight plus `extra` (`platform_release`, `platform_version`, `implementation_version`), the marker is treated as true and the entry is kept with the note `marker uses unmapped key <k>; kept`. `Marker.evaluate` merges the host's default environment for keys it is not given, so this rule is what keeps a result from depending on the machine; a test patches the default-environment functions with poison values and shows the eight-key results do not change. The tree walk reads `Marker._markers` and `packaging._parser.Variable` (private to `packaging`); a test pins the shape against 26.3 and the walk raises `LockfileParseError` on any shape it does not recognise.
+
+**4. Lockfile precedence.** `uv.lock` > `poetry.lock` > `requirements.txt`, top level of the scan root only. The first usable one wins; every other candidate present is recorded as `ignored_lockfile` ("lower precedence than <winner>"). A symlinked, non-regular or over-5-MiB candidate is skipped and recorded, and discovery falls through to the next. `Pipfile.lock` and `pylock.toml` are recorded as ignored ("format arrives in A1b"). No lockfile found: empty inventory, hint set, exit 0. A1b extends this order.
+
+**5. Path safety.** The scan root is `resolve(strict=True)`. Every lockfile and every `-r` include is checked in this order: lexically inside the root; not a symlink; `resolve(strict=True)` equals the lexical path (so a symlinked directory component is caught); inside the root; a regular file; at most 5 MiB. Anything else is recorded (`symlink`, `include_outside_root`, `include_missing`, `include_cycle`, `not_regular_file`, `too_large`) and never opened (a FIFO named `requirements.txt` is skipped without being opened). Encoding: BOM sniffed (utf-8-sig, utf-32, utf-16), else utf-8; an undecodable file or any `OSError` raises `LockfileParseError`.
+
+**6. `requirements.txt` rules.**
+- Comments and `\` continuations follow pip: a full-line comment is never continued and ends an open continuation. An entry's line number is its first physical line.
+- Only `name==<valid PEP 440 version>` with no `*` is `pinned` (`+local` allowed). `==1.*`, `>=`, `~=`, `!=`, several specifiers and a bare name are `unpinned`. `===`, a non-PEP 440 `==` version, a URL / VCS / path line, `pkg @ url`, `-e`, `-c`, unknown options and invalid requirements are `unsupported`; option and URL lines have `dist = None` and the raw text in the notes. A false marker is `marker_skipped` (evaluated first, so it wins over `unpinned` and `unsupported` for a parsable requirement).
+- **Tokenised option spellings (Gate G-1).** Whole-line options accept `--opt=V`, `--opt V`, `-xV` and `-x V`. Include: `-r f`, `-rf`, `--requirement=f`, `--requirement f`. Taint (index/source options): `-i V`, `-iV`, `--index-url=V`, `--index-url V`, `--extra-index-url=V`, `--extra-index-url V`, `--no-index`, `-f V`, `-fV`, `--find-links=V`, `--find-links V`. Every other option (`-e`, `-c`, `--trusted-host`, `--pre`, `--only-binary`, `--no-binary`, `--require-hashes`, unknown) becomes an `unsupported` row and taints nothing. Long options also resolve by optparse-style unique prefix against pip 25.1.1's full requirements-file option list (`_PIP_LONG_OPTIONS`, `inventory.py`): an exact match wins; a unique prefix resolves to that option (`--index-u x` and `--no-ind` taint, `--find x` taints, `--requirem f` is an include); an ambiguous prefix with any taint option among its candidates taints (conservative, e.g. `--no-`); any other ambiguous prefix (e.g. `--req`, which is `--require-hashes` or `--requirement`) is an `unsupported` row. `--pypi-url`, pip's alias of `--index-url`, taints. Fix round 1 F2.
+- **Taint is tree-global**, as pip applies index options to the whole invocation. If any file in the tree (the root file and every followed include) contains a taint option, every package entry in the tree becomes `unsupported`; the original status is kept in the notes (`original status: pinned`) and the version is kept. This is broader than the brief's "that file" wording and adds `--no-index` and `--find-links`, because both change where packages come from. Side effect, stated: a tainted `unpinned` row stops counting toward N in the lead and the hint.
+- `-r` uses an active stack (a cycle is `include_cycle`) and a separate done set (a diamond include is parsed once and is not a cycle).
+- `--hash` values are recorded in order and not verified.
+- **Include depth cap.** `MAX_INCLUDE_DEPTH = 32` (`inventory.py`). An `-r` chain deeper than 32 raises `LockfileParseError` naming the file at which the cap was exceeded; cycle and diamond semantics are unchanged. The cap exists so crafted input cannot reach `RecursionError`; the recursion limit is not raised.
+
+**7. `poetry.lock`.** Every `[[package]]` is a row. `groups` (or the legacy `category`) is recorded. `markers` may be a string or a per-group table: the package is `marker_skipped` only if every group's marker is false, and a group with no entry counts as true. A `[package.source].type` other than absent or `pypi` (`git`, `url`, `directory`, `file`, `legacy`) gives `unsupported` with the source type in the notes. A missing or non-PEP 440 version gives `unsupported`. `optional = true` is only a note. `line` is `None` (the TOML parser gives no lines).
+
+**8. `uv.lock`.**
+- The top-level `version` must be the integer `1`, else `UvLockFormatError`.
+- The root is the single `[[package]]` whose `source` is `editable = "."` or `virtual = "."`. None or several raises `UvLockRootError`, whose message lists every editable/virtual candidate and its source path. Never a guess.
+- The runtime closure follows `dependencies` and, for an edge with `extra = [...]`, the target's `optional-dependencies[<extra>]`. Edge markers are evaluated. `dev-dependencies`, dependency groups and the root's own `optional-dependencies` are never followed (A1a has no input saying which extras of the scanned app are in use). An edge back to the root is ignored with an inventory-level note. The root is not listed.
+- An edge resolves by canonical name, then `version` and `source` when the edge carries them; no match or more than one match raises `UvLockResolutionError`.
+- A package reached by any true edge is `pinned` even if a false edge was seen first; `marker_skipped` only if every edge to it is false. A non-registry source (git, url, path, directory, non-root editable or virtual) is `unsupported`; a package without `version` is `unsupported` with `no version in lock`. A registry other than PyPI is still `pinned` in A1a (known gap).
+- **Known gap, measured (Gate G-4).** `editable = "backend"` (a uv workspace root that is not the lock's own project) is refused with `UvLockRootError`. In the two research apps: `fastapi-tpl/uv.lock` has its only editable member `app` at `source = { editable = "backend" }` (line 69), so A1a refuses that real app; `flask-repo/uv.lock` has its root at `source = { editable = "." }` (line 406), which A1a accepts. Neither has a `virtual` source (G-4 measurement in `.agent/plan.md`). Supporting the workspace layout needs its own decision.
+
+**9. Names.** PEP 503 canonical names (`packaging.utils.canonicalize_name`) are used for inventory keys, OSV matching and output. A duplicate dist at two versions that both survive markers is two entries.
+
+**10. OSV matching rules as implemented.**
+- Loader: the file is read once into memory; the sha256 is computed on those bytes and the zip is opened from the same bytes. Refused: a filename not matching `osv-pypi-YYYY-MM-DD.zip` with a real date, and a hash mismatch (checked before any member is read, even if a member is invalid JSON). The date is taken from the filename. Members are read with `ZipFile.read`, never extracted. A record with `withdrawn` is excluded before grouping and counted. After the hash check, a member that fails to read (`zlib.error`, encrypted, unsupported compression, `EOFError`, `RecursionError`, bad JSON), a duplicate record `id` across members, and a wrong-shaped field (`aliases`, `database_specific`, `cwe_ids`, `affected`, `ranges`, `versions`) each raise `SnapshotError` naming the member; nothing is silently dropped or overwritten (fix round 1 F4; the reference snapshot loads under these checks, `pytest tests/scan` loads it in the T9/T10/M1 tests). Unparseable range contents still match conservatively with a note.
+- Groups: union-find over each record's `id` and `aliases`; `related` is never read. An alias that is not a record still links. The representative is the lowest sorted `GHSA-*` node, else the lowest node.
+- Match: PyPI `affected[]` entries whose canonical name equals the installed dist. Installed version is `Version(installed).public`; when a local segment is stripped the notes say so. An entry matches if the version is in `versions` (PEP 440 equality), or inside any ECOSYSTEM range, or satisfies `database_specific.last_known_affected_version_range`; the three are a union.
+- Ranges are ordered events: `introduced "0"` is minus infinity (so `0.0.0rc1` matches), `fixed` and `limit` are exclusive, `last_affected` is inclusive; events are walked in version order, and at an equal version the order depends on whether an interval is open: with one open, terminators run before `introduced` (so `fixed X` then `introduced X` stays affected from X); with none open, `introduced` runs first (so `introduced X, fixed X` is an empty interval, `introduced X, last_affected X` affects exactly X, and an installed version above `last_affected` is not affected). Fix round 1 F1 (synthetic tests in `tests/scan/test_scan_matcher_events.py`); the 17 rows of `matcher_rows.json` are unchanged and pass. Anything unreadable (an unparseable bound, an event with other than one known key, a range with no `introduced`) makes that range match, with a note.
+- `last_known_affected_version_range` is parsed as comma-separated `(<=|<|>=|>|==) <version>` clauses and compared with the same `Version` ordering as the events; `SpecifierSet` is not used. An unparseable one matches conservatively with a note. It adds a note only when it is the sole reason for the match.
+- `GIT` and `SEMVER` (and any other non-ECOSYSTEM) ranges never contribute to a match; they are counted in `Snapshot.ignored_range_types` and noted on a match.
+- Fixed-in: the lowest valid `fixed` event strictly above the installed version, among the ranges that match; the minimum across a group's matched records; the literal `none` if there is none (versions-only match, `last_affected`-only, `limit`).
+- Only `pinned` rows are matched. A non-PEP 440 installed version never reaches the matcher because the inventory marks it `unsupported`.
+- Malicious (spec §2.10): a group is malicious if any node (record id or alias) starts `MAL-` (`mal_prefix`), otherwise if any member record has `CWE-506` in `database_specific.cwe_ids` (`cwe_506`). No text matching. This is applied at **group** level, one step beyond the spec's record-level wording; it changes the classification of 2 groups in the snapshot, which mix malicious and non-malicious records (P5 (h), P4). A malicious group is listed in `malicious`, never in `findings` (G7), and never counted in M.
+- Unpinned: for every `unpinned` row, M counts the distinct non-withdrawn, non-malicious groups that have a PyPI affected entry for any unpinned dist at any version, including entries that can never match. `summary.lead` is `"{N} packages are not pinned; they have {M} known advisories (any version). Pin them to check."` when N > 0 and `None` otherwise (G8). There is no pluralisation logic, so N = 1 reads "1 packages" and M = 1 reads "1 known advisories".
+
+**11. Pre-registered values and the commands that produced them.** Scripts: `tests/fixtures/app_scan/eval/prereg/*.py.txt`, run as `.venv/bin/python -I <script> ~/osv-snapshots/osv-pypi-2026-11-12.zip`, outputs saved beside them as `*.out.txt` and pasted in `.agent/plan.md`. They are independent of `src/reachability/scan` (own `zipfile`/`json`/`packaging` code and own union-find). Labels and `matcher_rows.json` were committed before any code graded against them ran. Snapshot: sha256 `c7ea4e15b83912960fc5cbd42c6003dd630e422ec4dfbfc4ed19445573e1b08c`, 37,790,549 bytes, 26,863 members, 632 withdrawn (P0, P4).
+- **M1** (`eval/M1/label.json`; P2, `p2_m1_pick.py.txt`): `MAL-2023-10`, dist `security-util-py`, version `0.0.6`. The group is malicious by `mal_prefix`.
+- **T10** (`eval/T10/label.json`; P3, `p3_t10_m.py.txt`): jinja2 has 10 groups, werkzeug 15, the union M = 25. Lead: `2 packages are not pinned; they have 25 known advisories (any version). Pin them to check.`
+- **T9** (`eval/T9/label.json`; P3 `p3b_t9_pick.py.txt`, then `p3_t10_m.py.txt --dists accelerate`): the pick is the smallest M >= 1, then alphabetical: `accelerate` (M = 1; 955 dists have M = 1). Its one group is `CVE-2026-69112` with members `GHSA-4j2p-28q2-5m79` and `PYSEC-2026-3804`, both copied into the fixtures so the mini snapshot reproduces M. Lead: `1 packages are not pinned; they have 1 known advisories (any version). Pin them to check.`
+- **Matcher table**: 17 rows from real records (P6, `matcher_rows.json`), expectations written by hand from the raw events, never edited.
+- The reference-snapshot tests skip when `~/osv-snapshots/osv-pypi-2026-11-12.zip` is absent; a skip is not evidence. The evidence is the step-32 CLI run recorded in `.agent/plan.md` (P-final).
+
+**12. Known gaps and surprises.**
+- `GIT` ranges are ignored for matching: 1,528 PyPI entries have one, 1,517 of them together with an ECOSYSTEM range; no entry has a `SEMVER` range, so SEMVER handling is tested only with synthetic data (P5 (a)). 13 PyPI entries can never match: 2 are GIT-only and 11 have neither a range nor `versions` (P5 (f)).
+- 46 ECOSYSTEM bound values in 33 records are not valid PEP 440 (for example `0.9-stable`, `4.6.0.stable11`, `0.8.3ubuntu7.5`); those ranges match conservatively with a note and contribute no fixed-in (P5 (b), (g)). 2,444 `versions` items are not valid PEP 440; they never equal a valid installed version (P5 (e)).
+- `last_known_affected_version_range` appears on 1,341 entries and every shape fits the clause grammar (P5 (c)); every such record also has an ECOSYSTEM range, so no real record isolates it as the only reason to match. The union behaviour is tested with synthetic records (q2 survey in the P6 section).
+- No PyPI record in the snapshot has a raw package name that differs from its canonical form (q1: 0), so the name-normalisation row spells the requirement `Jinja2==2.0` against the record name `jinja2`.
+- **The one advisory group the dropped summary rule used to catch.** The spec (§2.10, §6) says dropping the "Malicious code in" summary rule loses 1 group. Measured: with the final structural rule (MAL- prefix or CWE-506, group level) the count of non-malicious groups whose summary starts "Malicious code in" is **0** (P4). With the MAL- prefix alone it is 1: `GHSA-xmpw-2vmm-p4p6` (aliases `CVE-2026-45758`, `PYSEC-2026-206`), which carries `CWE-506` and is therefore classified `cwe_506`, not lost (P4, `p4c`). The spec's wording of this gap was stale; `PHASE_APP_SCAN.md` §2.10 and §6 were corrected to the measured 0 on 13 Nov 2026. Record-level signal counts: id starts `MAL-` 12,020 (11,995 non-withdrawn); alias only 42 (42); CWE-506 only 8 (8) (P4).
+- The marker walk reads private `packaging` attributes (pinned by a test against 26.3).
+- **Error mapping rule.** Crafted input must end in a named `ScanError` (CLI exit 1) or a conservative status, never a raw exception. A huge-digit version (`ValueError` from Python's int-string limit) is treated like `InvalidVersion` at every `Version(` site (`unsupported`, a conservative bound match, or a marker kept with a note). `RecursionError` from TOML parsing (whole-file nesting in `uv.lock` or `poetry.lock`) or from a lockfile marker string (`Marker()`, the marker walk or evaluation) becomes `LockfileParseError`; the recursion limit is not raised. Exception, `requirements.txt` only (13 Nov 2026, after fix round 3): a line whose `Requirement()` parse, marker walk or marker evaluation raises `RecursionError` becomes one `unsupported` entry with the note `marker is nested too deeply` and a `raw:` note, carrying the canonical leading name when the line starts with one; the rest of the file and its includes are still scanned and the CLI exits 0. Reason: one bad line in a hand-written file should not hide every other dependency, while a lockfile that cannot be parsed is not trustworthy as a whole. Tests: `tests/scan/test_scan_crafted_input.py` (`test_requirements_deep_marker_line_is_unsupported_and_scan_continues`, `test_requirements_deep_marker_in_include_is_unsupported`, `test_requirements_marker_recursion_during_evaluation_is_unsupported`, `test_poetry_marker_recursion_during_evaluation_still_raises`). An `-r` operand that raises `OSError` or `ValueError` in the path check (NUL byte, over-long name) is a skipped `include_missing` item and is never followed.
+- Not verified: `--hash` values. A registry other than PyPI in a `uv.lock` stays `pinned`. Lock formats give `line = None`. The index-option override is literal and tree-global (see §6).
+- Not built here: `Pipfile.lock` and `pylock.toml` (A1b), wheel fetch (A2), `/v1/scans` and tables (A3), targets (A4), call graphs (A5), eval labels beyond M1, T9 and T10 (A6), the L3 exception (A7, own section), UI, and `CLAUDE.md` changes (A9).

@@ -1,0 +1,11 @@
+import hashlib
+import sys
+import zipfile
+from pathlib import Path
+
+zip_path, outdir, ids = sys.argv[1], Path(sys.argv[2]), sys.argv[3:]
+z = zipfile.ZipFile(zip_path)
+for i in ids:
+    data = z.read(f"{i}.json")
+    (outdir / f"{i}.json").write_bytes(data)
+    print(i, "|", hashlib.sha256(data).hexdigest())

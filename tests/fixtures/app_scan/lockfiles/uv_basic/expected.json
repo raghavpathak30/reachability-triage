@@ -1,0 +1,7 @@
+{"inventory": {
+  "flask": {"version": "3.0.3", "status": "pinned"},
+  "click": {"version": "8.1.7", "status": "pinned"},
+  "jinja2": {"version": "3.1.4", "status": "pinned"},
+  "markupsafe": {"version": "2.1.5", "status": "pinned"},
+  "colorama": {"version": "0.4.6", "status": "marker_skipped"}
+}}

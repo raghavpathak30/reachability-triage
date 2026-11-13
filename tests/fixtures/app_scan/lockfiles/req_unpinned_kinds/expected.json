@@ -1,0 +1,19 @@
+{"inventory": {
+  "a1": {"version": null, "status": "unpinned"},
+  "a2": {"version": null, "status": "unpinned"},
+  "a3": {"version": null, "status": "unpinned"},
+  "a4": {"version": null, "status": "unpinned"},
+  "a5": {"version": null, "status": "unpinned"},
+  "a6": {"version": null, "status": "unpinned"},
+  "a7": {"version": null, "status": "unpinned"},
+  "b1": {"version": null, "status": "unsupported"},
+  "(unnamed line 9)": {"version": null, "status": "unsupported"},
+  "(unnamed line 10)": {"version": null, "status": "unsupported"},
+  "(unnamed line 11)": {"version": null, "status": "unsupported"},
+  "(unnamed line 12)": {"version": null, "status": "unsupported"},
+  "c1": {"version": null, "status": "unsupported"},
+  "(unnamed line 14)": {"version": null, "status": "unsupported"},
+  "d1": {"version": null, "status": "unsupported"},
+  "e1": {"version": "1.0+cpu", "status": "pinned"},
+  "(unnamed line 17)": {"version": null, "status": "unsupported"}
+}}

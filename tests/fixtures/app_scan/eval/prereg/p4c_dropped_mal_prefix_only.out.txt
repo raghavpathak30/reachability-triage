@@ -1,0 +1,6 @@
+records with summary starting 'Malicious code in' (non-withdrawn): 12033
+... of which no record-level structural signal:
+  RECORD GHSA-xmpw-2vmm-p4p6 | aliases ['CVE-2026-45758', 'PYSEC-2026-206'] | group GHSA-xmpw-2vmm-p4p6 members ['GHSA-xmpw-2vmm-p4p6', 'PYSEC-2026-206'] | group_malicious False
+count 1
+distinct groups among them 1
+mixed groups (malicious + non-malicious records):
