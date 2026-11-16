@@ -391,12 +391,11 @@ def _check_path(root: Path, lexical: Path) -> tuple[Path | None, str | None, str
         return None, "include_missing", f"{type(exc).__name__}: cannot check path"
 
 
-def _check_path_unguarded(root: Path, lexical: Path) -> tuple[Path | None, str | None, str]:
-    """Return (resolved, None, "") if safe to open, else (None, kind, detail).
+def _resolve_inside(root: Path, lexical: Path) -> tuple[Path | None, str | None, str]:
+    """Return (resolved, None, "") if `lexical` exists strictly inside `root` with no symlink.
 
-    `lexical` is already normalised and absolute. A symlink (the path itself or
-    any directory component), a path outside `root`, a non-regular file and a
-    file over MAX_LOCKFILE_BYTES are all refused without being opened.
+    `lexical` is already normalised and absolute. A symlink (the path itself or any
+    directory component) and a path outside `root` are refused.
     """
     if not lexical.is_relative_to(root):
         return None, "include_outside_root", "path is outside the scan root"
@@ -412,6 +411,18 @@ def _check_path_unguarded(root: Path, lexical: Path) -> tuple[Path | None, str |
         return None, "symlink", "a path component is a symlink; not followed"
     if not resolved.is_relative_to(root):
         return None, "include_outside_root", "resolves outside the scan root"
+    return resolved, None, ""
+
+
+def _check_path_unguarded(root: Path, lexical: Path) -> tuple[Path | None, str | None, str]:
+    """Return (resolved, None, "") if safe to open, else (None, kind, detail).
+
+    On top of `_resolve_inside`, a non-regular file and a file over
+    MAX_LOCKFILE_BYTES are refused without being opened.
+    """
+    resolved, kind, detail = _resolve_inside(root, lexical)
+    if resolved is None:
+        return None, kind, detail
     try:
         st = os.stat(resolved)
     except OSError as exc:
@@ -421,6 +432,30 @@ def _check_path_unguarded(root: Path, lexical: Path) -> tuple[Path | None, str |
     if st.st_size > MAX_LOCKFILE_BYTES:
         return None, "too_large", f"{st.st_size} bytes exceeds {MAX_LOCKFILE_BYTES}"
     return resolved, None, ""
+
+
+def _check_dir(root: Path, rel: str, member: str = "") -> str:
+    """Validate a workspace member directory; return its POSIX path relative to `root`."""
+
+    def refuse(reason: str) -> UvLockRootError:
+        return UvLockRootError(f"uv workspace member {member!r} path {rel!r}: {reason}")
+
+    try:
+        if not rel:
+            raise refuse("path is empty")
+        if rel.startswith(("/", "\\")) or os.path.isabs(rel):
+            raise refuse("path is absolute")
+        if ".." in rel.replace("\\", "/").split("/"):
+            raise refuse("path has a '..' component")
+        lexical = Path(os.path.normpath(root / rel))
+        resolved, _, detail = _resolve_inside(root, lexical)
+        if resolved is None:
+            raise refuse(detail)
+        if not stat.S_ISDIR(os.stat(resolved).st_mode):
+            raise refuse("not a directory")
+        return resolved.relative_to(root).as_posix()
+    except (OSError, ValueError) as exc:
+        raise refuse(f"{type(exc).__name__}: cannot check path") from exc
 
 
 class _RequirementsTree:

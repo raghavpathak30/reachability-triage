@@ -128,3 +128,56 @@ def test_oversized_include_skipped(scan_root):
     inv = build_inventory(scan_root)
     assert kinds(inv) == ["too_large"]
     assert [e.status for e in inv.entries] == [Status.PINNED]
+
+
+from reachability.scan.inventory import UvLockRootError, _check_dir  # noqa: E402
+
+
+def test_check_dir_accepts_plain_subdir(tmp_path):
+    (tmp_path / "services" / "api").mkdir(parents=True)
+    assert _check_dir(tmp_path.resolve(), "services/api") == "services/api"
+    assert _check_dir(tmp_path.resolve(), "./services/api") == "services/api"
+
+
+def test_check_dir_refuses_absolute(tmp_path):
+    with pytest.raises(UvLockRootError, match="absolute"):
+        _check_dir(tmp_path.resolve(), "/etc")
+
+
+@pytest.mark.parametrize("rel", ["../x", "backend/../x"])
+def test_check_dir_refuses_dotdot_component(tmp_path, rel):
+    (tmp_path / "backend").mkdir()
+    with pytest.raises(UvLockRootError, match=r"\.\."):
+        _check_dir(tmp_path.resolve(), rel)
+
+
+def test_check_dir_refuses_symlinked_dir(tmp_path):
+    (tmp_path / "root").mkdir()
+    root = (tmp_path / "root").resolve()
+    (tmp_path / "real").mkdir()
+    os.symlink(tmp_path / "real", root / "link")
+    with pytest.raises(UvLockRootError, match="symlink"):
+        _check_dir(root, "link")
+
+
+def test_check_dir_refuses_symlinked_parent_component(tmp_path):
+    (tmp_path / "root").mkdir()
+    root = (tmp_path / "root").resolve()
+    (root / "real" / "sub").mkdir(parents=True)
+    os.symlink(root / "real", root / "link")
+    with pytest.raises(UvLockRootError, match="symlink"):
+        _check_dir(root, "link/sub")
+
+
+def test_check_dir_refuses_missing_and_regular_file(tmp_path):
+    (tmp_path / "f").write_text("x")
+    with pytest.raises(UvLockRootError, match="does not exist"):
+        _check_dir(tmp_path.resolve(), "nope")
+    with pytest.raises(UvLockRootError, match="not a directory"):
+        _check_dir(tmp_path.resolve(), "f")
+
+
+@pytest.mark.parametrize("rel", ["", "a\x00b", "x" * 5000])
+def test_check_dir_nul_byte_overlong_and_empty_raise(tmp_path, rel):
+    with pytest.raises(UvLockRootError):
+        _check_dir(tmp_path.resolve(), rel)
