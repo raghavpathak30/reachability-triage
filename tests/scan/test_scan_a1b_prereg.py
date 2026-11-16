@@ -10,3 +10,11 @@ def test_prereg_json_equals_each_fixture_expected_json():
     assert set(prereg) == {"uv_ws_one", "uv_ws_two", "uv_ws_escape", "req_huge_digit"}
     for name, exp in prereg.items():
         assert json.loads((FIXTURES / "lockfiles" / name / "expected.json").read_text()) == exp
+
+
+def test_decisions_has_section_28():
+    text = (REPO / "DECISIONS.md").read_text()
+    assert "## 28." in text
+    section = text[text.index("## 28."):]
+    for needle in ("--member", "app_root", "1.0.1"):
+        assert needle in section
