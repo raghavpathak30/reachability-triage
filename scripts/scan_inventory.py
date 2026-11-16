@@ -4,6 +4,10 @@
 Reads text files only. Exit 0 whenever the inventory completes (even with
 advisories, unpinned packages or no lockfile); exit 1 with `error: <Class>: <msg>`
 on stderr for a named error; argparse errors exit 2.
+
+`--member <name>` picks one member of a uv workspace lock; it is an error for any
+other lockfile or when no lockfile exists. The output starts with `app_root: <path>`
+(after the lead line, if any), the directory A2 reads code from.
 """
 
 import argparse
@@ -76,10 +80,15 @@ def main() -> int:
         default=REFERENCE_SHA256,
         help=f"expected sha256 of the snapshot (default: reference {REFERENCE_SHA256})",
     )
+    parser.add_argument(
+        "--member",
+        default=None,
+        help="uv workspace member to scan, needed when uv.lock lists several (uv.lock only)",
+    )
     args = parser.parse_args()
     try:
         snapshot = load_snapshot(Path(args.snapshot).expanduser(), args.snapshot_sha256)
-        inventory = build_inventory(Path(args.dir))
+        inventory = build_inventory(Path(args.dir), member=args.member)
         report = build_report(inventory, snapshot)
     except ScanError as exc:
         print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)

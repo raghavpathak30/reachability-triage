@@ -323,3 +323,14 @@ def test_ws_one_runtime_closure_excludes_dev_group():
 def test_ws_member_note_added():
     inv = build_inventory(FIX / "uv_ws_one")
     assert "uv workspace member 'app' selected (editable = 'backend')" in inv.notes
+
+
+def test_ws_two_member_worker_and_api_rows():
+    worker = build_inventory(FIX / "uv_ws_two", member="worker")
+    assert [(e.dist, e.version, e.status.value) for e in worker.entries] == [("requests", "2.32.3", "pinned")]
+    assert (worker.app_root, worker.member) == ("services/worker", "worker")
+    api = build_inventory(FIX / "uv_ws_two", member="api")
+    assert [(e.dist, e.version, e.status.value) for e in api.entries] == [("click", "8.1.7", "pinned")]
+    assert api.app_root == "services/api"
+    with pytest.raises(UvLockRootError):
+        build_inventory(FIX / "uv_ws_two", member="nope")

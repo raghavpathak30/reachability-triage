@@ -89,6 +89,31 @@ def test_cli_ws_one_prints_app_root_backend(snapshot_factory):
     assert lines[1].startswith("advisories as of ")
 
 
+def test_cli_uv_ws_two_without_member_exits_1_naming_option(snapshot_factory):
+    path, sha = snapshot_factory([{"id": "A-1", "aliases": [], "affected": []}])
+    proc = cli(FIX / "lockfiles" / "uv_ws_two", path, sha)
+    assert proc.returncode == 1
+    assert proc.stderr.startswith("error: UvLockRootError: ") and "--member" in proc.stderr
+
+
+def test_cli_member_selects_and_prints_app_root_services_worker(snapshot_factory):
+    path, sha = snapshot_factory([{"id": "A-1", "aliases": [], "affected": []}])
+    proc = cli(FIX / "lockfiles" / "uv_ws_two", path, sha, "--member", "worker")
+    assert proc.returncode == 0, proc.stderr
+    lines = proc.stdout.splitlines()
+    assert lines[0] == "app_root: services/worker"
+    assert "requests | 2.32.3 | pinned | - | -" in lines
+    assert not any(line.startswith("click |") for line in lines)
+
+
+def test_cli_member_on_requirements_exits_1_named_error(snapshot_factory, scan_root):
+    path, sha = snapshot_factory([{"id": "A-1", "aliases": [], "affected": []}])
+    (scan_root / "requirements.txt").write_text("foo==1.0\n")
+    proc = cli(scan_root, path, sha, "--member", "x")
+    assert proc.returncode == 1
+    assert proc.stderr.startswith("error: MemberOptionError: ")
+
+
 def test_cli_malicious_section_before_inventory(snapshot_factory):
     path, sha = snapshot_factory(["MAL-2023-10"])
     proc = cli(FIX / "lockfiles" / "M1", path, sha)

@@ -74,6 +74,10 @@ class UvLockResolutionError(ScanError):
     pass
 
 
+class MemberOptionError(ScanError):
+    pass
+
+
 class Status(str, Enum):
     PINNED = "pinned"
     UNPINNED = "unpinned"
@@ -916,7 +920,7 @@ def discover_lockfile(root: Path) -> tuple[str | None, Path | None, list[Skipped
     return winner[0], winner[1], skipped
 
 
-def build_inventory(root: Path) -> Inventory:
+def build_inventory(root: Path, member: str | None = None) -> Inventory:
     try:
         resolved = Path(root).resolve(strict=True)
     except OSError as exc:
@@ -924,6 +928,11 @@ def build_inventory(root: Path) -> Inventory:
     if not resolved.is_dir():
         raise ScanRootError(f"scan root is not a directory: {root}")
     lockfile, path, skipped = discover_lockfile(resolved)
+    if member is not None and lockfile != "uv.lock":
+        raise MemberOptionError(
+            f"--member {member!r} only applies to a uv.lock workspace; "
+            + (f"the lockfile found is {lockfile}" if lockfile else "no lockfile was found")
+        )
     tree = _RequirementsTree(resolved)
     entries: list[InventoryEntry] = []
     lock_notes: list[str] = []
@@ -935,7 +944,7 @@ def build_inventory(root: Path) -> Inventory:
     elif lockfile == "poetry.lock" and path is not None:
         entries = _parse_poetry_lock(path, "poetry.lock")
     elif lockfile == "uv.lock" and path is not None:
-        entries, lock_notes, app_root, selected = _parse_uv_lock(path, "uv.lock")
+        entries, lock_notes, app_root, selected = _parse_uv_lock(path, "uv.lock", member)
     hint = HINT if lockfile is None or any(e.status is Status.UNPINNED for e in entries) else None
     return Inventory(
         str(resolved),
