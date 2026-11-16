@@ -17,8 +17,8 @@ from enum import Enum
 from pathlib import Path
 
 from packaging._parser import Variable
-from packaging.markers import InvalidMarker, Marker, UndefinedComparison, UndefinedEnvironmentName
-from packaging.requirements import InvalidRequirement, Requirement
+from packaging.markers import Marker, UndefinedComparison, UndefinedEnvironmentName
+from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
@@ -283,7 +283,7 @@ def _parse_requirement_line(line: str, rel: str, lineno: int) -> InventoryEntry:
         return _unsupported(
             rel, lineno, line, MARKER_TOO_DEEP, canonicalize_name(name.group(1)) if name else None
         )
-    except InvalidRequirement as exc:
+    except ValueError as exc:  # InvalidRequirement and a bare ValueError alike
         salvage = _EQ_PIN.match(req_text)
         if salvage:
             return _unsupported(
@@ -536,7 +536,7 @@ def _parse_marker_string(text: str, rel: str) -> Marker:
         return Marker(text)
     except RecursionError as exc:
         raise LockfileParseError(f"invalid marker in {rel}: nested too deeply") from exc
-    except InvalidMarker as exc:
+    except ValueError as exc:  # InvalidMarker and a bare ValueError alike
         raise LockfileParseError(f"invalid marker in {rel}: {text!r}: {exc}") from exc
 
 
