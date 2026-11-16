@@ -24,6 +24,8 @@ def render(report: ScanReport) -> list[str]:
     out: list[str] = []
     if report.lead is not None:
         out.append(report.lead)
+    if inv.app_root is not None:
+        out.append(f"app_root: {inv.app_root}")
     out.append(f"advisories as of {snap.date.isoformat()} (snapshot sha256 {snap.sha256})")
     out.append("== Malicious packages ==")
     if report.malicious:

@@ -47,20 +47,37 @@ def test_cli_prints_sections_in_exact_order_with_lead_first(mini):
     lines = proc.stdout.splitlines()
     label = json.loads((FIX / "eval" / "T9" / "label.json").read_text())
     assert lines[0] == label["summary_lead"]
-    assert lines[1].startswith("advisories as of 2026-11-12 (snapshot sha256 " + sha + ")")
+    assert lines[2].startswith("advisories as of 2026-11-12 (snapshot sha256 " + sha + ")")
     idx = [section_index(lines, h) for h in ("== Malicious packages ==", "== Inventory ==", "== Skipped and ignored ==", "== Hint ==")]
-    assert idx == sorted(idx) and idx[0] == 2
+    assert idx == sorted(idx) and idx[0] == 3
     assert lines[-1] == HINT and lines[-2] == "== Hint =="
 
 
-def test_cli_no_lead_line_when_all_pinned_first_line_is_advisories_as_of(snapshot_factory, scan_root):
+def test_cli_no_lead_line_when_all_pinned_first_lines_are_app_root_then_advisories(snapshot_factory, scan_root):
     path, sha = snapshot_factory([{"id": "A-1", "aliases": [], "affected": [aff("foo", ["9"])]}])
     (scan_root / "requirements.txt").write_text("foo==1.0\n")
     proc = cli(scan_root, path, sha)
     assert proc.returncode == 0
     lines = proc.stdout.splitlines()
-    assert lines[0].startswith("advisories as of 2026-11-12 (snapshot sha256 ")
+    assert lines[0] == "app_root: ."
+    assert lines[1].startswith("advisories as of 2026-11-12 (snapshot sha256 ")
     assert "== Hint ==" not in lines
+
+
+def test_cli_prints_app_root_line_right_after_lead(mini):
+    path, sha = mini
+    proc = cli(FIX / "lockfiles" / "T9", path, sha)
+    lines = proc.stdout.splitlines()
+    label = json.loads((FIX / "eval" / "T9" / "label.json").read_text())
+    assert lines[0] == label["summary_lead"]
+    assert lines[1] == "app_root: ."
+
+
+def test_cli_omits_app_root_when_no_lockfile(snapshot_factory, scan_root):
+    path, sha = snapshot_factory([{"id": "A-1", "aliases": [], "affected": []}])
+    proc = cli(scan_root, path, sha)
+    assert proc.returncode == 0, proc.stderr
+    assert not any(line.startswith("app_root:") for line in proc.stdout.splitlines())
 
 
 def test_cli_malicious_section_before_inventory(snapshot_factory):

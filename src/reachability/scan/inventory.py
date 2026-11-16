@@ -110,6 +110,8 @@ class Inventory:
     skipped: tuple[SkippedItem, ...]
     hint: str | None
     notes: tuple[str, ...] = ()
+    app_root: str | None = None
+    member: str | None = None
 
 
 def _marker_variables(marker: Marker) -> set[str]:
@@ -834,4 +836,12 @@ def build_inventory(root: Path) -> Inventory:
     elif lockfile == "uv.lock" and path is not None:
         entries, lock_notes = _parse_uv_lock(path, "uv.lock")
     hint = HINT if lockfile is None or any(e.status is Status.UNPINNED for e in entries) else None
-    return Inventory(str(resolved), lockfile, tuple(entries), tuple(skipped) + tuple(tree.skipped), hint, tuple(lock_notes))
+    return Inventory(
+        str(resolved),
+        lockfile,
+        tuple(entries),
+        tuple(skipped) + tuple(tree.skipped),
+        hint,
+        tuple(lock_notes),
+        app_root="." if lockfile is not None else None,
+    )
