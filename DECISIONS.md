@@ -1574,6 +1574,6 @@ Scope cut by the v1 plan and council of 16 Nov 2026: `Pipfile.lock` and `pylock.
 
 **Pre-registration.** Expected rows for `uv_ws_one`, `uv_ws_two`, `uv_ws_escape` and `req_huge_digit` were committed before any of this code (`tests/fixtures/app_scan/eval/prereg/a1b_expected.json`, `a1b_reasoning.md`) and not changed afterwards.
 
-**Real-app count: (filled in by the main thread)**
+**Real-app count (16 Nov 2026).** `fastapi/full-stack-fastapi-template` at `aabb901` (`uv.lock` sha256 `d6e5a35b36a7d13642b8fdaeec2ba2b98eb1adfeb2eca61530429561c7e46b02`), cloned read-only to `/tmp/app-scan-research/fastapi-template`, nothing committed. Command: `python scripts/scan_inventory.py /tmp/app-scan-research/fastapi-template --snapshot ~/osv-snapshots/osv-pypi-2026-11-12.zip`. Result: exit 0, no `UvLockRootError`, `app_root: backend`, member `app`, **64 inventory rows** (62 `pinned`, 2 `marker_skipped`: `colorama 0.4.6`, `tzdata 2026.2`), `dkimpy 1.1.8 pinned`. This equals the pre-registered 64 (`agent_docs/research/APP_SCAN_RESEARCH.md` l.697-700).
 
 **Known gaps.** Several workspace members cannot be scanned in one run. `--member` cannot pick another member when a `"."` root exists. The ignored-file text still says "format arrives in A1b". Pipfile.lock and pylock.toml are not parsed (1.0.1).
