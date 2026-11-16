@@ -829,9 +829,8 @@ def _parse_uv_lock(path: Path, rel: str, member: str | None = None) -> tuple[lis
     kind, rel_path = _uv_member_path(root)
     app_root, selected = ".", None
     if rel_path != ".":
-        if not (path.parent / rel_path).is_dir():
-            raise UvLockRootError(f"uv workspace member {root.get('name')!r}: {rel_path!r} is not a directory")
-        app_root, selected = Path(rel_path).as_posix(), canonicalize_name(root["name"])
+        app_root = _check_dir(path.parent, rel_path, str(root.get("name")))
+        selected = canonicalize_name(root["name"])
         notes.append(f"uv workspace member '{selected}' selected ({kind} = '{rel_path}')")
     expanded: set[tuple[int, str | None]] = set()
     stack: list[tuple[int, str | None]] = [(root_idx, None)]

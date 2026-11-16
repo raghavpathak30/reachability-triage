@@ -298,3 +298,28 @@ def test_duplicate_candidate_name_raises_ambiguous():
     pkgs = [pkg("api", {"editable": "a"}), pkg("API", {"editable": "b"})]
     with pytest.raises(UvLockRootError, match="ambiguous member"):
         find_uv_root(pkgs, ["api"])
+
+
+def ws_lock(path):
+    return (
+        "version = 1\n[manifest]\nmembers = [\"svc\"]\n"
+        f'[[package]]\nname = "svc"\nversion = "1"\nsource = {{ editable = "{path}" }}\n'
+    )
+
+
+@pytest.mark.parametrize("path", ["missing", "../x", "/abs", "link"])
+def test_uv_ws_member_path_failure_is_uvlockrooterror_naming_member(scan_root, path):
+    (scan_root / "real").mkdir()
+    (scan_root / "link").symlink_to(scan_root / "real")
+    with pytest.raises(UvLockRootError) as ei:
+        write_uv(scan_root, ws_lock(path))
+    assert "svc" in str(ei.value) and path in str(ei.value)
+
+
+def test_ws_one_runtime_closure_excludes_dev_group():
+    assert "pytest" not in {e.dist for e in build_inventory(FIX / "uv_ws_one").entries}
+
+
+def test_ws_member_note_added():
+    inv = build_inventory(FIX / "uv_ws_one")
+    assert "uv workspace member 'app' selected (editable = 'backend')" in inv.notes
