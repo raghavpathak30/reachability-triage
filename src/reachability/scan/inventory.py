@@ -657,10 +657,14 @@ def _describe_source(source: object) -> str:
     return ", ".join(f"{k} = {v!r}" for k, v in source.items()) if isinstance(source, dict) else repr(source)
 
 
-def find_uv_root(packages: list[dict], manifest_members: list[str] | None = None) -> dict:
-    """The single [[package]] whose source is `editable = "."` or `virtual = "."`.
+def find_uv_root(
+    packages: list[dict], manifest_members: list[str] | None = None, member: str | None = None
+) -> dict:
+    """Pick the package whose runtime closure is scanned.
 
-    Without a "." root, a lock with `[manifest] members` selects its one member package.
+    A single `editable = "."` / `virtual = "."` package wins. Otherwise a lock with
+    `[manifest] members` selects among the member packages that have an editable or
+    virtual path source; several need `member`. No `[manifest] members`: the A1a error.
     """
     roots = []
     candidates = []
@@ -674,20 +678,41 @@ def find_uv_root(packages: list[dict], manifest_members: list[str] | None = None
                 if source[kind] == ".":
                     roots.append(pkg)
     listing = "; ".join(candidates) if candidates else "none"
+    wanted = canonicalize_name(member) if member is not None else None
     if len(roots) == 1:
+        if wanted is not None and canonicalize_name(str(roots[0].get("name"))) != wanted:
+            raise UvLockRootError(
+                f"unknown member {member!r}: uv.lock has a root member {roots[0].get('name')!r} "
+                "(editable/virtual = \".\"), and only that one can be selected"
+            )
         return roots[0]
     if not roots and manifest_members is not None:
-        wanted = {canonicalize_name(m) for m in manifest_members}
+        in_manifest = {canonicalize_name(m) for m in manifest_members}
         chosen = [
             p
             for p in packages
             if isinstance(p.get("name"), str)
-            and canonicalize_name(p["name"]) in wanted
+            and canonicalize_name(p["name"]) in in_manifest
             and isinstance(p.get("source"), dict)
             and any(isinstance(p["source"].get(k), str) for k in ("editable", "virtual"))
         ]
+        names = [canonicalize_name(p["name"]) for p in chosen]
+        dupes = sorted({n for n in names if names.count(n) > 1})
+        if dupes:
+            raise UvLockRootError(f"ambiguous member {dupes[0]!r}: several packages in uv.lock carry that name")
+        described = "; ".join(f"{p['name']} ({_uv_member_path(p)[1]})" for p in chosen)
+        if wanted is not None:
+            picked = [p for p, n in zip(chosen, names) if n == wanted]
+            if not picked:
+                raise UvLockRootError(f"unknown member {member!r}; workspace members: {described or 'none'}")
+            return picked[0]
         if len(chosen) == 1:
             return chosen[0]
+        if len(chosen) > 1:
+            raise UvLockRootError(
+                f"uv.lock is a workspace with {len(chosen)} members, pick one with --member <name>; "
+                f"members: {described}"
+            )
     if not roots:
         raise UvLockRootError(
             "uv.lock has no root member (a package with source editable = \".\" or virtual = \".\"); "
@@ -696,6 +721,24 @@ def find_uv_root(packages: list[dict], manifest_members: list[str] | None = None
     raise UvLockRootError(
         f"uv.lock has {len(roots)} root members, expected exactly one; candidates: {listing}"
     )
+
+
+def _uv_member_path(pkg: dict) -> tuple[str, str]:
+    source = pkg["source"]
+    kind = "editable" if isinstance(source.get("editable"), str) else "virtual"
+    return kind, source[kind]
+
+
+def _uv_manifest_members(data: dict, rel: str) -> list[str] | None:
+    if "manifest" not in data:
+        return None
+    manifest = data["manifest"]
+    if not isinstance(manifest, dict):
+        raise _shape_error(rel, "'manifest'", "a table", manifest)
+    if "members" not in manifest:
+        return None
+    _check_str_list(rel, "'manifest' field 'members'", manifest["members"])
+    return manifest["members"]
 
 
 _UV_REGISTRY_ONLY = "registry"
@@ -730,22 +773,14 @@ def _uv_edges(pkg: dict, extra: str | None) -> list[dict]:
     return edges
 
 
-def _uv_member_path(pkg: dict) -> tuple[str, str]:
-    source = pkg["source"]
-    kind = "editable" if isinstance(source.get("editable"), str) else "virtual"
-    return kind, source[kind]
-
-
-def _parse_uv_lock(path: Path, rel: str) -> tuple[list[InventoryEntry], list[str], str, str | None]:
+def _parse_uv_lock(path: Path, rel: str, member: str | None = None) -> tuple[list[InventoryEntry], list[str], str, str | None]:
     data = _load_toml(path, rel)
     version = data.get("version")
     if version != 1 or isinstance(version, bool):
         raise UvLockFormatError(f"{rel}: unsupported uv.lock version {version!r}; only version 1 is read")
     packages = _package_tables(data, rel)
     _check_uv_shapes(packages, rel)
-    manifest = data.get("manifest")
-    members = manifest.get("members") if isinstance(manifest, dict) else None
-    root = find_uv_root(packages, members)
+    root = find_uv_root(packages, _uv_manifest_members(data, rel), member)
     root_idx = next(i for i, p in enumerate(packages) if p is root)
     by_name: dict[str, list[int]] = {}
     for i, p in enumerate(packages):
