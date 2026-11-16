@@ -80,6 +80,15 @@ def test_cli_omits_app_root_when_no_lockfile(snapshot_factory, scan_root):
     assert not any(line.startswith("app_root:") for line in proc.stdout.splitlines())
 
 
+def test_cli_ws_one_prints_app_root_backend(snapshot_factory):
+    path, sha = snapshot_factory([{"id": "A-1", "aliases": [], "affected": []}])
+    proc = cli(FIX / "lockfiles" / "uv_ws_one", path, sha)
+    assert proc.returncode == 0, proc.stderr
+    lines = proc.stdout.splitlines()
+    assert lines[0] == "app_root: backend"
+    assert lines[1].startswith("advisories as of ")
+
+
 def test_cli_malicious_section_before_inventory(snapshot_factory):
     path, sha = snapshot_factory(["MAL-2023-10"])
     proc = cli(FIX / "lockfiles" / "M1", path, sha)

@@ -219,3 +219,10 @@ def test_uv_lock_wins_end_to_end_over_requirements(scan_root):
     assert inv.lockfile == "uv.lock"
     assert [e.dist for e in inv.entries] == ["a"]
     assert sorted(s.path for s in inv.skipped if s.kind == "ignored_lockfile") == ["poetry.lock", "requirements.txt"]
+
+
+def test_ws_one_selects_backend_app_root_and_member():
+    inv = build_inventory(FIX / "uv_ws_one")
+    assert inv.app_root == "backend"
+    assert inv.member == "app"
+    assert [e.dist for e in inv.entries] == ["click", "colorama"]

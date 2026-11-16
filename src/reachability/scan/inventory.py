@@ -657,8 +657,11 @@ def _describe_source(source: object) -> str:
     return ", ".join(f"{k} = {v!r}" for k, v in source.items()) if isinstance(source, dict) else repr(source)
 
 
-def find_uv_root(packages: list[dict]) -> dict:
-    """The single [[package]] whose source is `editable = "."` or `virtual = "."`."""
+def find_uv_root(packages: list[dict], manifest_members: list[str] | None = None) -> dict:
+    """The single [[package]] whose source is `editable = "."` or `virtual = "."`.
+
+    Without a "." root, a lock with `[manifest] members` selects its one member package.
+    """
     roots = []
     candidates = []
     for pkg in packages:
@@ -673,6 +676,18 @@ def find_uv_root(packages: list[dict]) -> dict:
     listing = "; ".join(candidates) if candidates else "none"
     if len(roots) == 1:
         return roots[0]
+    if not roots and manifest_members is not None:
+        wanted = {canonicalize_name(m) for m in manifest_members}
+        chosen = [
+            p
+            for p in packages
+            if isinstance(p.get("name"), str)
+            and canonicalize_name(p["name"]) in wanted
+            and isinstance(p.get("source"), dict)
+            and any(isinstance(p["source"].get(k), str) for k in ("editable", "virtual"))
+        ]
+        if len(chosen) == 1:
+            return chosen[0]
     if not roots:
         raise UvLockRootError(
             "uv.lock has no root member (a package with source editable = \".\" or virtual = \".\"); "
@@ -715,14 +730,22 @@ def _uv_edges(pkg: dict, extra: str | None) -> list[dict]:
     return edges
 
 
-def _parse_uv_lock(path: Path, rel: str) -> tuple[list[InventoryEntry], list[str]]:
+def _uv_member_path(pkg: dict) -> tuple[str, str]:
+    source = pkg["source"]
+    kind = "editable" if isinstance(source.get("editable"), str) else "virtual"
+    return kind, source[kind]
+
+
+def _parse_uv_lock(path: Path, rel: str) -> tuple[list[InventoryEntry], list[str], str, str | None]:
     data = _load_toml(path, rel)
     version = data.get("version")
     if version != 1 or isinstance(version, bool):
         raise UvLockFormatError(f"{rel}: unsupported uv.lock version {version!r}; only version 1 is read")
     packages = _package_tables(data, rel)
     _check_uv_shapes(packages, rel)
-    root = find_uv_root(packages)
+    manifest = data.get("manifest")
+    members = manifest.get("members") if isinstance(manifest, dict) else None
+    root = find_uv_root(packages, members)
     root_idx = next(i for i, p in enumerate(packages) if p is root)
     by_name: dict[str, list[int]] = {}
     for i, p in enumerate(packages):
@@ -733,6 +756,13 @@ def _parse_uv_lock(path: Path, rel: str) -> tuple[list[InventoryEntry], list[str
     false_seen: set[int] = set()
     marker_notes: dict[int, list[str]] = {}
     notes: list[str] = []
+    kind, rel_path = _uv_member_path(root)
+    app_root, selected = ".", None
+    if rel_path != ".":
+        if not (path.parent / rel_path).is_dir():
+            raise UvLockRootError(f"uv workspace member {root.get('name')!r}: {rel_path!r} is not a directory")
+        app_root, selected = Path(rel_path).as_posix(), canonicalize_name(root["name"])
+        notes.append(f"uv workspace member '{selected}' selected ({kind} = '{rel_path}')")
     expanded: set[tuple[int, str | None]] = set()
     stack: list[tuple[int, str | None]] = [(root_idx, None)]
     while stack:
@@ -785,7 +815,7 @@ def _parse_uv_lock(path: Path, rel: str) -> tuple[list[InventoryEntry], list[str
                 notes=tuple(entry_notes),
             )
         )
-    return out, notes
+    return out, notes, app_root, selected
 
 
 _CANDIDATES = ("uv.lock", "poetry.lock", "requirements.txt")
@@ -828,13 +858,15 @@ def build_inventory(root: Path) -> Inventory:
     tree = _RequirementsTree(resolved)
     entries: list[InventoryEntry] = []
     lock_notes: list[str] = []
+    app_root: str | None = "." if lockfile is not None else None
+    selected: str | None = None
     if lockfile == "requirements.txt" and path is not None:
         tree.parse(path)
         entries = _apply_taint(tree.entries, tree.taints)
     elif lockfile == "poetry.lock" and path is not None:
         entries = _parse_poetry_lock(path, "poetry.lock")
     elif lockfile == "uv.lock" and path is not None:
-        entries, lock_notes = _parse_uv_lock(path, "uv.lock")
+        entries, lock_notes, app_root, selected = _parse_uv_lock(path, "uv.lock")
     hint = HINT if lockfile is None or any(e.status is Status.UNPINNED for e in entries) else None
     return Inventory(
         str(resolved),
@@ -843,5 +875,6 @@ def build_inventory(root: Path) -> Inventory:
         tuple(skipped) + tuple(tree.skipped),
         hint,
         tuple(lock_notes),
-        app_root="." if lockfile is not None else None,
+        app_root=app_root,
+        member=selected,
     )
