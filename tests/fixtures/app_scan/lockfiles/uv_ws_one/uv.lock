@@ -1,0 +1,33 @@
+version = 1
+revision = 5
+requires-python = ">=3.13"
+
+[manifest]
+members = ["app"]
+
+[manifest.dependency-groups]
+dev = [{ name = "pytest", specifier = ">=8" }]
+
+[[package]]
+name = "app"
+version = "0.1.0"
+source = { editable = "backend" }
+dependencies = [
+    { name = "click" },
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+]
+
+[[package]]
+name = "click"
+version = "8.1.7"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "colorama"
+version = "0.4.6"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "pytest"
+version = "8.3.4"
+source = { registry = "https://pypi.org/simple" }

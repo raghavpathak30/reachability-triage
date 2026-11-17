@@ -414,7 +414,7 @@ Every gate includes:
   - an unpinned line yields `unpinned` plus the hint, never a guessed version;
   - no network in tests (socket-blocking fixture).
 
-### A1b: Pipfile.lock and pylock.toml
+### A1b: Pipfile.lock and pylock.toml (deferred to 1.0.1, not built)
 
 - `Pipfile.lock`: `default` only by default; no graph, so the whole set is
   fetched.
@@ -426,7 +426,10 @@ Every gate includes:
 - **Amendment (13 Nov 2026, after A1a):** uv workspace roots
   (`editable = "<subdir>"`): select the workspace member that contains the app;
   the FastAPI template research app uses this layout and is refused by A1a
-  (`UvLockRootError`). Not implemented.
+  (`UvLockRootError`). **Built** (16 Nov 2026), together with `app_root`,
+  `--member` and the `ValueError` fix; see DECISIONS §28.
+- **Status (16 Nov 2026):** `Pipfile.lock` and `pylock.toml` are deferred to
+  1.0.1 and are **not built** (v1 plan / council 2026-11-16).
 
 ### A2: Fetch and import-closure evidence (CLI)
 

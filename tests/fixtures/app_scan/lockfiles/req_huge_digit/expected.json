@@ -1,0 +1,5 @@
+{"inventory": {
+  "click": {"version": "8.1.7", "status": "pinned"},
+  "hugever": {"version": null, "status": "unsupported"},
+  "idna": {"version": "3.10", "status": "pinned"}
+}}

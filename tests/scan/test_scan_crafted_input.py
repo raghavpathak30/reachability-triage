@@ -234,3 +234,58 @@ def test_long_include_operand_cli_exits_0(scan_root, snapshot_factory):
     proc = run_cli(scan_root, snapshot_factory)
     assert proc.returncode == 0
     assert "Traceback" not in proc.stderr
+
+
+# ---- A1b: a bare ValueError from packaging's parsers is handled like its named subclass
+
+
+def test_requirement_valueerror_makes_line_unsupported_with_note(scan_root, monkeypatch):
+    from reachability.scan import inventory  # noqa: PLC0415
+
+    real = inventory.Requirement
+
+    def flaky(text):
+        if text.startswith("bad"):
+            raise ValueError("boom")
+        return real(text)
+
+    monkeypatch.setattr(inventory, "Requirement", flaky)
+    (scan_root / "requirements.txt").write_text("bad>1.0\ngood==2.0\n")
+    bad, good = build_inventory(scan_root).entries
+    assert bad.status is Status.UNSUPPORTED
+    assert bad.notes[0].startswith("invalid requirement")
+    assert (good.dist, good.status) == ("good", Status.PINNED)
+
+
+def test_marker_valueerror_in_lockfile_is_lockfile_parse_error(scan_root, monkeypatch):
+    from reachability.scan import inventory  # noqa: PLC0415
+
+    def boom(text):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(inventory, "Marker", boom)
+    (scan_root / "poetry.lock").write_text(
+        '[[package]]\nname = "foo"\nversion = "1.0"\ngroups = ["main"]\nmarkers = "sys_platform == \'linux\'"\n'
+    )
+    with pytest.raises(LockfileParseError, match="invalid marker"):
+        build_inventory(scan_root)
+
+
+def test_huge_digit_pin_in_requirements_is_unsupported(scan_root):
+    (scan_root / "requirements.txt").write_text(f"click==8.1.7\nhugever=={BIG}\nidna==3.10\n")
+    got = [(e.dist, e.version, e.status.value) for e in build_inventory(scan_root).entries]
+    assert got == [("click", "8.1.7", "pinned"), ("hugever", None, "unsupported"), ("idna", "3.10", "pinned")]
+
+
+def test_huge_digit_version_in_poetry_and_uv_is_unsupported(scan_root):
+    (scan_root / "poetry.lock").write_text(f'[[package]]\nname = "foo"\nversion = "{BIG}"\ngroups = ["main"]\n')
+    poetry = build_inventory(scan_root).entries[0]
+    assert (poetry.dist, poetry.status) == ("foo", Status.UNSUPPORTED)
+    (scan_root / "poetry.lock").unlink()
+    (scan_root / "uv.lock").write_text(
+        'version = 1\n[[package]]\nname = "app"\nversion = "0.1"\nsource = {virtual = "."}\n'
+        'dependencies = [{name = "foo"}]\n'
+        f'[[package]]\nname = "foo"\nversion = "{BIG}"\nsource = {{registry = "https://pypi.org/simple"}}\n'
+    )
+    uv = [e for e in build_inventory(scan_root).entries if e.dist == "foo"][0]
+    assert uv.status is Status.UNSUPPORTED

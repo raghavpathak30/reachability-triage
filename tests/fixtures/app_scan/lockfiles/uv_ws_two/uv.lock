@@ -1,0 +1,28 @@
+version = 1
+revision = 5
+requires-python = ">=3.13"
+
+[manifest]
+members = ["api", "worker"]
+
+[[package]]
+name = "api"
+version = "0.1.0"
+source = { editable = "services/api" }
+dependencies = [{ name = "click" }]
+
+[[package]]
+name = "worker"
+version = "0.1.0"
+source = { editable = "services/worker" }
+dependencies = [{ name = "requests" }]
+
+[[package]]
+name = "click"
+version = "8.1.7"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "requests"
+version = "2.32.3"
+source = { registry = "https://pypi.org/simple" }

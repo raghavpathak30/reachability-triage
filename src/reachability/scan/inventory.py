@@ -17,8 +17,8 @@ from enum import Enum
 from pathlib import Path
 
 from packaging._parser import Variable
-from packaging.markers import InvalidMarker, Marker, UndefinedComparison, UndefinedEnvironmentName
-from packaging.requirements import InvalidRequirement, Requirement
+from packaging.markers import Marker, UndefinedComparison, UndefinedEnvironmentName
+from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
@@ -74,6 +74,10 @@ class UvLockResolutionError(ScanError):
     pass
 
 
+class MemberOptionError(ScanError):
+    pass
+
+
 class Status(str, Enum):
     PINNED = "pinned"
     UNPINNED = "unpinned"
@@ -110,6 +114,8 @@ class Inventory:
     skipped: tuple[SkippedItem, ...]
     hint: str | None
     notes: tuple[str, ...] = ()
+    app_root: str | None = None
+    member: str | None = None
 
 
 def _marker_variables(marker: Marker) -> set[str]:
@@ -277,7 +283,7 @@ def _parse_requirement_line(line: str, rel: str, lineno: int) -> InventoryEntry:
         return _unsupported(
             rel, lineno, line, MARKER_TOO_DEEP, canonicalize_name(name.group(1)) if name else None
         )
-    except InvalidRequirement as exc:
+    except ValueError as exc:  # InvalidRequirement and a bare ValueError alike
         salvage = _EQ_PIN.match(req_text)
         if salvage:
             return _unsupported(
@@ -389,12 +395,11 @@ def _check_path(root: Path, lexical: Path) -> tuple[Path | None, str | None, str
         return None, "include_missing", f"{type(exc).__name__}: cannot check path"
 
 
-def _check_path_unguarded(root: Path, lexical: Path) -> tuple[Path | None, str | None, str]:
-    """Return (resolved, None, "") if safe to open, else (None, kind, detail).
+def _resolve_inside(root: Path, lexical: Path) -> tuple[Path | None, str | None, str]:
+    """Return (resolved, None, "") if `lexical` exists strictly inside `root` with no symlink.
 
-    `lexical` is already normalised and absolute. A symlink (the path itself or
-    any directory component), a path outside `root`, a non-regular file and a
-    file over MAX_LOCKFILE_BYTES are all refused without being opened.
+    `lexical` is already normalised and absolute. A symlink (the path itself or any
+    directory component) and a path outside `root` are refused.
     """
     if not lexical.is_relative_to(root):
         return None, "include_outside_root", "path is outside the scan root"
@@ -410,6 +415,18 @@ def _check_path_unguarded(root: Path, lexical: Path) -> tuple[Path | None, str |
         return None, "symlink", "a path component is a symlink; not followed"
     if not resolved.is_relative_to(root):
         return None, "include_outside_root", "resolves outside the scan root"
+    return resolved, None, ""
+
+
+def _check_path_unguarded(root: Path, lexical: Path) -> tuple[Path | None, str | None, str]:
+    """Return (resolved, None, "") if safe to open, else (None, kind, detail).
+
+    On top of `_resolve_inside`, a non-regular file and a file over
+    MAX_LOCKFILE_BYTES are refused without being opened.
+    """
+    resolved, kind, detail = _resolve_inside(root, lexical)
+    if resolved is None:
+        return None, kind, detail
     try:
         st = os.stat(resolved)
     except OSError as exc:
@@ -419,6 +436,30 @@ def _check_path_unguarded(root: Path, lexical: Path) -> tuple[Path | None, str |
     if st.st_size > MAX_LOCKFILE_BYTES:
         return None, "too_large", f"{st.st_size} bytes exceeds {MAX_LOCKFILE_BYTES}"
     return resolved, None, ""
+
+
+def _check_dir(root: Path, rel: str, member: str = "") -> str:
+    """Validate a workspace member directory; return its POSIX path relative to `root`."""
+
+    def refuse(reason: str) -> UvLockRootError:
+        return UvLockRootError(f"uv workspace member {member!r} path {rel!r}: {reason}")
+
+    try:
+        if not rel:
+            raise refuse("path is empty")
+        if rel.startswith(("/", "\\")) or os.path.isabs(rel):
+            raise refuse("path is absolute")
+        if ".." in rel.replace("\\", "/").split("/"):
+            raise refuse("path has a '..' component")
+        lexical = Path(os.path.normpath(root / rel))
+        resolved, _, detail = _resolve_inside(root, lexical)
+        if resolved is None:
+            raise refuse(detail)
+        if not stat.S_ISDIR(os.stat(resolved).st_mode):
+            raise refuse("not a directory")
+        return resolved.relative_to(root).as_posix()
+    except (OSError, ValueError) as exc:
+        raise refuse(f"{type(exc).__name__}: cannot check path") from exc
 
 
 class _RequirementsTree:
@@ -495,7 +536,7 @@ def _parse_marker_string(text: str, rel: str) -> Marker:
         return Marker(text)
     except RecursionError as exc:
         raise LockfileParseError(f"invalid marker in {rel}: nested too deeply") from exc
-    except InvalidMarker as exc:
+    except ValueError as exc:  # InvalidMarker and a bare ValueError alike
         raise LockfileParseError(f"invalid marker in {rel}: {text!r}: {exc}") from exc
 
 
@@ -655,8 +696,15 @@ def _describe_source(source: object) -> str:
     return ", ".join(f"{k} = {v!r}" for k, v in source.items()) if isinstance(source, dict) else repr(source)
 
 
-def find_uv_root(packages: list[dict]) -> dict:
-    """The single [[package]] whose source is `editable = "."` or `virtual = "."`."""
+def find_uv_root(
+    packages: list[dict], manifest_members: list[str] | None = None, member: str | None = None
+) -> dict:
+    """Pick the package whose runtime closure is scanned.
+
+    A single `editable = "."` / `virtual = "."` package wins. Otherwise a lock with
+    `[manifest] members` selects among the member packages that have an editable or
+    virtual path source; several need `member`. No `[manifest] members`: the A1a error.
+    """
     roots = []
     candidates = []
     for pkg in packages:
@@ -669,8 +717,41 @@ def find_uv_root(packages: list[dict]) -> dict:
                 if source[kind] == ".":
                     roots.append(pkg)
     listing = "; ".join(candidates) if candidates else "none"
+    wanted = canonicalize_name(member) if member is not None else None
     if len(roots) == 1:
+        if wanted is not None and canonicalize_name(str(roots[0].get("name"))) != wanted:
+            raise UvLockRootError(
+                f"unknown member {member!r}: uv.lock has a root member {roots[0].get('name')!r} "
+                "(editable/virtual = \".\"), and only that one can be selected"
+            )
         return roots[0]
+    if not roots and manifest_members is not None:
+        in_manifest = {canonicalize_name(m) for m in manifest_members}
+        chosen = [
+            p
+            for p in packages
+            if isinstance(p.get("name"), str)
+            and canonicalize_name(p["name"]) in in_manifest
+            and isinstance(p.get("source"), dict)
+            and any(isinstance(p["source"].get(k), str) for k in ("editable", "virtual"))
+        ]
+        names = [canonicalize_name(p["name"]) for p in chosen]
+        dupes = sorted({n for n in names if names.count(n) > 1})
+        if dupes:
+            raise UvLockRootError(f"ambiguous member {dupes[0]!r}: several packages in uv.lock carry that name")
+        described = "; ".join(f"{p['name']} ({_uv_member_path(p)[1]})" for p in chosen)
+        if wanted is not None:
+            picked = [p for p, n in zip(chosen, names) if n == wanted]
+            if not picked:
+                raise UvLockRootError(f"unknown member {member!r}; workspace members: {described or 'none'}")
+            return picked[0]
+        if len(chosen) == 1:
+            return chosen[0]
+        if len(chosen) > 1:
+            raise UvLockRootError(
+                f"uv.lock is a workspace with {len(chosen)} members, pick one with --member <name>; "
+                f"members: {described}"
+            )
     if not roots:
         raise UvLockRootError(
             "uv.lock has no root member (a package with source editable = \".\" or virtual = \".\"); "
@@ -679,6 +760,24 @@ def find_uv_root(packages: list[dict]) -> dict:
     raise UvLockRootError(
         f"uv.lock has {len(roots)} root members, expected exactly one; candidates: {listing}"
     )
+
+
+def _uv_member_path(pkg: dict) -> tuple[str, str]:
+    source = pkg["source"]
+    kind = "editable" if isinstance(source.get("editable"), str) else "virtual"
+    return kind, source[kind]
+
+
+def _uv_manifest_members(data: dict, rel: str) -> list[str] | None:
+    if "manifest" not in data:
+        return None
+    manifest = data["manifest"]
+    if not isinstance(manifest, dict):
+        raise _shape_error(rel, "'manifest'", "a table", manifest)
+    if "members" not in manifest:
+        return None
+    _check_str_list(rel, "'manifest' field 'members'", manifest["members"])
+    return manifest["members"]
 
 
 _UV_REGISTRY_ONLY = "registry"
@@ -713,14 +812,14 @@ def _uv_edges(pkg: dict, extra: str | None) -> list[dict]:
     return edges
 
 
-def _parse_uv_lock(path: Path, rel: str) -> tuple[list[InventoryEntry], list[str]]:
+def _parse_uv_lock(path: Path, rel: str, member: str | None = None) -> tuple[list[InventoryEntry], list[str], str, str | None]:
     data = _load_toml(path, rel)
     version = data.get("version")
     if version != 1 or isinstance(version, bool):
         raise UvLockFormatError(f"{rel}: unsupported uv.lock version {version!r}; only version 1 is read")
     packages = _package_tables(data, rel)
     _check_uv_shapes(packages, rel)
-    root = find_uv_root(packages)
+    root = find_uv_root(packages, _uv_manifest_members(data, rel), member)
     root_idx = next(i for i, p in enumerate(packages) if p is root)
     by_name: dict[str, list[int]] = {}
     for i, p in enumerate(packages):
@@ -731,6 +830,12 @@ def _parse_uv_lock(path: Path, rel: str) -> tuple[list[InventoryEntry], list[str
     false_seen: set[int] = set()
     marker_notes: dict[int, list[str]] = {}
     notes: list[str] = []
+    kind, rel_path = _uv_member_path(root)
+    app_root, selected = ".", None
+    if rel_path != ".":
+        app_root = _check_dir(path.parent, rel_path, str(root.get("name")))
+        selected = canonicalize_name(root["name"])
+        notes.append(f"uv workspace member '{selected}' selected ({kind} = '{rel_path}')")
     expanded: set[tuple[int, str | None]] = set()
     stack: list[tuple[int, str | None]] = [(root_idx, None)]
     while stack:
@@ -783,7 +888,7 @@ def _parse_uv_lock(path: Path, rel: str) -> tuple[list[InventoryEntry], list[str
                 notes=tuple(entry_notes),
             )
         )
-    return out, notes
+    return out, notes, app_root, selected
 
 
 _CANDIDATES = ("uv.lock", "poetry.lock", "requirements.txt")
@@ -815,7 +920,7 @@ def discover_lockfile(root: Path) -> tuple[str | None, Path | None, list[Skipped
     return winner[0], winner[1], skipped
 
 
-def build_inventory(root: Path) -> Inventory:
+def build_inventory(root: Path, member: str | None = None) -> Inventory:
     try:
         resolved = Path(root).resolve(strict=True)
     except OSError as exc:
@@ -823,15 +928,31 @@ def build_inventory(root: Path) -> Inventory:
     if not resolved.is_dir():
         raise ScanRootError(f"scan root is not a directory: {root}")
     lockfile, path, skipped = discover_lockfile(resolved)
+    if member is not None and lockfile != "uv.lock":
+        raise MemberOptionError(
+            f"--member {member!r} only applies to a uv.lock workspace; "
+            + (f"the lockfile found is {lockfile}" if lockfile else "no lockfile was found")
+        )
     tree = _RequirementsTree(resolved)
     entries: list[InventoryEntry] = []
     lock_notes: list[str] = []
+    app_root: str | None = "." if lockfile is not None else None
+    selected: str | None = None
     if lockfile == "requirements.txt" and path is not None:
         tree.parse(path)
         entries = _apply_taint(tree.entries, tree.taints)
     elif lockfile == "poetry.lock" and path is not None:
         entries = _parse_poetry_lock(path, "poetry.lock")
     elif lockfile == "uv.lock" and path is not None:
-        entries, lock_notes = _parse_uv_lock(path, "uv.lock")
+        entries, lock_notes, app_root, selected = _parse_uv_lock(path, "uv.lock", member)
     hint = HINT if lockfile is None or any(e.status is Status.UNPINNED for e in entries) else None
-    return Inventory(str(resolved), lockfile, tuple(entries), tuple(skipped) + tuple(tree.skipped), hint, tuple(lock_notes))
+    return Inventory(
+        str(resolved),
+        lockfile,
+        tuple(entries),
+        tuple(skipped) + tuple(tree.skipped),
+        hint,
+        tuple(lock_notes),
+        app_root=app_root,
+        member=selected,
+    )

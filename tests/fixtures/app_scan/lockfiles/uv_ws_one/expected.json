@@ -1,0 +1,4 @@
+{"inventory": {
+  "click": {"version": "8.1.7", "status": "pinned"},
+  "colorama": {"version": "0.4.6", "status": "marker_skipped"}
+}}

@@ -38,7 +38,7 @@ def test_expected_fixture_set_is_complete():
     assert {
         "req_basic", "req_unpinned_kinds", "req_markers", "req_include", "req_index_url", "req_dup_versions",
         "T9", "T10", "M1", "poetry_basic", "poetry_markers", "uv_basic", "uv_extras_markers", "uv_cycle",
-        "uv_no_root", "uv_two_roots", "uv_root_subdir",
+        "uv_no_root", "uv_two_roots", "uv_root_subdir", "uv_ws_one", "uv_ws_two", "uv_ws_escape", "req_huge_digit",
     } <= set(DIRS)
 
 

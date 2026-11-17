@@ -219,3 +219,118 @@ def test_uv_lock_wins_end_to_end_over_requirements(scan_root):
     assert inv.lockfile == "uv.lock"
     assert [e.dist for e in inv.entries] == ["a"]
     assert sorted(s.path for s in inv.skipped if s.kind == "ignored_lockfile") == ["poetry.lock", "requirements.txt"]
+
+
+def test_ws_one_selects_backend_app_root_and_member():
+    inv = build_inventory(FIX / "uv_ws_one")
+    assert inv.app_root == "backend"
+    assert inv.member == "app"
+    assert [e.dist for e in inv.entries] == ["click", "colorama"]
+
+
+def test_manifest_virtual_member_selected():
+    got = find_uv_root([pkg("svc", {"virtual": "svc"}), pkg("lib", {"registry": "x"})], ["svc"])
+    assert got["name"] == "svc"
+
+
+def test_two_members_without_member_raises_naming_option():
+    pkgs = [pkg("api", {"editable": "services/api"}), pkg("worker", {"editable": "services/worker"})]
+    with pytest.raises(UvLockRootError) as ei:
+        find_uv_root(pkgs, ["api", "worker"])
+    msg = str(ei.value)
+    assert "--member" in msg and "api" in msg and "services/worker" in msg
+
+
+def test_member_selects_among_two():
+    pkgs = [pkg("api", {"editable": "services/api"}), pkg("worker", {"editable": "services/worker"})]
+    assert find_uv_root(pkgs, ["api", "worker"], member="worker")["name"] == "worker"
+
+
+def test_unknown_member_raises():
+    pkgs = [pkg("api", {"editable": "services/api"}), pkg("worker", {"editable": "services/worker"})]
+    with pytest.raises(UvLockRootError, match="unknown member"):
+        find_uv_root(pkgs, ["api", "worker"], member="nope")
+
+
+def test_member_only_considers_names_in_manifest():
+    pkgs = [pkg("api", {"editable": "services/api"}), pkg("stray", {"editable": "stray"})]
+    assert find_uv_root(pkgs, ["api"])["name"] == "api"
+    with pytest.raises(UvLockRootError, match="unknown member"):
+        find_uv_root(pkgs, ["api"], member="stray")
+
+
+def test_dot_root_wins_over_manifest():
+    pkgs = [pkg("app", {"editable": "."}), pkg("api", {"editable": "services/api"})]
+    assert find_uv_root(pkgs, ["api"])["name"] == "app"
+
+
+def test_member_must_name_the_dot_root_when_one_exists():
+    pkgs = [pkg("app", {"editable": "."}), pkg("api", {"editable": "services/api"})]
+    assert find_uv_root(pkgs, ["api"], member="App")["name"] == "app"
+    with pytest.raises(UvLockRootError, match="unknown member"):
+        find_uv_root(pkgs, ["api"], member="api")
+
+
+def test_manifest_present_without_members_keeps_old_error():
+    with pytest.raises(UvLockRootError, match="has no root member"):
+        find_uv_root([pkg("api", {"editable": "services/api"})], None)
+
+
+def test_no_manifest_keeps_old_error_text(scan_root):
+    (scan_root / "uv.lock").write_text(
+        'version = 1\n[[package]]\nname = "a"\nversion = "1"\nsource = { editable = "sub" }\n'
+    )
+    with pytest.raises(UvLockRootError) as ei:
+        build_inventory(scan_root)
+    assert str(ei.value) == (
+        'uv.lock has no root member (a package with source editable = "." or virtual = "."); '
+        "editable/virtual candidates: a (editable = 'sub')"
+    )
+
+
+def test_member_names_compared_canonically():
+    pkgs = [pkg("foo-bar", {"editable": "a"}), pkg("other", {"editable": "b"})]
+    got = find_uv_root(pkgs, ["Foo_Bar", "other"], member="FOO.bar")
+    assert got["name"] == "foo-bar"
+
+
+def test_duplicate_candidate_name_raises_ambiguous():
+    pkgs = [pkg("api", {"editable": "a"}), pkg("API", {"editable": "b"})]
+    with pytest.raises(UvLockRootError, match="ambiguous member"):
+        find_uv_root(pkgs, ["api"])
+
+
+def ws_lock(path):
+    return (
+        "version = 1\n[manifest]\nmembers = [\"svc\"]\n"
+        f'[[package]]\nname = "svc"\nversion = "1"\nsource = {{ editable = "{path}" }}\n'
+    )
+
+
+@pytest.mark.parametrize("path", ["missing", "../x", "/abs", "link"])
+def test_uv_ws_member_path_failure_is_uvlockrooterror_naming_member(scan_root, path):
+    (scan_root / "real").mkdir()
+    (scan_root / "link").symlink_to(scan_root / "real")
+    with pytest.raises(UvLockRootError) as ei:
+        write_uv(scan_root, ws_lock(path))
+    assert "svc" in str(ei.value) and path in str(ei.value)
+
+
+def test_ws_one_runtime_closure_excludes_dev_group():
+    assert "pytest" not in {e.dist for e in build_inventory(FIX / "uv_ws_one").entries}
+
+
+def test_ws_member_note_added():
+    inv = build_inventory(FIX / "uv_ws_one")
+    assert "uv workspace member 'app' selected (editable = 'backend')" in inv.notes
+
+
+def test_ws_two_member_worker_and_api_rows():
+    worker = build_inventory(FIX / "uv_ws_two", member="worker")
+    assert [(e.dist, e.version, e.status.value) for e in worker.entries] == [("requests", "2.32.3", "pinned")]
+    assert (worker.app_root, worker.member) == ("services/worker", "worker")
+    api = build_inventory(FIX / "uv_ws_two", member="api")
+    assert [(e.dist, e.version, e.status.value) for e in api.entries] == [("click", "8.1.7", "pinned")]
+    assert api.app_root == "services/api"
+    with pytest.raises(UvLockRootError):
+        build_inventory(FIX / "uv_ws_two", member="nope")

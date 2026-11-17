@@ -71,3 +71,16 @@ def test_cli_wrong_shape_exits_1_with_named_error(scan_root, snapshot_factory):
     assert proc.returncode == 1
     assert proc.stderr.startswith("error: LockfileParseError: ")
     assert "Traceback" not in proc.stderr
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    ['manifest = "x"', "[manifest]\nmembers = \"x\"", "[manifest]\nmembers = [1]"],
+    ids=["manifest_str", "members_str", "member_int"],
+)
+def test_uv_manifest_wrong_shape_raises_lockfile_parse_error(tmp_path, manifest):
+    (tmp_path / "uv.lock").write_text(
+        "version = 1\n" + manifest + '\n[[package]]\nname = "a"\nversion = "1"\nsource = { editable = "." }\n'
+    )
+    with pytest.raises(LockfileParseError, match="uv.lock"):
+        build_inventory(tmp_path)
