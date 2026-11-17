@@ -154,3 +154,13 @@ def test_f3_cap_bites_over_200_pending(tmp_path):
     assert sum(f.reason_code == "SCAN_BUDGET" for f in res.findings) == 1
 
 
+# ---- F4
+def test_f4_fix_wheel_cut_by_fetch_budget_is_scan_budget(tmp_path, monkeypatch):
+    real = pl.FetchBudget if hasattr(pl, "FetchBudget") else FetchBudget
+    monkeypatch.setattr(pl, "FetchBudget", lambda clock: real(max_dists=1, clock=clock))
+    res = _run(_setup(tmp_path, _advs(2)))
+    for f in res.findings:
+        assert f.reason_code == "SCAN_BUDGET" and f.verdict == "unknown" and f.evidence_level is None
+        assert "lib==2.0" in f.detail and "cap" in f.detail
+    assert any(g.kind == "budget" and "lib==2.0" in g.detail for g in res.gaps)
+    assert not any(f.reason_code == "NO_WHEEL_FOR_FIX" for f in res.findings)

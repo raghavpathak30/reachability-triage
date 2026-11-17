@@ -247,6 +247,9 @@ def _analyse(matches, snapshot, fetched, combined: CombinedIndex, fetcher, store
                     diff_failed.add(fkey)
         fixed = fixed_cache[fkey]
         if fixed is None:
+            if fkey in fix_cut:
+                return done(m, identity, ReasonCode.SCAN_BUDGET,
+                            f"fix wheel {dist}=={m.fixed_in} not fetched: {fix_cut[fkey]}")
             return done(m, identity, ReasonCode.NO_CANDIDATE if fkey in diff_failed else ReasonCode.NO_WHEEL_FOR_FIX)
         if not within_time():
             return done(m, identity, ReasonCode.SCAN_BUDGET,
