@@ -100,7 +100,7 @@ def test_f1_shared_context_failure_is_one_gap_not_a_crash(tmp_path, monkeypatch)
     assert "gaps: 1" in render_text(res)
 
 
-def test_f1_cli_catch_all_exits_2(tmp_path, monkeypatch, capsys):
+def test_g5_cli_unexpected_error_exits_2_one_stripped_line(tmp_path, monkeypatch, capsys):
     from reachability import cli
 
     s = _setup(tmp_path, _advs(1))
@@ -112,7 +112,7 @@ def test_f1_cli_catch_all_exits_2(tmp_path, monkeypatch, capsys):
     rc = cli.main(["scan", str(s["app"]), "--snapshot", str(s["snapshot"]), "--snapshot-sha256", s["sha256"],
                    "--wheel-dir", str(s["wheels"])])
     err = capsys.readouterr().err
-    assert rc == 2 and "ZeroDivisionError" in err and "\x1b" not in err and "Traceback" not in err
+    assert rc == 2 and err.startswith("error: unexpected ZeroDivisionError") and "ZeroDivisionError" in err and "\x1b" not in err and "Traceback" not in err
     assert err.count("\n") == 1
 
 
