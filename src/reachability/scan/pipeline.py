@@ -14,7 +14,13 @@ from reachability.scan.lock_wheels import read_lock_wheels
 from reachability.scan.models import Finding, Gap, ScanResult, Target
 from reachability.scan.query import QueryContext, derive_reason, exact_lookup, make_context
 from reachability.scan.reasons import EvidenceLevel, ReasonCode
-from reachability.scan.targets import defs_from_tables, defs_from_tree, diff_defs, resolve_targets
+from reachability.scan.targets import (
+    diff_symbols,
+    non_py_changed,
+    resolve_targets,
+    symbols_from_tables,
+    symbols_from_tree,
+)
 
 
 def _advisory_identity(snapshot: Snapshot, ids: tuple[str, ...]) -> tuple[str, list[str]]:
@@ -37,11 +43,11 @@ def _unknown(identity, m: MatchResult, code: ReasonCode, *, targets=None, detail
     )
 
 
-def _proven(identity, m: MatchResult, hit, targets) -> Finding:
+def _proven(identity, m: MatchResult, hit, targets, truncated=False) -> Finding:
     advisory_id, aliases = identity
     return Finding(
         advisory_id, aliases, m.dist, m.version, m.fixed_in, hit.verdict,
-        EvidenceLevel.PATH_PROVEN.value, None, hit.path, None, targets, False, None,
+        EvidenceLevel.PATH_PROVEN.value, None, hit.path, None, targets, truncated, None,
     )
 
 
@@ -176,29 +182,34 @@ def _analyse(matches, snapshot, fetched, combined: CombinedIndex, fetcher, store
     ordered = sorted(matches, key=lambda m: (m.dist, m.version, _advisory_identity(snapshot, m.ids)[0]))
     ctx: QueryContext = make_context(combined)
     origins = combined.module_origins()
-    installed_cache: dict[str, dict] = {}
-    fixed_cache: dict[tuple[str, str], dict | None] = {}
+    installed_cache: dict[str, object] = {}
+    fixed_cache: dict[tuple[str, str], tuple[object, Path] | None] = {}
     diff_failed: set[tuple[str, str]] = set()
-    per: list[tuple[MatchResult, tuple, list[Target] | None, Finding | None]] = []
+    per: list[tuple[MatchResult, tuple, list[Target], bool, Finding | None]] = []
+
+    def done(m, identity, code):
+        per.append((m, identity, [], False, _unknown(identity, m, code)))
+
     for m in ordered:
         identity = _advisory_identity(snapshot, m.ids)
         dist = canonicalize_name(m.dist)
         if m.fixed_in == NO_FIX:
-            per.append((m, identity, None, _unknown(identity, m, ReasonCode.NO_FIX_VERSION)))
+            done(m, identity, ReasonCode.NO_FIX_VERSION)
             continue
         fd = fetched.dists.get((dist, m.version))
         if fd is None or fd.status != "fetched":
-            per.append((m, identity, None, _unknown(identity, m, ReasonCode.NO_WHEEL)))
+            done(m, identity, ReasonCode.NO_WHEEL)
             continue
         if dist not in installed_cache:
             mods = {mod for mod, o in origins.items() if o == dist}
             try:
-                installed_cache[dist] = defs_from_tables(combined.index.symbol_index, mods)
+                installed_cache[dist] = symbols_from_tables(combined.index.symbol_index, mods)
             except Exception as exc:
                 installed_cache[dist] = None
                 gaps.append(Gap("dist_error", dist, f"{dist}=={m.version}: {type(exc).__name__} while indexing"))
-        if installed_cache[dist] is None:
-            per.append((m, identity, None, _unknown(identity, m, ReasonCode.NO_CANDIDATE)))
+        installed = installed_cache[dist]
+        if installed is None:
+            done(m, identity, ReasonCode.NO_CANDIDATE)
             continue
         fkey = (dist, m.fixed_in)
         if fkey not in fixed_cache:
@@ -207,41 +218,44 @@ def _analyse(matches, snapshot, fetched, combined: CombinedIndex, fetcher, store
             fixed_cache[fkey] = None
             if ffd.status == "fetched" and ffd.root:
                 try:
-                    fixed_cache[fkey] = defs_from_tree(ffd.root)
+                    fixed_cache[fkey] = (symbols_from_tree(ffd.root), ffd.root)
                 except Exception as exc:
                     gaps.append(Gap("dist_error", dist, f"{dist}=={m.fixed_in}: {type(exc).__name__} while indexing"))
                     diff_failed.add(fkey)
-        fixed_defs = fixed_cache[fkey]
-        if fixed_defs is None:
-            code = ReasonCode.NO_CANDIDATE if fkey in diff_failed else ReasonCode.NO_WHEEL_FOR_FIX
-            per.append((m, identity, None, _unknown(identity, m, code)))
+        fixed = fixed_cache[fkey]
+        if fixed is None:
+            done(m, identity, ReasonCode.NO_CANDIDATE if fkey in diff_failed else ReasonCode.NO_WHEEL_FOR_FIX)
             continue
         try:
-            changes = diff_defs(installed_cache[dist], fixed_defs)
-            targets = resolve_targets(changes, installed_cache[dist], combined, dist)
+            diff = diff_symbols(installed, fixed[0])
+            targets, truncated = resolve_targets(diff.changes, installed, combined, dist)
+            native = (
+                not targets and not diff.py_changed and non_py_changed(fd.root, fixed[1])
+            )
         except Exception as exc:
             gaps.append(Gap("dist_error", dist, f"{dist}=={m.version}: {type(exc).__name__} while diffing"))
-            per.append((m, identity, None, _unknown(identity, m, ReasonCode.NO_CANDIDATE)))
+            done(m, identity, ReasonCode.NO_CANDIDATE)
             continue
         if not targets:
-            per.append((m, identity, None, _unknown(identity, m, ReasonCode.NO_CANDIDATE)))
+            done(m, identity, ReasonCode.NATIVE_ONLY_CHANGE if native else ReasonCode.NO_CANDIDATE)
             continue
-        per.append((m, identity, targets, None))
+        per.append((m, identity, targets, truncated, None))
     targets_seconds = clock() - t_targets
 
     t_query = clock()
     findings: list[Finding] = []
-    for m, identity, targets, done in per:
-        if done is not None:
-            findings.append(done)
+    for m, identity, targets, truncated, finished in per:
+        if finished is not None:
+            findings.append(finished)
             continue
         hit = exact_lookup(ctx, targets)
         if hit is not None:
-            findings.append(_proven(identity, m, hit, targets))
+            findings.append(_proven(identity, m, hit, targets, truncated))
             continue
         res = derive_reason(ctx, targets, clock=clock)
         findings.append(
-            _unknown(identity, m, res.code, targets=targets, detail=res.detail, partial=res.partial_path)
+            _unknown(identity, m, res.code, targets=targets, detail=res.detail, partial=res.partial_path,
+                     truncated=truncated)
         )
     query_seconds = clock() - t_query
     return findings, {"gaps": gaps, "queries": ctx.queries, "query_seconds_list": ctx.query_seconds}, targets_seconds, query_seconds

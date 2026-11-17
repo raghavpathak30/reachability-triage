@@ -35,35 +35,81 @@ def _shallow_shape(node: ast.AST) -> str:
     return ast.dump(clone, include_attributes=False)
 
 
-def defs_from_tables(tables: dict[str, ModuleSymbolTable], modules: set[str] | None = None) -> dict[Key, SymDef]:
-    out: dict[Key, SymDef] = {}
+VERSION_NAMES = frozenset({"__version__", "VERSION", "version", "version_info", "__version_info__"})
+MAX_TARGETS = 20
+
+
+@dataclass
+class SymbolSet:
+    defs: dict[Key, SymDef]
+    modules: dict[str, str]  # module -> shape of its non-def, non-version statements
+
+
+@dataclass(frozen=True)
+class Diff:
+    changes: list[tuple[Key, str]]
+    module_level_changes: int
+
+    @property
+    def py_changed(self) -> bool:
+        return bool(self.changes) or self.module_level_changes > 0
+
+
+def is_test_module(module: str) -> bool:
+    return any(seg in ("tests", "test", "testing") or seg.startswith("test_") for seg in module.split("."))
+
+
+def _const(node: ast.AST | None) -> bool:
+    if isinstance(node, ast.Constant):
+        return True
+    return isinstance(node, ast.Tuple) and all(isinstance(e, ast.Constant) for e in node.elts)
+
+
+def _is_version_only(stmt: ast.stmt) -> bool:
+    if isinstance(stmt, ast.Assign):
+        targets, value = stmt.targets, stmt.value
+    elif isinstance(stmt, ast.AnnAssign):
+        targets, value = [stmt.target], stmt.value
+    else:
+        return False
+    return all(isinstance(t, ast.Name) and t.id in VERSION_NAMES for t in targets) and _const(value)
+
+
+def _module_shape(tree: ast.Module) -> str:
+    rest = [s for s in tree.body if not isinstance(s, _DEF_TYPES) and not _is_version_only(s)]
+    return ast.dump(ast.Module(body=rest, type_ignores=[]), include_attributes=False) if rest else ""
+
+
+def symbols_from_tables(tables: dict[str, ModuleSymbolTable], modules: set[str] | None = None) -> SymbolSet:
+    defs: dict[Key, SymDef] = {}
+    shapes: dict[str, str] = {}
     for module in sorted(tables):
         if modules is not None and module not in modules:
             continue
-        nodes = [n for n in tables[module].nodes if n.kind in TARGET_KINDS]
+        nodes = tables[module].nodes
         if not nodes:
             continue
-        by_file: dict[Path, dict[int, ast.AST]] = {}
+        file = nodes[0].file
+        tree = ast.parse(file.read_text(), filename=str(file))
+        shape = _module_shape(tree)
+        if shape:
+            shapes[module] = shape
+        by_lineno = {n.lineno: n for n in ast.walk(tree) if isinstance(n, _DEF_TYPES)}
         counts: dict[str, int] = {}
-        for node in sorted(nodes, key=lambda n: (n.lineno, n.qualname)):
-            if node.file not in by_file:
-                tree = ast.parse(node.file.read_text(), filename=str(node.file))
-                by_file[node.file] = {
-                    n.lineno: n for n in ast.walk(tree) if isinstance(n, _DEF_TYPES)
-                }
-            ast_node = by_file[node.file].get(node.lineno)
+        for node in sorted((n for n in nodes if n.kind in TARGET_KINDS), key=lambda n: (n.lineno, n.qualname)):
+            ast_node = by_lineno.get(node.lineno)
             if ast_node is None:
                 continue
             qual = _strip(node.qualname)
             ordinal = counts.get(qual, 0)
             counts[qual] = ordinal + 1
             key = (module, qual, ordinal)
-            out[key] = SymDef(key, node.node_id, node.file, node.lineno, _shallow_shape(ast_node))
-    return out
+            defs[key] = SymDef(key, node.node_id, node.file, node.lineno, _shallow_shape(ast_node))
+    return SymbolSet(defs, shapes)
 
 
-def defs_from_tree(tree: Path, tmp_parent: Path | None = None) -> dict[Key, SymDef]:
-    """Symbol defs of a wheel tree, restricted to the files the combined root would take."""
+def symbols_from_tree(tree: Path, tmp_parent: Path | None = None) -> SymbolSet:
+    """Symbols of a wheel tree, restricted to the files the combined root would take."""
     view = Path(tempfile.mkdtemp(prefix="rscan-fix-", dir=tmp_parent))
     try:
         for rel, src in wheel_top_level_files(tree):
@@ -71,40 +117,71 @@ def defs_from_tree(tree: Path, tmp_parent: Path | None = None) -> dict[Key, SymD
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(src, dest)
         report = build_l1_index(view)
-        return defs_from_tables(build_symbol_index(report))
+        return symbols_from_tables(build_symbol_index(report))
     finally:
         shutil.rmtree(view, ignore_errors=True)
 
 
-def diff_defs(old: dict[Key, SymDef], new: dict[Key, SymDef]) -> list[tuple[Key, str]]:
+def diff_symbols(old: SymbolSet, new: SymbolSet) -> Diff:
     changes: list[tuple[Key, str]] = []
-    for key in sorted(set(old) | set(new)):
-        if key not in new:
+    for key in sorted(set(old.defs) | set(new.defs)):
+        if is_test_module(key[0]):
+            continue
+        if key not in new.defs:
             changes.append((key, "removed"))
-        elif key not in old:
+        elif key not in old.defs:
             changes.append((key, "added"))
-        elif old[key].shape != new[key].shape:
+        elif old.defs[key].shape != new.defs[key].shape:
             changes.append((key, "changed"))
-    return changes
+    module_level = sum(
+        1
+        for m in set(old.modules) | set(new.modules)
+        if not is_test_module(m) and old.modules.get(m, "") != new.modules.get(m, "")
+    )
+    return Diff(changes, module_level)
+
+
+def _record_non_py(tree: Path) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for rec in sorted(tree.glob("*.dist-info/RECORD")):
+        try:
+            lines = rec.read_text(errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            parts = line.rsplit(",", 2)
+            if len(parts) != 3:
+                continue
+            path, digest, _size = parts
+            if path.endswith(".py") or ".dist-info/" in path or path.endswith("/RECORD") or not digest:
+                continue
+            out[path] = digest
+    return out
+
+
+def non_py_changed(old_tree: Path, new_tree: Path) -> bool:
+    """True if a non-Python file (for example a compiled extension) differs, per the RECORD files."""
+    return _record_non_py(old_tree) != _record_non_py(new_tree)
 
 
 def resolve_targets(
     changes: list[tuple[Key, str]],
-    installed: dict[Key, SymDef],
+    installed: SymbolSet,
     combined: CombinedIndex,
     dist: str,
-) -> list[Target]:
-    """Targets are the changed/removed symbols present in the installed index, owned by dist."""
+) -> tuple[list[Target], bool]:
+    """Changed/removed symbols present in the installed index and owned by dist, capped at 20."""
     origins = combined.module_origins()
     targets: list[Target] = []
     for key, kind in changes:
         if kind == "added":
             continue
         module, qual, ordinal = key
-        sym = installed.get(key)
+        sym = installed.defs.get(key)
         if sym is None or origins.get(module) != dist:
             continue
         targets.append(
             Target(sym.node_id, module, qual, ordinal, combined.display_path(sym.file), sym.lineno, kind)
         )
-    return targets
+    targets.sort(key=lambda t: (t.changed != "changed", t.module, t.qualname, t.ordinal))
+    return targets[:MAX_TARGETS], len(targets) > MAX_TARGETS
