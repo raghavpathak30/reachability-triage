@@ -2,7 +2,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from reachability.scan.fetch import LocalDirFetcher
+from reachability.scan.fetch import LocalDirFetcher, PyPIFetcher
 from reachability.scan.inventory import ScanError
 from reachability.scan.pipeline import run_scan
 from reachability.scan.render import render_json, render_text
@@ -27,9 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        if args.wheel_dir is None:
-            raise ScanError("no wheel source configured: pass --wheel-dir")
-        fetcher = LocalDirFetcher(Path(args.wheel_dir))
+        fetcher = LocalDirFetcher(Path(args.wheel_dir)) if args.wheel_dir else PyPIFetcher()
         result = run_scan(
             Path(args.dir),
             Path(args.snapshot).expanduser(),
