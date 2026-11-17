@@ -8,7 +8,7 @@ from reachability.index.discovery import EXCLUDED_DIR_NAMES
 from reachability.scan.inventory import ScanError
 from reachability.scan.models import Gap
 from reachability.scan.wheel_extract import preparse_error
-from reachability.triage.index_adapter import RepoIndex, build_repo_index
+from reachability.triage.index_adapter import IndexBuildError, RepoIndex, build_repo_index
 
 # First path components of a wheel that never become part of the combined root.
 SKIPPED_WHEEL_DIRS = frozenset({"tests", "test", "testing", "docs", "doc", "examples", "benchmarks"})
@@ -146,10 +146,17 @@ def wheel_top_level_files(tree: Path) -> list[tuple[str, Path]]:
     return out
 
 
-def build_combined(
-    app_dir: Path, dists: dict[str, Path], tmp_parent: Path | None = None
-) -> CombinedIndex:
-    """Copy app modules and each dist's top-level packages into one root and index it."""
+MAX_REBUILDS = 12
+_INDEX_FAILURES = (IndexBuildError, RecursionError, MemoryError)
+
+
+def _failure_name(exc: BaseException) -> str:
+    cause = exc.__cause__
+    return type(cause if cause is not None else exc).__name__
+
+
+def _assemble(app_dir: Path, dists: dict[str, Path], tmp_parent: Path | None) -> CombinedIndex:
+    """Copy app modules and the given dists into a fresh root and index it (may raise)."""
     root = _make_root(tmp_parent)
     gaps: list[Gap] = []
     state = CombinedIndex(root, None, {}, {}, gaps)  # type: ignore[arg-type]
@@ -167,4 +174,56 @@ def build_combined(
     except BaseException:
         shutil.rmtree(root, ignore_errors=True)
         raise
+    return state
+
+
+def build_combined(
+    app_dir: Path, dists: dict[str, Path], tmp_parent: Path | None = None
+) -> CombinedIndex:
+    """Combined index of the app plus every dist; a dist whose files break the index is dropped.
+
+    On failure the dists are bisected (at most MAX_REBUILDS rebuilds); each failing or
+    undecided dist becomes a Gap{dist_error} and the scan continues without it. An app
+    that cannot be indexed on its own is a tool error.
+    """
+    try:
+        return _assemble(app_dir, dists, tmp_parent)
+    except _INDEX_FAILURES as first:
+        first_name = _failure_name(first)
+    rebuilds = 0
+
+    def attempt(subset: list[str]) -> bool:
+        nonlocal rebuilds
+        rebuilds += 1
+        try:
+            _assemble(app_dir, {d: dists[d] for d in subset}, tmp_parent).close()
+            return True
+        except _INDEX_FAILURES:
+            return False
+
+    if not attempt([]):
+        raise CombinedIndexError(f"the app cannot be indexed on its own ({first_name})")
+    good: list[str] = []
+    bad: list[tuple[str, str]] = []
+
+    def search(cands: list[str]) -> None:
+        if not cands:
+            return
+        if rebuilds >= MAX_REBUILDS - 1:  # keep one rebuild for the final index
+            bad.extend((d, "undecided after the rebuild limit") for d in cands)
+            return
+        if attempt(good + cands):
+            good.extend(cands)
+            return
+        if len(cands) == 1:
+            bad.append((cands[0], f"{first_name} while indexing"))
+            return
+        mid = len(cands) // 2
+        search(cands[:mid])
+        search(cands[mid:])
+
+    search(sorted(dists))
+    state = _assemble(app_dir, {d: dists[d] for d in good}, tmp_parent)
+    for dist, why in sorted(bad):
+        state.gaps.append(Gap("dist_error", dist, f"{dist}: dropped from the combined index ({why})"))
     return state
