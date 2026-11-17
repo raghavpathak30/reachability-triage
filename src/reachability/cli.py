@@ -6,6 +6,7 @@ from reachability.scan.fetch import LocalDirFetcher, PyPIFetcher
 from reachability.scan.inventory import ScanError
 from reachability.scan.pipeline import run_scan
 from reachability.scan.render import render_json, render_text
+from reachability.scan.textsafe import strip_control_line
 
 REFERENCE_SHA256 = "c7ea4e15b83912960fc5cbd42c6003dd630e422ec4dfbfc4ed19445573e1b08c"
 
@@ -37,7 +38,7 @@ def main(argv: list[str] | None = None) -> int:
             cache_dir=Path(args.cache_dir) if args.cache_dir else None,
         )
     except (ScanError, OSError) as exc:
-        sys.stderr.write(f"error: {type(exc).__name__}: {exc}\n")
+        sys.stderr.write(strip_control_line(f"error: {type(exc).__name__}: {exc}") + "\n")
         return 2
     sys.stdout.write(render_json(result) if args.format == "json" else render_text(result))
     return 0
