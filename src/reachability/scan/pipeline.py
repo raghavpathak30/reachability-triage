@@ -11,7 +11,7 @@ from reachability.scan.combined import CombinedIndex, build_combined
 from reachability.scan.fetch import Fetcher, FetchBudget, fetch_dist, fetch_dists
 from reachability.scan.inventory import TARGET_ENV, Status, build_inventory
 from reachability.scan.lock_wheels import read_lock_wheels
-from reachability.scan.models import Finding, Gap, ScanResult, Target
+from reachability.scan.models import FetchedDist, Finding, Gap, ScanResult, Target
 from reachability.scan.query import QueryContext, derive_reason, exact_lookup, make_context
 from reachability.scan.reasons import EvidenceLevel, ReasonCode
 from reachability.scan.targets import (
@@ -96,7 +96,21 @@ def run_scan(
             for e in inventory.entries
             if e.status is Status.PINNED and e.dist and e.version and e.hashes
         }
-        fetched = fetch_dists(pinned, fetcher, store, locks=locks, req_hashes=req_hashes, budget=budget)
+        matched_pairs = [dv for dv in pinned if dv[0] in matched]
+        rest_pairs = [dv for dv in pinned if dv[0] not in matched]
+        fetched = fetch_dists(matched_pairs, fetcher, store, locks=locks, req_hashes=req_hashes, budget=budget)
+        fix_fetched: dict[tuple[str, str], FetchedDist] = {}
+        for m in sorted(report.findings, key=lambda m: (m.dist, m.version, m.fixed_in)):
+            dist = canonicalize_name(m.dist)
+            fd = fetched.dists.get((dist, m.version))
+            if m.fixed_in == NO_FIX or fd is None or fd.status != "fetched" or (dist, m.fixed_in) in fix_fetched:
+                continue
+            ffd, fgaps = fetch_dist(dist, m.fixed_in, fetcher, store, budget=budget)
+            fix_fetched[(dist, m.fixed_in)] = ffd
+            fetched.gaps.extend(fgaps)
+        rest = fetch_dists(rest_pairs, fetcher, store, locks=locks, req_hashes=req_hashes, budget=budget)
+        fetched.dists.update(rest.dists)
+        fetched.gaps.extend(rest.gaps)
         gaps.extend(fetched.gaps)
         fetch_seconds = clock() - t_fetch
 
@@ -109,7 +123,7 @@ def run_scan(
         combine_seconds = clock() - t_comb
         try:
             findings, stats_extra, targets_seconds, query_seconds = _analyse(
-                report.findings, snapshot, fetched, combined, fetcher, store, clock, budget,
+                report.findings, snapshot, fetched, fix_fetched, combined, clock,
                 analysis_start, analysis_seconds, max_advisories,
             )
             gaps.extend(stats_extra.pop("gaps"))
@@ -184,7 +198,7 @@ def _wheel_status(entry, fetched) -> str:
     return fd.status if fd else "not_fetched"
 
 
-def _analyse(matches, snapshot, fetched, combined: CombinedIndex, fetcher, store, clock, budget,
+def _analyse(matches, snapshot, fetched, fix_fetched, combined: CombinedIndex, clock,
              analysis_start, analysis_seconds, max_advisories):
     gaps: list[Gap] = []
     t_targets = clock()
@@ -234,8 +248,7 @@ def _analyse(matches, snapshot, fetched, combined: CombinedIndex, fetcher, store
             return done(m, identity, ReasonCode.NO_CANDIDATE)
         fkey = (dist, m.fixed_in)
         if fkey not in fixed_cache:
-            ffd, fgaps = fetch_dist(dist, m.fixed_in, fetcher, store, budget=budget)
-            gaps.extend(fgaps)
+            ffd = fix_fetched[fkey]
             fixed_cache[fkey] = None
             if ffd.status == "budget":
                 fix_cut[fkey] = ffd.reason or "fetch budget reached"

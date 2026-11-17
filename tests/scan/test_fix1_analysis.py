@@ -175,3 +175,24 @@ def test_f4_fix_wheel_cut_by_fetch_budget_is_scan_budget(tmp_path, monkeypatch):
         assert "lib==2.0" in f.detail and "cap" in f.detail
     assert any(g.kind == "budget" and "lib==2.0" in g.detail for g in res.gaps)
     assert not any(f.reason_code == "NO_WHEEL_FOR_FIX" for f in res.findings)
+
+
+# ---- G2
+def test_g2_matched_installed_then_fix_wheels_before_unrelated_installed(tmp_path):
+    pins = {f"aaa-{i:03d}": "1.0" for i in range(155)}
+    pins["lib"] = "1.0"
+    s = make_scan(
+        tmp_path,
+        app_files={"main.py": APP_CALLS_F},
+        pins=pins,
+        wheels={("lib", "1.0"): lib_files(LIB_OLD), ("lib", "2.0"): lib_files(LIB_NEW)},
+        advisories=[advisory("GHSA-aaaa-bbbb-0000", "lib")],
+    )
+    res = _run(s)
+    f = res.findings[0]
+    assert f.verdict == "reachable" and f.evidence_level == "path_proven"
+    cut = sorted(g.dist for g in res.gaps if g.kind == "budget")
+    assert cut == [f"aaa-{i:03d}" for i in range(148, 155)]
+    assert "lib" not in cut and "aaa-000" not in cut
+    assert all(g.dist.startswith("aaa-") and "cap reached" in g.detail for g in res.gaps if g.kind == "budget")
+    assert not any(g.kind == "budget" and "2.0" in g.detail for g in res.gaps)
