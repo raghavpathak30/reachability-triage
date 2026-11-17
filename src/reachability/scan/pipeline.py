@@ -231,6 +231,9 @@ def _analyse(matches, snapshot, fetched, fix_fetched, combined: CombinedIndex, c
         if m.fixed_in == NO_FIX:
             return done(m, identity, ReasonCode.NO_FIX_VERSION)
         fd = fetched.dists.get((dist, m.version))
+        if fd is not None and fd.status == "budget":
+            return done(m, identity, ReasonCode.SCAN_BUDGET,
+                        f"installed wheel {dist}=={m.version} not fetched: {fd.reason or 'fetch budget reached'}")
         if fd is not None and fd.error:
             return done(m, identity, ReasonCode.NO_CANDIDATE,
                         f"fetch failed: {fd.error} during installed wheel fetch")
