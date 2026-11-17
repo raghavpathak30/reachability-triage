@@ -1,6 +1,8 @@
 # Phase App Scan: which advisories in my dependencies can my app reach?
 
-Status: **spec only, nothing built.** Every component below is *proposed*.
+Status: A1a, A1b (DECISIONS §27-§28) and unit S1 (DECISIONS §29) are built;
+every other component below is *proposed*. Since 17 Nov 2026 units S1, S2a,
+S2b and S3 replace A2/A4/A5/A6 (DECISIONS §29); v1.0 is a CLI-only package.
 Research and measurements are in `agent_docs/research/APP_SCAN_RESEARCH.md`,
 cited here as "R §n". Where R's design sections differ from this spec, this
 spec wins.
@@ -433,6 +435,11 @@ Every gate includes:
 
 ### A2: Fetch and import-closure evidence (CLI)
 
+- **Status (17 Nov 2026):** the S1 thin slice of A2 is **built** (DECISIONS §29):
+  `scan/fetch.py` (PyPI JSON API via stdlib `urllib`, not pip), `scan/wheel_extract.py`,
+  disk cache, archive rules and caps. Import closure `C(A)`, `dist_of` and evidence
+  levels 2-4 are **not built** (unit S2a).
+
 - `scan/fetch.py`: wheel-only download of every `pinned`, marker-true dist,
   sha256 against the lock's hash when present. `no_wheel` → `Gap`.
 - Archive safety on every extracted wheel: names that are absolute, contain
@@ -475,6 +482,11 @@ Every gate includes:
 
 ### A4: Targets
 
+- **Status (17 Nov 2026):** the S1 thin slice of A4 is **built** (DECISIONS §29):
+  `scan/targets.py` (`changed` on the stable key, version-only filter, test-module
+  exclusion, cap 20; confidence `medium` only). `named`, confidence `high` and
+  `DEPENDENCY_PIN_FIX` are **not built** (unit S2b).
+
 - `scan/targets.py` per §2.4: installed ↔ first-fixed-above diff on the stable
   key, the version-only filter, `non_py_changes`, `NATIVE_ONLY_CHANGE`,
   `DEPENDENCY_PIN_FIX` (only `Requires-Dist` differs), `named` extraction,
@@ -491,6 +503,11 @@ Every gate includes:
     named, and langchain-openai's `` `_url_to_size()` `` is named.
 
 ### A5: Linked call graph (`path_proven`)
+
+- **Status (17 Nov 2026):** the S1 thin slice of A5 is **built** (DECISIONS §29):
+  one combined-root index (`scan/combined.py`) and an exact-node BFS lookup (`scan/query.py`),
+  not per-dist cached indexes with a link step. `dist_index.py` and the D3-set
+  cache are **not built** (unit S2b).
 
 - `scan/dist_index.py`: per-dist L1–L3 with the wheel as its own root,
   cached. A link step re-resolves `ext:<module>.<name>` callees across the
