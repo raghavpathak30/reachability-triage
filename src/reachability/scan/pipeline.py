@@ -303,12 +303,12 @@ def _analyse(matches, snapshot, fetched, combined: CombinedIndex, fetcher, store
 
     # Phase B: engine reason queries, clock checked before each one.
     # The advisory cap counts only advisories that still need a query.
-    for i in pending:
+    for n, i in enumerate(pending):
         m, identity, targets, truncated, _ = per[i]
         res = None
         why = f"advisory cap reached ({max_advisories} per scan)"
         try:
-            if i < max_advisories:
+            if n < max_advisories:
                 res = derive_reason(ctx, targets, within_time, clock)
                 why = f"analysis time cap reached ({analysis_seconds:.0f} s)"
         except Exception as exc:

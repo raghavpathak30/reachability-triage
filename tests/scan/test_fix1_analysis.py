@@ -136,3 +136,21 @@ def test_f2_clock_crossing_during_targets_cuts_remaining(tmp_path, monkeypatch):
         assert "analysis time cap" in f.detail
 
 
+# ---- F3
+def test_f3_cap_counts_only_advisories_needing_analysis(tmp_path):
+    no_fix = [advisory(f"GHSA-nofx-bbbb-{i:04d}", "lib", fixed=None) for i in range(150)]
+    pending = [advisory(f"GHSA-pend-bbbb-{i:04d}", "lib") for i in range(60)]
+    res = _run(_setup(tmp_path, no_fix + pending, app=APP_NO_PATH))
+    assert len(res.findings) == 210
+    assert not any(f.reason_code == "SCAN_BUDGET" for f in res.findings)
+    assert sum(f.reason_code == "NO_FIX_VERSION" for f in res.findings) == 150
+    assert sum(f.reason_code == "NO_PATH_FOUND" for f in res.findings) == 60
+
+
+def test_f3_cap_bites_over_200_pending(tmp_path):
+    no_fix = [advisory(f"GHSA-nofx-bbbb-{i:04d}", "lib", fixed=None) for i in range(5)]
+    pending = [advisory(f"GHSA-pend-bbbb-{i:04d}", "lib") for i in range(201)]
+    res = _run(_setup(tmp_path, no_fix + pending, app=APP_NO_PATH))
+    assert sum(f.reason_code == "SCAN_BUDGET" for f in res.findings) == 1
+
+
