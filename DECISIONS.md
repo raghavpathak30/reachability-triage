@@ -1604,4 +1604,22 @@ Plan change from the council record `agent_docs/council/v1-final-push-plan-2026-
 
 **Pre-registration.** Committed before any S1 code in `tests/fixtures/app_scan/eval/prereg/` (`s1_e1_expected.json`, `s1_realapp_plan.md`, `s1_openwebui_expected.json`); the commit hash is in `.agent/STATE.md`.
 
-**Real-app measurement.** (placeholder, filled after the real-app run)
+**Real-app measurement.** Run 2026-11-17 on the three pre-registered apps with the snapshot sha256 `c7ea4e15...1b08c`, `--format json` plus one `--format text` run each, no `--member`. Nothing was tuned. Every run exited 0; none ended in `SCAN_BUDGET`; there was no crash and no memory failure. G1 holds: no finding has verdict `not_reachable` in any output (checked on the `verdict` field). Raw output is in `.agent/progress.md` under "Step 17 real-app measurement". `/usr/bin/time` is not installed on the machine, so a stdlib wrapper supplied wall time and peak RSS.
+
+| | flaskr (49943b5, generated pins) | fastapi-template (aabb901) | open-webui (b0e6098) |
+|---|---|---|---|
+| inventory (pinned rows) | 7 | 62 (2 marker_skipped) | 259 (7 marker_skipped) |
+| advisories matched | 0 | 0 | 103 |
+| wheels fetched / no_wheel | 7 / 0 | 50 / 12 | 124 / 26 |
+| cut by the 150-dist cap | 0 | 0 | 109 installed + 33 fixed-version fetches |
+| combined modules / edges | 140 / 10,546 | 2,157 / 115,885 | 11,111 / 679,237 |
+| build time | 0.83 s | 11.0 s | 56.6 s |
+| queries (median / max) | 0 / none | 0 / none | 0 / none |
+| peak RSS | 206 MB | 235 MB | 622 MB |
+| wall time | 2.7 s (warm cache) | 25.1 s | 176.1 s cold, 113.5 s warm |
+| findings | 0 | 0 | 103 unknown (NO_FIX_VERSION 24, NO_WHEEL 2, NO_WHEEL_FOR_FIX 77) |
+| path_proven | 0 | 0 | 0 |
+
+The flaskr pins (blinker 1.9.0, click 8.5.1, flask 3.1.3, itsdangerous 2.2.0, jinja2 3.1.6, markupsafe 3.0.4, werkzeug 3.1.9) were resolved by a throwaway script from PyPI JSON metadata and are not committed. The flaskr wheels were already in the cache from an interrupted earlier run, so its time is a warm-cache time. The fastapi-template no_wheel rows are 11 dists with no wheel matching the target environment plus `dkimpy` (sdist only), and one app file, `app/app/api/deps.py`, raised a SyntaxError and became an `unparsed_file` Gap. No query ran on any app, so the per-query times are zero by absence, not measurement.
+
+open-webui: pypdf 6.21.2, pyjwt 2.13.0 and anyio 4.14.0 are inside the 150-dist limit and their wheels were fetched. The fetch budget is shared with fixed-version fetches, and by the time the scan reached the fixed releases the limit was spent, so the fixed wheels for pypdf (6.21.3, 6.21.4), pyjwt (2.14.0, 2.15.0), anyio (4.14.2) and sentence-transformers (5.6.0) were cut and reported as `budget` Gaps by name. As a result all five pre-registered pairs (GHSA-w6j9, GHSA-5849, GHSA-4vqv, GHSA-x3rh, GHSA-3w57) came out `unknown` with reason `NO_WHEEL_FOR_FIX`, none `path_proven`. The engine was never reached for them, so this run says nothing about the constructor class-node stop recorded in step 6. The 11 hand-typed pairs came out `unknown` as expected (GHSA-gvp8 `NO_FIX_VERSION`, the other ten `NO_WHEEL_FOR_FIX`). With no `path_proven` finding there is no final-callee check, no `path_proven` outside the spike's 16, and nothing to report separately for pyjwt. The warm run produced identical findings and gaps; the cold and warm wall times are 176.1 s and 113.5 s.
