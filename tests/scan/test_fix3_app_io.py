@@ -40,3 +40,21 @@ def test_unreadable_app_file_is_an_unparsed_gap_and_scan_continues(tmp_path):
     assert len(gaps) == 1 and gaps[0].detail.startswith("app/secret.py") and "PermissionError" in gaps[0].detail
     assert res.closure_complete is False
     assert res.findings[0].verdict == "reachable"
+
+
+def test_listable_but_not_searchable_app_directory_is_a_gap_not_exit_2(tmp_path):
+    # Mode 0o444: scandir succeeds, but stat of anything inside raises PermissionError.
+    s = simple_lib_scan(tmp_path)
+    pkg = s["app"] / "pkg"
+    (pkg / "sub").mkdir(parents=True)
+    (pkg / "sub" / "y.py").write_text("y = 1\n")
+    (pkg / "x.py").write_text("x = 1\n")
+    pkg.chmod(0o444)
+    try:
+        res = _run(s)
+    finally:
+        pkg.chmod(0o755)
+    gaps = [g for g in res.gaps if g.kind == "unreadable_path"]
+    assert [g.detail for g in gaps] == ["app/pkg: PermissionError"]
+    assert res.closure_complete is False
+    assert res.findings[0].verdict == "reachable"

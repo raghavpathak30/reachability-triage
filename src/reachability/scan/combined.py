@@ -57,6 +57,8 @@ def find_app_files(app_dir: Path, gaps: list[Gap]) -> list[AppFile]:
     def walk(d: Path, root: Path, packaged: bool) -> None:
         try:
             entries = sorted(os.scandir(d), key=lambda e: e.name)
+            # Checked here, under the guard: a listable but unsearchable dir raises on stat.
+            child_packaged = packaged or (d / "__init__.py").is_file()
         except OSError as exc:
             gaps.append(Gap("unreadable_path", None, f"app/{d.relative_to(app_dir).as_posix()}: {type(exc).__name__}"))
             return
@@ -71,9 +73,6 @@ def find_app_files(app_dir: Path, gaps: list[Gap]) -> list[AppFile]:
                     if e.name in ("build", "dist") and _has_py(p):
                         gaps.append(Gap("excluded_dir", None, f"app/{rel}: the index skips directories named {e.name!r}"))
                     continue
-                child_packaged = packaged or (d != app_dir and (d / "__init__.py").is_file()) or (
-                    d == app_dir and (d / "__init__.py").is_file()
-                )
                 new_root = p if is_root(p, child_packaged) else root
                 walk(p, new_root, child_packaged)
             elif e.is_file(follow_symlinks=False) and e.name.endswith(".py"):
