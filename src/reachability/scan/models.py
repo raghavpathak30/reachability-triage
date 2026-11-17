@@ -94,6 +94,7 @@ class FetchedDist:
     sha256: str | None = None
     root: Path | None = None
     reason: str | None = None
+    error: str | None = None  # exception class name when the fetch itself raised
 
 
 @dataclass

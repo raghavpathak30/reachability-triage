@@ -361,7 +361,7 @@ def fetch_dist(
     except Exception as exc:
         name = type(exc).__name__
         return (
-            FetchedDist(dist, version, "no_wheel", reason=f"{name} while fetching"),
+            FetchedDist(dist, version, "no_wheel", reason=f"{name} while fetching", error=name),
             [Gap("dist_error", dist, f"{dist}=={version}: {name} while fetching or extracting")],
         )
     finally:

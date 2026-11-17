@@ -231,6 +231,9 @@ def _analyse(matches, snapshot, fetched, fix_fetched, combined: CombinedIndex, c
         if m.fixed_in == NO_FIX:
             return done(m, identity, ReasonCode.NO_FIX_VERSION)
         fd = fetched.dists.get((dist, m.version))
+        if fd is not None and fd.error:
+            return done(m, identity, ReasonCode.NO_CANDIDATE,
+                        f"fetch failed: {fd.error} during installed wheel fetch")
         if fd is None or fd.status != "fetched":
             return done(m, identity, ReasonCode.NO_WHEEL)
         if not within_time():
@@ -263,6 +266,10 @@ def _analyse(matches, snapshot, fetched, fix_fetched, combined: CombinedIndex, c
             if fkey in fix_cut:
                 return done(m, identity, ReasonCode.SCAN_BUDGET,
                             f"fix wheel {dist}=={m.fixed_in} not fetched: {fix_cut[fkey]}")
+            ffd = fix_fetched[fkey]
+            if ffd.error:
+                return done(m, identity, ReasonCode.NO_CANDIDATE,
+                            f"fetch failed: {ffd.error} during fix wheel fetch ({dist}=={m.fixed_in})")
             return done(m, identity, ReasonCode.NO_CANDIDATE if fkey in diff_failed else ReasonCode.NO_WHEEL_FOR_FIX)
         if not within_time():
             return done(m, identity, ReasonCode.SCAN_BUDGET,

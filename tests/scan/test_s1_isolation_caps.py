@@ -71,7 +71,7 @@ def test_raising_fetcher_is_dist_error_gap(tmp_path):
     res = _run(s, RaisingFetcher(s["wheels"]))
     assert any(g.kind == "dist_error" and g.dist == "lib" and "RuntimeError" in g.detail for g in res.gaps)
     assert res.closure_complete is False
-    assert res.findings[0].verdict == "unknown" and res.findings[0].reason_code == "NO_WHEEL"
+    assert res.findings[0].verdict == "unknown" and res.findings[0].reason_code == "NO_CANDIDATE"
 
 
 def test_fixed_wheel_fetch_error_does_not_fail_scan(tmp_path):
@@ -85,7 +85,7 @@ def test_fixed_wheel_fetch_error_does_not_fail_scan(tmp_path):
 
     res = _run(s, F(s["wheels"]))
     assert any(g.kind == "dist_error" for g in res.gaps)
-    assert res.findings[0].reason_code == "NO_WHEEL_FOR_FIX"
+    assert res.findings[0].reason_code == "NO_CANDIDATE"
 
 
 def test_dist_count_cap_cuts_the_rest_by_name(tmp_path):
