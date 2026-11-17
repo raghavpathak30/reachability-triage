@@ -22,6 +22,10 @@ def _is_excluded(name: str) -> bool:
     return name in EXCLUDED_DIR_NAMES or name.endswith(".egg-info")
 
 
+def _has_py(path: Path) -> bool:
+    return any(True for _ in path.rglob("*.py"))
+
+
 @dataclass
 class AppFile:
     source: Path  # real file under the scan root
@@ -61,6 +65,8 @@ def find_app_files(app_dir: Path, gaps: list[Gap]) -> list[AppFile]:
                 continue
             if e.is_dir(follow_symlinks=False):
                 if _is_excluded(e.name):
+                    if e.name in ("build", "dist") and _has_py(p):
+                        gaps.append(Gap("excluded_dir", None, f"app/{rel}: the index skips directories named {e.name!r}"))
                     continue
                 child_packaged = packaged or (d != app_dir and (d / "__init__.py").is_file()) or (
                     d == app_dir and (d / "__init__.py").is_file()
@@ -120,6 +126,9 @@ def _make_root(tmp_parent: Path | None) -> Path:
 
 def _place(root: Path, rel: str, src: Path, origin: str, display: str, state: "CombinedIndex") -> None:
     dest = root / rel
+    if rel.split("/")[0] == "src":
+        state.gaps.append(Gap("excluded_dir", None, f"{display}: a top-level 'src' would change the index root"))
+        return
     if rel in state.origin:
         state.gaps.append(
             Gap("collision", None, f"{display} collides with {state.display[rel]}; first kept")
@@ -131,6 +140,19 @@ def _place(root: Path, rel: str, src: Path, origin: str, display: str, state: "C
     state.display[rel] = display
 
 
+def _wheel_first_component_skipped(first: str) -> bool:
+    return first.endswith(".dist-info") or first.endswith(".data") or first in SKIPPED_WHEEL_DIRS
+
+
+def wheel_dropped_dirs(tree: Path) -> list[str]:
+    """Top-level wheel directories with Python files that the index would drop or misread."""
+    out = []
+    for d in sorted(tree.iterdir()):
+        if d.is_dir() and not d.is_symlink() and (_is_excluded(d.name) or d.name == "src") and _has_py(d):
+            out.append(d.name)
+    return out
+
+
 def wheel_top_level_files(tree: Path) -> list[tuple[str, Path]]:
     out: list[tuple[str, Path]] = []
     for p in sorted(tree.rglob("*")):
@@ -138,7 +160,7 @@ def wheel_top_level_files(tree: Path) -> list[tuple[str, Path]]:
             continue
         rel = p.relative_to(tree).as_posix()
         first = rel.split("/")[0]
-        if first.endswith(".dist-info") or first.endswith(".data") or first in SKIPPED_WHEEL_DIRS:
+        if _wheel_first_component_skipped(first) or _is_excluded(first) or first == "src":
             continue
         if not rel.endswith(".py"):
             continue
@@ -168,6 +190,8 @@ def _assemble(app_dir: Path, dists: dict[str, Path], tmp_parent: Path | None) ->
                 continue
             _place(root, af.rel_in_root, af.source, "app", f"app/{af.display}", state)
         for dist in sorted(dists):
+            for name in wheel_dropped_dirs(dists[dist]):
+                gaps.append(Gap("excluded_dir", dist, f"{dist}/{name}: dropped from the combined index"))
             for rel, src in wheel_top_level_files(dists[dist]):
                 _place(root, rel, src, dist, f"{dist}/{rel}", state)
         state.index = build_repo_index(root)
