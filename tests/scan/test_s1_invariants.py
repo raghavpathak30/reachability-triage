@@ -12,6 +12,7 @@ from reachability.scan.fetch import LocalDirFetcher
 from reachability.scan.pipeline import run_scan
 from reachability.scan.reasons import ALLOWED_LEVELS, S1_EMITTED, ReasonCode
 from reachability.scan.render import render_json, render_text
+from reachability.triage.index_adapter import build_repo_index
 from tests.scan.s1_support import (
     APP_CALLS_F,
     LIB_NEW,
@@ -156,6 +157,7 @@ def test_scenario_invariants(tmp_path, name):
     setup, fetcher, kw = SCENARIOS[name](tmp_path)
     res = run_scan(setup["app"], setup["snapshot"], setup["sha256"], fetcher, **kw)
     outputs = [render_json(res), render_text(res)]
+    app_start_ids = {ep.node_id for ep in build_repo_index(Path(setup["app"])).entrypoints}
     for out in outputs:
         assert "not_reachable" not in out
     data = json.loads(outputs[0])
@@ -172,6 +174,7 @@ def test_scenario_invariants(tmp_path, name):
         else:
             assert f.evidence_level == "path_proven" and f.reason_code is None
             assert f.path and f.path[0].file.startswith("app/")
+            assert f.path[0].caller in app_start_ids
             assert f.path[-1].callee in {t.node_id for t in f.targets}
     assert all(g.kind in {"no_wheel", "unparsed_file", "skipped_symlink", "budget", "collision", "dist_error", "excluded_dir"} for g in res.gaps)
 
