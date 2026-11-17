@@ -1,7 +1,9 @@
 import hashlib
 import json
+import os
 import re
 import shutil
+import stat
 import tempfile
 import time
 from collections.abc import Callable
@@ -24,6 +26,8 @@ ALLOWED_HOSTS = frozenset({PYPI_HOST, FILES_HOST})
 MAX_JSON_BYTES = 10 * 1024 * 1024
 MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
 DOWNLOAD_SECONDS = 120.0
+EXTRACT_RULES_VERSION = 1
+_SHA_OK = re.compile(r"[0-9a-f]{64}")
 _NAME_OK = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 
 
@@ -245,6 +249,7 @@ def _fetch_dist(
 ) -> tuple[FetchedDist, list[Gap]]:
     name = canonicalize_name(dist)
     try:
+        json_url(dist, version)  # validates the name and version used in cache paths
         chosen = _select(dist, version, fetcher, lock, req_hashes)
     except FetchRefused as exc:
         fd, gap = _no_wheel(dist, version, str(exc))
@@ -261,31 +266,68 @@ def _fetch_dist(
     if not expected:
         fd, gap = _no_wheel(dist, version, "no digest")
         return fd, [gap]
-    tree = store / f"{name}-{version}-{expected}" / "tree"
-    unparsed_gaps: list[Gap] = []
-    if not tree.is_dir():
-        store.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=store) as tmp:
-            wheel = Path(tmp) / "w.whl"
-            try:
-                fetcher.download(chosen.url, wheel, max_bytes=MAX_DOWNLOAD_BYTES, deadline_seconds=download_seconds)
-            except FetchRefused as exc:
-                fd, gap = _no_wheel(dist, version, str(exc))
-                return fd, [gap]
-            actual = _sha256_file(wheel)
-            if actual != expected:
-                fd, gap = _no_wheel(dist, version, "sha256 mismatch")
-                return fd, [gap]
-            staging = Path(tmp) / "tree"
-            try:
-                unparsed = extract_wheel(wheel, staging)
-            except WheelRejected as exc:
-                fd, gap = _no_wheel(dist, version, f"wheel rejected: {exc}")
-                return fd, [gap]
-            unparsed_gaps = [Gap("unparsed_file", dist, f"{rel}: {err}") for rel, err in unparsed]
-            tree.parent.mkdir(parents=True, exist_ok=True)
-            staging.rename(tree)
-    return FetchedDist(dist, version, "fetched", chosen.filename, expected, tree), unparsed_gaps
+    if not _SHA_OK.fullmatch(expected):
+        fd, gap = _no_wheel(dist, version, "invalid digest")
+        return fd, [gap]
+    entry = store / f"{name}-{version}-{expected}-r{EXTRACT_RULES_VERSION}"
+    cached = _vet_entry(entry)
+    if cached is not None:
+        return (
+            FetchedDist(dist, version, "fetched", chosen.filename, expected, entry / "tree"),
+            [Gap("unparsed_file", dist, f"{rel}: {err}") for rel, err in cached],
+        )
+    store.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=store) as tmp:
+        wheel = Path(tmp) / "w.whl"
+        try:
+            fetcher.download(chosen.url, wheel, max_bytes=MAX_DOWNLOAD_BYTES, deadline_seconds=download_seconds)
+        except FetchRefused as exc:
+            fd, gap = _no_wheel(dist, version, str(exc))
+            return fd, [gap]
+        actual = _sha256_file(wheel)
+        if actual != expected:
+            fd, gap = _no_wheel(dist, version, "sha256 mismatch")
+            return fd, [gap]
+        staging = Path(tmp) / "entry"
+        try:
+            unparsed = extract_wheel(wheel, staging / "tree")
+        except WheelRejected as exc:
+            fd, gap = _no_wheel(dist, version, f"wheel rejected: {exc}")
+            return fd, [gap]
+        (staging / "gaps.json").write_text(json.dumps(unparsed))
+        (staging / "COMPLETE").write_text("ok\n")  # written last
+        if entry.exists():
+            shutil.rmtree(entry)
+        staging.rename(entry)
+    return (
+        FetchedDist(dist, version, "fetched", chosen.filename, expected, entry / "tree"),
+        [Gap("unparsed_file", dist, f"{rel}: {err}") for rel, err in unparsed],
+    )
+
+
+def _vet_entry(entry: Path) -> list[list[str]] | None:
+    """Return the entry's recorded unparsed files if it is complete and clean, else None."""
+    try:
+        if not (entry / "COMPLETE").is_file():
+            return None
+        gaps = json.loads((entry / "gaps.json").read_text())
+        if not isinstance(gaps, list) or not all(isinstance(g, list) and len(g) == 2 for g in gaps):
+            return None
+        tree = entry / "tree"
+        if not tree.is_dir() or tree.is_symlink():
+            return None
+        for dirpath, dirnames, filenames in os.walk(tree):
+            for d in dirnames:
+                if not stat.S_ISDIR(os.lstat(os.path.join(dirpath, d)).st_mode):
+                    return None
+            for f in filenames:
+                if not stat.S_ISREG(os.lstat(os.path.join(dirpath, f)).st_mode):
+                    return None
+                if not (f.endswith(".py") or f == "RECORD"):
+                    return None
+        return gaps
+    except (OSError, ValueError):
+        return None
 
 
 def fetch_dist(
