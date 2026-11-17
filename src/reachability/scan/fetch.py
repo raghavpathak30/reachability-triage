@@ -216,6 +216,8 @@ def _select(
     dist: str, version: str, fetcher: Fetcher, lock: LockEntry | None, req_hashes: tuple[str, ...]
 ) -> Candidate | str:
     """Return the chosen candidate, or a no_wheel reason string."""
+    if lock is not None and lock.source_kind:
+        return f"package source is {lock.source_kind}, not the PyPI registry"
     if lock is not None and lock.registry and lock.registry.rstrip("/") != PYPI_REGISTRY:
         return f"package comes from a non-PyPI registry ({urlsplit(lock.registry).hostname})"
     if lock is not None and lock.wheels:
