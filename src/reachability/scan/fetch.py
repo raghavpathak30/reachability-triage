@@ -217,8 +217,7 @@ def _select(
 ) -> Candidate | str:
     """Return the chosen candidate, or a no_wheel reason string."""
     if lock is not None and lock.registry and lock.registry.rstrip("/") != PYPI_REGISTRY:
-        if not lock.wheels or any(urlsplit(w.url).hostname != FILES_HOST for w in lock.wheels):
-            return f"package comes from a non-PyPI registry ({urlsplit(lock.registry).hostname})"
+        return f"package comes from a non-PyPI registry ({urlsplit(lock.registry).hostname})"
     if lock is not None and lock.wheels:
         chosen = choose_wheel(list(lock.wheels))
         if chosen is None:
