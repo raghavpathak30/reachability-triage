@@ -1577,3 +1577,31 @@ Scope cut by the v1 plan and council of 16 Nov 2026: `Pipfile.lock` and `pylock.
 **Real-app count (16 Nov 2026).** `fastapi/full-stack-fastapi-template` at `aabb901` (`uv.lock` sha256 `d6e5a35b36a7d13642b8fdaeec2ba2b98eb1adfeb2eca61530429561c7e46b02`), cloned read-only to `/tmp/app-scan-research/fastapi-template`, nothing committed. Command: `python scripts/scan_inventory.py /tmp/app-scan-research/fastapi-template --snapshot ~/osv-snapshots/osv-pypi-2026-11-12.zip`. Result: exit 0, no `UvLockRootError`, `app_root: backend`, member `app`, **64 inventory rows** (62 `pinned`, 2 `marker_skipped`: `colorama 0.4.6`, `tzdata 2026.2`), `dkimpy 1.1.8 pinned`. This equals the pre-registered 64 (`agent_docs/research/APP_SCAN_RESEARCH.md` l.697-700).
 
 **Known gaps.** Several workspace members cannot be scanned in one run. `--member` cannot pick another member when a `"."` root exists. The ignored-file text still says "format arrives in A1b". Pipfile.lock and pylock.toml are not parsed (1.0.1).
+
+## 29. v1.0 is a CLI-only package; app scan unit S1 (17 Nov 2026)
+
+Plan change from the council record `agent_docs/council/v1-final-push-plan-2026-11-16.md`, recorded before any S1 code. **v1.0 is a CLI-only package.**
+1. A3 (`/v1/scans`, `scans` tables, worker), A7, A8 and A10 are deferred past 1.0.
+2. SARIF, the GitHub Action and the `Pipfile.lock` / `pylock.toml` parsers move to 1.0.1.
+3. The FastAPI/Postgres/LangGraph/web service is archived at release, in S4.
+4. Scan caches live on disk, not in Postgres.
+5. Wheels are fetched through the PyPI JSON API with stdlib `urllib`, not a `pip` subprocess, because `uvx` environments have no pip. Only `pypi.org` and `files.pythonhosted.org` over HTTPS (every redirect hop re-checked); sha256 is verified before an archive is opened.
+6. Units S1, S2a, S2b and S3 replace A2, A4, A5 and A6, in that order. §4's frozen eval rules are unchanged.
+7. Day 1 spike result (`agent_docs/spike-2026-11-17.md`): E=16 by the pre-registered rule, all in open-webui; 5 of the 16 need no hand-typed edges (pypdf GHSA-5849, GHSA-4vqv, GHSA-x3rh; pyjwt GHSA-w6j9; anyio GHSA-3w57). Band >=5, plan A' proceeds. 7 of 8 apps gave 0.
+8. Top post-1.0 engine item: the spike's hand-typed patterns (alias of a bound method on a module-level object, self-attribute types set in `__init__`, dict-lookup dispatch, `super()`). Not built in 1.0.
+
+**S1 design choices** (approved at the gate, 17 Nov 2026).
+(a) **App modules are found by a scan-side walker anchored on `app_root`** (from A1b), not `discover_modules`: open-webui's empty `src/` hides `backend/open_webui/` (`discovery.py:29-30`). This is a recorded deviation from spec §2.3 "modules `discover_modules` finds". Import roots are `app_root` plus any directory with no `__init__.py` (and no packaged ancestor) that has a direct child package; a file belongs to its deepest import root; nothing from a non-Python `src/` becomes an app module. Symlinks are skipped with `Gap{skipped_symlink}`.
+(b) **`no_wheel` is a `Gap`** and a fetch result, not an inventory `Status` (A1a/A1b contract untouched).
+(c) **New Gap kinds** beyond spec §2.1: `collision` (same relative path in the combined root), `dist_error` (any exception on one dist, exception class named), `excluded_dir` (a package directory the index would drop, e.g. top-level `build`/`dist`).
+(d) **"hardlink"** in the fixture list means any non-regular zip member: zip has no hardlink entry type, so a member whose unix file type is not regular (symlink, device, fifo, socket) rejects the wheel. Absolute, `..`, drive, backslash, NUL, duplicate and file/directory-prefix-conflicting names also reject it.
+(e) **Console scripts.** Library console scripts never start a path. App console scripts are not start points in S1 (no `pyproject.toml` is copied into the combined root). Routes, `__main__` and tests of the app still are.
+(f) **Budgets.** Two separate budgets. Fetch: a fixed **total** wall-clock cap of 600 s across all downloads (each download also capped at 120 s, 100 MB), at most 150 distributions (advisory-matched first, then sorted by canonical name); every dist cut is `Gap{budget}` naming the dist. Analysis (combined build, targets, queries): 600 s wall clock and 200 advisories; advisories cut get `unknown` / `SCAN_BUDGET`, each named. An exact-node path lookup runs for every advisory before the budget can cut anything, and a `path_proven` already found is never dropped. The scan still completes (exit 0) and says what was cut.
+(g) **Evidence level.** S1 has no import closure (S2a). `evidence_level` is `path_proven` for `reachable` / `reachable_only_from_tests` and `null` for every `unknown`; the JSON carries `import_closure_evaluated: false` and the text output says so in one line. A level the scan did not compute is never emitted. Reason codes `NOT_IMPORTED_BY_APP_CODE` and `DEPENDENCY_PIN_FIX` are not emitted in S1.
+(h) **Query.** The engine's `NOT_REACHABLE` is mapped to `unknown` / `NO_PATH_FOUND` in one place and never emitted. A target is `path_proven` only if its exact node id is reached by the engine's own confident-edge BFS (`_build_by_caller`, `_bfs`, imported unmodified from `reachability.index.reachability`), not by the engine's name-based match, which can hit a different same-named symbol.
+(i) **`--snapshot-sha256`** (default: the reference hash) and **`--wheel-dir`** (offline wheel source; every wheel needs a `.sha256` sidecar and goes through the same verification and archive rules) are added to the CLI. The CLI is run as `PYTHONPATH=src python -m reachability.cli` until S4 packages it.
+(j) Archive caps: 100 MB download, 200 MB extracted (streaming counter, not declared sizes), 20,000 members, 5 MB per `.py`; only `.py` files and `*.dist-info/RECORD` are written; each `.py` is pre-parsed and unparsable files are left out with `Gap{unparsed_file}`.
+
+**Pre-registration.** Committed before any S1 code in `tests/fixtures/app_scan/eval/prereg/` (`s1_e1_expected.json`, `s1_realapp_plan.md`, `s1_openwebui_expected.json`); the commit hash is in `.agent/STATE.md`.
+
+**Real-app measurement.** (placeholder, filled after the real-app run)

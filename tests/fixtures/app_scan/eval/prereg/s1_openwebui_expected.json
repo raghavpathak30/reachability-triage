@@ -1,0 +1,122 @@
+{
+ "app": "open-webui @ b0e6098e940942281d9c83f3529ea117287a3a22, scanned from /tmp/spike/open-webui",
+ "source": "agent_docs/spike-2026-11-17.md (16 explicit-call pairs; true symbols from the fix-commit column)",
+ "expected_path_proven": [
+  {
+   "advisory_id": "GHSA-w6j9-cwv2-h6wq",
+   "dist_version": "pyjwt 2.13.0",
+   "true_symbol": "jwt.api_jwk:PyJWK.__init__",
+   "spike": "spike pair 11"
+  },
+  {
+   "advisory_id": "GHSA-5849-834g-hvw5",
+   "dist_version": "pypdf 6.21.2",
+   "true_symbol": "pypdf._reader:PdfReader._read_standard_xref_table",
+   "spike": "spike pair 12"
+  },
+  {
+   "advisory_id": "GHSA-4vqv-7265-gm2w",
+   "dist_version": "pypdf 6.21.2",
+   "true_symbol": "pypdf._reader:PdfReader._read_standard_xref_table, PdfReader._read_xref, PdfReader._read_xref_tables_and_trailers",
+   "spike": "spike pair 13"
+  },
+  {
+   "advisory_id": "GHSA-x3rh-gjgm-fmqc",
+   "dist_version": "pypdf 6.21.2",
+   "true_symbol": "pypdf._reader:PdfReader.__init__, PdfReader._read_pdf15_xref_stream",
+   "spike": "spike pair 14"
+  },
+  {
+   "advisory_id": "GHSA-3w57-8xmc-8v26",
+   "dist_version": "anyio 4.14.0",
+   "true_symbol": "anyio._core._subprocesses:open_process",
+   "spike": "spike pair 16"
+  }
+ ],
+ "expected_unknown": [
+  {
+   "advisory_id": "GHSA-8wjv-2p76-3863",
+   "dist_version": "pyjwt 2.13.0",
+   "true_symbol": "PyJWS._load",
+   "spike": "pair 1 (hand-typed D, V)",
+   "reason": "needs a hand-typed edge; engine not taught the pattern in S1"
+  },
+  {
+   "advisory_id": "GHSA-hxm8-2xgr-2p9m",
+   "dist_version": "pyjwt 2.13.0",
+   "true_symbol": "PyJWS._load",
+   "spike": "pair 2 (hand-typed)",
+   "reason": "needs a hand-typed edge; engine not taught the pattern in S1"
+  },
+  {
+   "advisory_id": "GHSA-gvp8-978c-rx2q",
+   "dist_version": "pyjwt 2.13.0",
+   "true_symbol": "PyJWT._merge_options",
+   "spike": "pair 3 (hand-typed D)",
+   "reason": "needs a hand-typed edge; engine not taught the pattern in S1"
+  },
+  {
+   "advisory_id": "GHSA-42vr-xj54-vc7v",
+   "dist_version": "pyjwt 2.13.0",
+   "true_symbol": "PyJWT._decode_payload",
+   "spike": "pair 4 (hand-typed D)",
+   "reason": "needs a hand-typed edge; engine not taught the pattern in S1"
+  },
+  {
+   "advisory_id": "GHSA-9j54-fg26-wv3r",
+   "dist_version": "pyjwt 2.13.0",
+   "true_symbol": "PyJWS._verify_signature",
+   "spike": "pair 5 (hand-typed D, V)",
+   "reason": "needs a hand-typed edge; engine not taught the pattern in S1"
+  },
+  {
+   "advisory_id": "GHSA-r6x4-923q-g947",
+   "dist_version": "pyjwt 2.13.0",
+   "true_symbol": "HMACAlgorithm.prepare_key",
+   "spike": "pair 6 (hand-typed)",
+   "reason": "needs a hand-typed edge; engine not taught the pattern in S1"
+  },
+  {
+   "advisory_id": "GHSA-p4g4-x82p-q773",
+   "dist_version": "pyjwt 2.13.0",
+   "true_symbol": "HMACAlgorithm.prepare_key",
+   "spike": "pair 7 (hand-typed)",
+   "reason": "needs a hand-typed edge; engine not taught the pattern in S1"
+  },
+  {
+   "advisory_id": "GHSA-w2cx-738m-mc7w",
+   "dist_version": "pyjwt 2.13.0",
+   "true_symbol": "HMACAlgorithm.prepare_key",
+   "spike": "pair 8 (hand-typed)",
+   "reason": "needs a hand-typed edge; engine not taught the pattern in S1"
+  },
+  {
+   "advisory_id": "GHSA-jwrc-g2q2-pq5p",
+   "dist_version": "pyjwt 2.13.0",
+   "true_symbol": "jwt.utils.is_pem_format",
+   "spike": "pair 9 (hand-typed)",
+   "reason": "needs a hand-typed edge; engine not taught the pattern in S1"
+  },
+  {
+   "advisory_id": "GHSA-ffc3-869f-jxw9",
+   "dist_version": "pyjwt 2.13.0",
+   "true_symbol": "jwt.utils.is_pem_format",
+   "spike": "pair 10 (hand-typed)",
+   "reason": "needs a hand-typed edge; engine not taught the pattern in S1"
+  },
+  {
+   "advisory_id": "GHSA-jhr6-gm9c-rqjv",
+   "dist_version": "sentence-transformers 5.5.1",
+   "true_symbol": "import_module_class, _load_module_class_from_ref, _load_config_modules",
+   "spike": "pair 15 (hand-typed super())",
+   "reason": "needs a hand-typed edge; engine not taught the pattern in S1"
+  }
+ ],
+ "rules": [
+  "A missing expected path_proven is recorded with the engine reason, not fixed in S1.",
+  "An expected unknown that comes out path_proven is recorded as a surprise and checked against its true symbol.",
+  "Every path_proven NOT among the 16 spike pairs is listed separately with its final callee and checked against that advisory's true symbol in the spike file.",
+  "For every path_proven, record whether the final callee is the advisory's own true symbol or a function changed by a different advisory in the same diff (pyjwt 2.13.0 has 15 open advisories; HMACAlgorithm.prepare_key is the true symbol of three of them). pyjwt is reported separately.",
+  "No threshold on these counts."
+ ]
+}
