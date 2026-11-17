@@ -15,7 +15,7 @@ from packaging.version import InvalidVersion, Version
 
 from reachability.scan.lock_wheels import PYPI_REGISTRY, LockEntry
 from reachability.scan.models import FetchedDist, FetchResult, Gap
-from reachability.scan.wheel_extract import extract_wheel
+from reachability.scan.wheel_extract import WheelRejected, extract_wheel
 from reachability.scan.wheel_select import Candidate, choose_wheel
 
 PYPI_HOST = "pypi.org"
@@ -245,7 +245,11 @@ def fetch_dist(
                 fd, gap = _no_wheel(dist, version, "sha256 mismatch")
                 return fd, [gap]
             staging = Path(tmp) / "tree"
-            extract_wheel(wheel, staging)
+            try:
+                extract_wheel(wheel, staging)
+            except WheelRejected as exc:
+                fd, gap = _no_wheel(dist, version, f"wheel rejected: {exc}")
+                return fd, [gap]
             tree.parent.mkdir(parents=True, exist_ok=True)
             staging.rename(tree)
     return FetchedDist(dist, version, "fetched", chosen.filename, expected, tree), []
