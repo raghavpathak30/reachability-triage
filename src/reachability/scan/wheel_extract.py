@@ -10,6 +10,11 @@ class WheelRejected(Exception):
 
 _DRIVE = re.compile(r"[A-Za-z]:")
 
+MAX_MEMBERS = 20_000
+MAX_PY_BYTES = 5 * 1024 * 1024
+MAX_EXTRACTED_BYTES = 200 * 1024 * 1024
+_CHUNK = 64 * 1024
+
 
 def _wanted(name: str) -> bool:
     if name.endswith("/"):
@@ -38,6 +43,8 @@ def _check_name(name: str) -> None:
 
 def check_members(infos: list[zipfile.ZipInfo]) -> None:
     """Reject the whole wheel on any unsafe member; nothing is written before this passes."""
+    if len(infos) > MAX_MEMBERS:
+        raise WheelRejected(f"too many members: {len(infos)} (limit {MAX_MEMBERS})")
     seen: set[str] = set()
     files: set[str] = set()
     for info in infos:
@@ -62,12 +69,16 @@ def check_members(infos: list[zipfile.ZipInfo]) -> None:
 
 
 def extract_wheel(wheel_path: Path, dest: Path) -> None:
-    """Write only `.py` files and `*.dist-info/RECORD` from the wheel into dest."""
+    """Write only `.py` files and `*.dist-info/RECORD` from the wheel into dest.
+
+    Sizes are enforced on the bytes actually streamed, not on declared header sizes.
+    """
     dest.mkdir(parents=True, exist_ok=True)
     try:
         zf = zipfile.ZipFile(wheel_path)
     except zipfile.BadZipFile as exc:
         raise WheelRejected(f"not a readable zip: {exc}") from exc
+    total = 0
     with zf:
         infos = zf.infolist()
         check_members(infos)
@@ -76,4 +87,16 @@ def extract_wheel(wheel_path: Path, dest: Path) -> None:
                 continue
             out = dest / info.filename
             out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_bytes(zf.read(info))
+            size = 0
+            with zf.open(info) as src, out.open("wb") as sink:
+                while True:
+                    chunk = src.read(_CHUNK)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    total += len(chunk)
+                    if info.filename.endswith(".py") and size > MAX_PY_BYTES:
+                        raise WheelRejected(f"{info.filename!r} exceeds {MAX_PY_BYTES} bytes")
+                    if total > MAX_EXTRACTED_BYTES:
+                        raise WheelRejected(f"extracted size exceeds {MAX_EXTRACTED_BYTES} bytes")
+                    sink.write(chunk)
