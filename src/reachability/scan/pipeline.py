@@ -188,27 +188,37 @@ def _analyse(matches, snapshot, fetched, combined: CombinedIndex, fetcher, store
              analysis_start, analysis_seconds, max_advisories):
     gaps: list[Gap] = []
     t_targets = clock()
+
+    def within_time() -> bool:
+        return clock() - analysis_start < analysis_seconds
+
     ordered = sorted(matches, key=lambda m: (m.dist, m.version, _advisory_identity(snapshot, m.ids)[0]))
-    ctx: QueryContext = make_context(combined)
-    origins = combined.module_origins()
+    ctx: QueryContext | None = None
+    ctx_failure = ""
+    try:
+        ctx = make_context(combined)
+        origins = combined.module_origins()
+    except Exception as exc:
+        ctx = None
+        ctx_failure = type(exc).__name__
+        origins = {}
+        gaps.append(Gap("dist_error", None, f"shared analysis context: {ctx_failure}"))
     installed_cache: dict[str, object] = {}
     fixed_cache: dict[tuple[str, str], tuple[object, Path] | None] = {}
     diff_failed: set[tuple[str, str]] = set()
+    fix_cut: dict[tuple[str, str], str] = {}
     per: list[tuple[MatchResult, tuple, list[Target], bool, Finding | None]] = []
 
-    def done(m, identity, code):
-        per.append((m, identity, [], False, _unknown(identity, m, code)))
+    def done(m, identity, code, detail=None):
+        per.append((m, identity, [], False, _unknown(identity, m, code, detail=detail)))
 
-    for m in ordered:
-        identity = _advisory_identity(snapshot, m.ids)
+    def step(m, identity):
         dist = canonicalize_name(m.dist)
         if m.fixed_in == NO_FIX:
-            done(m, identity, ReasonCode.NO_FIX_VERSION)
-            continue
+            return done(m, identity, ReasonCode.NO_FIX_VERSION)
         fd = fetched.dists.get((dist, m.version))
         if fd is None or fd.status != "fetched":
-            done(m, identity, ReasonCode.NO_WHEEL)
-            continue
+            return done(m, identity, ReasonCode.NO_WHEEL)
         if dist not in installed_cache:
             mods = {mod for mod, o in origins.items() if o == dist}
             try:
@@ -218,13 +228,14 @@ def _analyse(matches, snapshot, fetched, combined: CombinedIndex, fetcher, store
                 gaps.append(Gap("dist_error", dist, f"{dist}=={m.version}: {type(exc).__name__} while indexing"))
         installed = installed_cache[dist]
         if installed is None:
-            done(m, identity, ReasonCode.NO_CANDIDATE)
-            continue
+            return done(m, identity, ReasonCode.NO_CANDIDATE)
         fkey = (dist, m.fixed_in)
         if fkey not in fixed_cache:
             ffd, fgaps = fetch_dist(dist, m.fixed_in, fetcher, store, budget=budget)
             gaps.extend(fgaps)
             fixed_cache[fkey] = None
+            if ffd.status == "budget":
+                fix_cut[fkey] = ffd.reason or "fetch budget reached"
             if ffd.status == "fetched" and ffd.root:
                 try:
                     fixed_cache[fkey] = (symbols_from_tree(ffd.root), ffd.root)
@@ -233,8 +244,7 @@ def _analyse(matches, snapshot, fetched, combined: CombinedIndex, fetcher, store
                     diff_failed.add(fkey)
         fixed = fixed_cache[fkey]
         if fixed is None:
-            done(m, identity, ReasonCode.NO_CANDIDATE if fkey in diff_failed else ReasonCode.NO_WHEEL_FOR_FIX)
-            continue
+            return done(m, identity, ReasonCode.NO_CANDIDATE if fkey in diff_failed else ReasonCode.NO_WHEEL_FOR_FIX)
         try:
             diff = diff_symbols(installed, fixed[0])
             targets, truncated = resolve_targets(diff.changes, installed, combined, dist)
@@ -243,12 +253,25 @@ def _analyse(matches, snapshot, fetched, combined: CombinedIndex, fetcher, store
             )
         except Exception as exc:
             gaps.append(Gap("dist_error", dist, f"{dist}=={m.version}: {type(exc).__name__} while diffing"))
-            done(m, identity, ReasonCode.NO_CANDIDATE)
-            continue
+            return done(m, identity, ReasonCode.NO_CANDIDATE)
         if not targets:
-            done(m, identity, ReasonCode.NATIVE_ONLY_CHANGE if native else ReasonCode.NO_CANDIDATE)
-            continue
+            return done(m, identity, ReasonCode.NATIVE_ONLY_CHANGE if native else ReasonCode.NO_CANDIDATE)
         per.append((m, identity, targets, truncated, None))
+
+    def failed(m, identity, exc, phase):
+        gaps.append(Gap("dist_error", canonicalize_name(m.dist),
+                        f"{identity[0]}: {type(exc).__name__} during {phase}"))
+        return _unknown(identity, m, ReasonCode.NO_CANDIDATE,
+                        detail=f"analysis failed: {type(exc).__name__} during {phase}")
+
+    for m in ordered:
+        identity = _advisory_identity(snapshot, m.ids)
+        size = len(per)
+        try:
+            step(m, identity)
+        except Exception as exc:
+            del per[size:]
+            per.append((m, identity, [], False, failed(m, identity, exc, "target analysis")))
     targets_seconds = clock() - t_targets
 
     t_query = clock()
@@ -258,24 +281,33 @@ def _analyse(matches, snapshot, fetched, combined: CombinedIndex, fetcher, store
     for i, (m, identity, targets, truncated, finished) in enumerate(per):
         if finished is not None:
             results[i] = finished
-            continue
-        hit = exact_lookup(ctx, targets)
-        if hit is not None:
-            results[i] = _proven(identity, m, hit, targets, truncated)
+        elif ctx is None:
+            results[i] = _unknown(identity, m, ReasonCode.NO_CANDIDATE, targets=targets, truncated=truncated,
+                                  detail=f"analysis context unavailable: {ctx_failure}")
         else:
-            pending.append(i)
+            try:
+                hit = exact_lookup(ctx, targets)
+            except Exception as exc:
+                results[i] = failed(m, identity, exc, "exact lookup")
+                continue
+            if hit is not None:
+                results[i] = _proven(identity, m, hit, targets, truncated)
+            else:
+                pending.append(i)
 
     # Phase B: engine reason queries, clock checked before each one.
-    def within_time() -> bool:
-        return clock() - analysis_start < analysis_seconds
-
+    # The advisory cap counts only advisories that still need a query.
     for i in pending:
         m, identity, targets, truncated, _ = per[i]
         res = None
         why = f"advisory cap reached ({max_advisories} per scan)"
-        if i < max_advisories:
-            res = derive_reason(ctx, targets, within_time, clock)
-            why = f"analysis time cap reached ({analysis_seconds:.0f} s)"
+        try:
+            if i < max_advisories:
+                res = derive_reason(ctx, targets, within_time, clock)
+                why = f"analysis time cap reached ({analysis_seconds:.0f} s)"
+        except Exception as exc:
+            results[i] = failed(m, identity, exc, "reason query")
+            continue
         if res is None:
             results[i] = _unknown(identity, m, ReasonCode.SCAN_BUDGET, targets=targets, truncated=truncated,
                                   detail=f"not analysed: {why}")
@@ -284,4 +316,6 @@ def _analyse(matches, snapshot, fetched, combined: CombinedIndex, fetcher, store
                                   partial=res.partial_path, truncated=truncated)
     findings = [results[i] for i in range(len(per))]
     query_seconds = clock() - t_query
-    return findings, {"gaps": gaps, "queries": ctx.queries, "query_seconds_list": ctx.query_seconds}, targets_seconds, query_seconds
+    qn = ctx.queries if ctx else 0
+    ql = ctx.query_seconds if ctx else []
+    return findings, {"gaps": gaps, "queries": qn, "query_seconds_list": ql}, targets_seconds, query_seconds

@@ -40,6 +40,9 @@ def main(argv: list[str] | None = None) -> int:
     except (ScanError, OSError) as exc:
         sys.stderr.write(strip_control_line(f"error: {type(exc).__name__}: {exc}") + "\n")
         return 2
+    except Exception as exc:
+        sys.stderr.write(strip_control_line(f"error: unexpected {type(exc).__name__}: {exc}") + "\n")
+        return 2
     sys.stdout.write(render_json(result) if args.format == "json" else render_text(result))
     return 0
 
