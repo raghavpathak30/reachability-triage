@@ -113,3 +113,26 @@ def test_f1_cli_catch_all_exits_2(tmp_path, monkeypatch, capsys):
     assert err.count("\n") == 1
 
 
+# ---- F2
+def test_f2_clock_crossing_during_targets_cuts_remaining(tmp_path, monkeypatch):
+    now = [0.0]
+    real = pl.resolve_targets
+    calls = []
+
+    def crossing(*a, **k):
+        calls.append(1)
+        out = real(*a, **k)
+        if len(calls) == 1:
+            now[0] += 601.0
+        return out
+
+    monkeypatch.setattr(pl, "resolve_targets", crossing)
+    res = _run(_setup(tmp_path, _advs(3)), clock=lambda: now[0])
+    by_id = {f.advisory_id: f for f in res.findings}
+    assert by_id["GHSA-aaaa-bbbb-0000"].verdict == "reachable"  # already proven work is kept
+    for i in ("0001", "0002"):
+        f = by_id[f"GHSA-aaaa-bbbb-{i}"]
+        assert f.reason_code == "SCAN_BUDGET" and f.verdict == "unknown" and f.evidence_level is None
+        assert "analysis time cap" in f.detail
+
+

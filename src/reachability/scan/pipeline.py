@@ -219,6 +219,9 @@ def _analyse(matches, snapshot, fetched, combined: CombinedIndex, fetcher, store
         fd = fetched.dists.get((dist, m.version))
         if fd is None or fd.status != "fetched":
             return done(m, identity, ReasonCode.NO_WHEEL)
+        if not within_time():
+            return done(m, identity, ReasonCode.SCAN_BUDGET,
+                        f"not analysed: analysis time cap reached ({analysis_seconds:.0f} s)")
         if dist not in installed_cache:
             mods = {mod for mod, o in origins.items() if o == dist}
             try:
@@ -245,6 +248,9 @@ def _analyse(matches, snapshot, fetched, combined: CombinedIndex, fetcher, store
         fixed = fixed_cache[fkey]
         if fixed is None:
             return done(m, identity, ReasonCode.NO_CANDIDATE if fkey in diff_failed else ReasonCode.NO_WHEEL_FOR_FIX)
+        if not within_time():
+            return done(m, identity, ReasonCode.SCAN_BUDGET,
+                        f"not analysed: analysis time cap reached ({analysis_seconds:.0f} s)")
         try:
             diff = diff_symbols(installed, fixed[0])
             targets, truncated = resolve_targets(diff.changes, installed, combined, dist)

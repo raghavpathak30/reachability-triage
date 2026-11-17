@@ -64,10 +64,21 @@ def test_clock_past_limit_mid_phase_b_cuts_the_rest(tmp_path):
     assert all("analysis time cap" in f.detail for f in res.findings if f.reason_code == "SCAN_BUDGET")
 
 
-def test_path_proven_survives_budget_exhaustion(tmp_path):
+def test_path_proven_survives_budget_exhaustion(tmp_path, monkeypatch):
     advs = [advisory("GHSA-aaaa-bbbb-0001", "lib")]
     s = _scan(tmp_path, advs, app=APP_CALLS_F)
-    res = _run(s, analysis_seconds=-1.0)  # budget already spent before phase B
+    import reachability.scan.pipeline as pl
+
+    now = [0.0]
+    real = pl.exact_lookup
+
+    def spend_after_lookup(*a, **k):
+        out = real(*a, **k)
+        now[0] += 601.0  # budget spent after phase A, before phase B
+        return out
+
+    monkeypatch.setattr(pl, "exact_lookup", spend_after_lookup)
+    res = _run(s, clock=lambda: now[0])
     f = res.findings[0]
     assert f.verdict == "reachable" and f.evidence_level == "path_proven" and f.path
 
