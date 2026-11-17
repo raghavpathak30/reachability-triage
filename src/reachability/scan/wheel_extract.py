@@ -1,3 +1,4 @@
+import ast
 import re
 import stat
 import zipfile
@@ -68,10 +69,21 @@ def check_members(infos: list[zipfile.ZipInfo]) -> None:
                 raise WheelRejected(f"file member {'/'.join(parts[:i])!r} is also a directory prefix of {name!r}")
 
 
-def extract_wheel(wheel_path: Path, dest: Path) -> None:
+def preparse_error(path: Path) -> str | None:
+    """Exception class name if the engine's index could not read this file, else None."""
+    try:
+        ast.parse(path.read_bytes().decode("utf-8"), filename=str(path))
+    except (SyntaxError, RecursionError, MemoryError, ValueError) as exc:  # UnicodeDecodeError is a ValueError
+        return type(exc).__name__
+    return None
+
+
+def extract_wheel(wheel_path: Path, dest: Path) -> list[tuple[str, str]]:
     """Write only `.py` files and `*.dist-info/RECORD` from the wheel into dest.
 
     Sizes are enforced on the bytes actually streamed, not on declared header sizes.
+    Every `.py` is pre-parsed; one the index could not read is removed and returned as
+    (relative path, exception class name).
     """
     dest.mkdir(parents=True, exist_ok=True)
     try:
@@ -79,6 +91,7 @@ def extract_wheel(wheel_path: Path, dest: Path) -> None:
     except zipfile.BadZipFile as exc:
         raise WheelRejected(f"not a readable zip: {exc}") from exc
     total = 0
+    unparsed: list[tuple[str, str]] = []
     with zf:
         infos = zf.infolist()
         check_members(infos)
@@ -100,3 +113,9 @@ def extract_wheel(wheel_path: Path, dest: Path) -> None:
                     if total > MAX_EXTRACTED_BYTES:
                         raise WheelRejected(f"extracted size exceeds {MAX_EXTRACTED_BYTES} bytes")
                     sink.write(chunk)
+            if info.filename.endswith(".py"):
+                err = preparse_error(out)
+                if err is not None:
+                    out.unlink()
+                    unparsed.append((info.filename, err))
+    return unparsed

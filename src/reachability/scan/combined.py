@@ -7,6 +7,7 @@ from pathlib import Path
 from reachability.index.discovery import EXCLUDED_DIR_NAMES
 from reachability.scan.inventory import ScanError
 from reachability.scan.models import Gap
+from reachability.scan.wheel_extract import preparse_error
 from reachability.triage.index_adapter import RepoIndex, build_repo_index
 
 # First path components of a wheel that never become part of the combined root.
@@ -154,6 +155,10 @@ def build_combined(
     state = CombinedIndex(root, None, {}, {}, gaps)  # type: ignore[arg-type]
     try:
         for af in find_app_files(Path(app_dir), gaps):
+            err = preparse_error(af.source)
+            if err is not None:
+                gaps.append(Gap("unparsed_file", None, f"app/{af.display}: {err}"))
+                continue
             _place(root, af.rel_in_root, af.source, "app", f"app/{af.display}", state)
         for dist in sorted(dists):
             for rel, src in wheel_top_level_files(dists[dist]):

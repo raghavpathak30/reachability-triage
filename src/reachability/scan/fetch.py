@@ -27,6 +27,36 @@ DOWNLOAD_SECONDS = 120.0
 _NAME_OK = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 
 
+MAX_DISTS = 150
+FETCH_TOTAL_SECONDS = 600.0
+
+
+class FetchBudget:
+    """Shared cap for one scan: at most MAX_DISTS dists and FETCH_TOTAL_SECONDS spent fetching."""
+
+    def __init__(
+        self,
+        max_dists: int = MAX_DISTS,
+        total_seconds: float = FETCH_TOTAL_SECONDS,
+        clock: Callable[[], float] = time.monotonic,
+    ):
+        self.max_dists = max_dists
+        self.total_seconds = total_seconds
+        self.clock = clock
+        self.count = 0
+        self.spent = 0.0
+
+    def check(self) -> str | None:
+        if self.count >= self.max_dists:
+            return f"distribution cap reached ({self.max_dists} per scan)"
+        if self.spent >= self.total_seconds:
+            return f"total fetch time cap reached ({self.total_seconds:.0f} s)"
+        return None
+
+    def download_seconds(self) -> float:
+        return max(1.0, min(DOWNLOAD_SECONDS, self.total_seconds - self.spent))
+
+
 class FetchRefused(Exception):
     """A request the fetcher will not make or a response it will not accept."""
 
@@ -203,7 +233,7 @@ def _select(
     return chosen
 
 
-def fetch_dist(
+def _fetch_dist(
     dist: str,
     version: str,
     fetcher: Fetcher,
@@ -211,6 +241,7 @@ def fetch_dist(
     *,
     lock: LockEntry | None = None,
     req_hashes: tuple[str, ...] = (),
+    download_seconds: float = DOWNLOAD_SECONDS,
 ) -> tuple[FetchedDist, list[Gap]]:
     name = canonicalize_name(dist)
     try:
@@ -231,12 +262,13 @@ def fetch_dist(
         fd, gap = _no_wheel(dist, version, "no digest")
         return fd, [gap]
     tree = store / f"{name}-{version}-{expected}" / "tree"
+    unparsed_gaps: list[Gap] = []
     if not tree.is_dir():
         store.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=store) as tmp:
             wheel = Path(tmp) / "w.whl"
             try:
-                fetcher.download(chosen.url, wheel, max_bytes=MAX_DOWNLOAD_BYTES, deadline_seconds=DOWNLOAD_SECONDS)
+                fetcher.download(chosen.url, wheel, max_bytes=MAX_DOWNLOAD_BYTES, deadline_seconds=download_seconds)
             except FetchRefused as exc:
                 fd, gap = _no_wheel(dist, version, str(exc))
                 return fd, [gap]
@@ -246,13 +278,52 @@ def fetch_dist(
                 return fd, [gap]
             staging = Path(tmp) / "tree"
             try:
-                extract_wheel(wheel, staging)
+                unparsed = extract_wheel(wheel, staging)
             except WheelRejected as exc:
                 fd, gap = _no_wheel(dist, version, f"wheel rejected: {exc}")
                 return fd, [gap]
+            unparsed_gaps = [Gap("unparsed_file", dist, f"{rel}: {err}") for rel, err in unparsed]
             tree.parent.mkdir(parents=True, exist_ok=True)
             staging.rename(tree)
-    return FetchedDist(dist, version, "fetched", chosen.filename, expected, tree), []
+    return FetchedDist(dist, version, "fetched", chosen.filename, expected, tree), unparsed_gaps
+
+
+def fetch_dist(
+    dist: str,
+    version: str,
+    fetcher: Fetcher,
+    store: Path,
+    *,
+    lock: LockEntry | None = None,
+    req_hashes: tuple[str, ...] = (),
+    budget: FetchBudget | None = None,
+) -> tuple[FetchedDist, list[Gap]]:
+    """Fetch one dist; any failure becomes a Gap on this dist and never propagates."""
+    download_seconds = DOWNLOAD_SECONDS
+    started = 0.0
+    if budget is not None:
+        reason = budget.check()
+        if reason is not None:
+            return (
+                FetchedDist(dist, version, "budget", reason=reason),
+                [Gap("budget", dist, f"{dist}=={version} not fetched: {reason}")],
+            )
+        budget.count += 1
+        download_seconds = budget.download_seconds()
+        started = budget.clock()
+    try:
+        return _fetch_dist(
+            dist, version, fetcher, store, lock=lock, req_hashes=req_hashes, download_seconds=download_seconds
+        )
+    except Exception as exc:
+        name = type(exc).__name__
+        return (
+            FetchedDist(dist, version, "no_wheel", reason=f"{name} while fetching"),
+            [Gap("dist_error", dist, f"{dist}=={version}: {name} while fetching or extracting")],
+        )
+    finally:
+        if budget is not None:
+            budget.spent += budget.clock() - started
 
 
 def fetch_dists(
@@ -262,6 +333,7 @@ def fetch_dists(
     *,
     locks: dict[tuple[str, str], LockEntry] | None = None,
     req_hashes: dict[tuple[str, str], tuple[str, ...]] | None = None,
+    budget: FetchBudget | None = None,
 ) -> FetchResult:
     store.mkdir(parents=True, exist_ok=True)
     result = FetchResult()
@@ -269,7 +341,7 @@ def fetch_dists(
         key = (canonicalize_name(dist), version)
         fd, gaps = fetch_dist(
             dist, version, fetcher, store,
-            lock=(locks or {}).get(key), req_hashes=(req_hashes or {}).get(key, ()),
+            lock=(locks or {}).get(key), req_hashes=(req_hashes or {}).get(key, ()), budget=budget,
         )
         result.dists[(dist, version)] = fd
         result.gaps.extend(gaps)

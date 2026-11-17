@@ -8,7 +8,7 @@ from packaging.utils import canonicalize_name
 
 from reachability.scan.advisories import NO_FIX, MatchResult, Snapshot, build_report, load_snapshot
 from reachability.scan.combined import CombinedIndex, build_combined
-from reachability.scan.fetch import Fetcher, fetch_dist, fetch_dists
+from reachability.scan.fetch import Fetcher, FetchBudget, fetch_dist, fetch_dists
 from reachability.scan.inventory import TARGET_ENV, Status, build_inventory
 from reachability.scan.lock_wheels import read_lock_wheels
 from reachability.scan.models import Finding, Gap, ScanResult, Target
@@ -66,13 +66,16 @@ def run_scan(
         store = Path(cache_dir) if cache_dir else Path(scratch.name) / "cache"
         # fetch phase
         t_fetch = clock()
+        matched = {canonicalize_name(m.dist) for m in report.findings}
         pinned = sorted(
             {
                 (canonicalize_name(e.dist), e.version)
                 for e in inventory.entries
                 if e.status is Status.PINNED and e.dist and e.version
-            }
+            },
+            key=lambda dv: (dv[0] not in matched, dv[0], dv[1]),
         )
+        budget = FetchBudget(clock=clock)
         locks = (
             read_lock_wheels(Path(inventory.root) / inventory.lockfile) if inventory.lockfile == "uv.lock" else {}
         )
@@ -81,7 +84,7 @@ def run_scan(
             for e in inventory.entries
             if e.status is Status.PINNED and e.dist and e.version and e.hashes
         }
-        fetched = fetch_dists(pinned, fetcher, store, locks=locks, req_hashes=req_hashes)
+        fetched = fetch_dists(pinned, fetcher, store, locks=locks, req_hashes=req_hashes, budget=budget)
         gaps.extend(fetched.gaps)
         fetch_seconds = clock() - t_fetch
 
@@ -93,7 +96,7 @@ def run_scan(
         combine_seconds = clock() - t_comb
         try:
             findings, stats_extra, targets_seconds, query_seconds = _analyse(
-                report.findings, snapshot, fetched, combined, fetcher, store, clock
+                report.findings, snapshot, fetched, combined, fetcher, store, clock, budget
             )
             gaps.extend(stats_extra.pop("gaps"))
             combined_modules = len(combined.index.report.modules)
@@ -167,7 +170,7 @@ def _wheel_status(entry, fetched) -> str:
     return fd.status if fd else "not_fetched"
 
 
-def _analyse(matches, snapshot, fetched, combined: CombinedIndex, fetcher, store, clock):
+def _analyse(matches, snapshot, fetched, combined: CombinedIndex, fetcher, store, clock, budget):
     gaps: list[Gap] = []
     t_targets = clock()
     ordered = sorted(matches, key=lambda m: (m.dist, m.version, _advisory_identity(snapshot, m.ids)[0]))
@@ -175,6 +178,7 @@ def _analyse(matches, snapshot, fetched, combined: CombinedIndex, fetcher, store
     origins = combined.module_origins()
     installed_cache: dict[str, dict] = {}
     fixed_cache: dict[tuple[str, str], dict | None] = {}
+    diff_failed: set[tuple[str, str]] = set()
     per: list[tuple[MatchResult, tuple, list[Target] | None, Finding | None]] = []
     for m in ordered:
         identity = _advisory_identity(snapshot, m.ids)
@@ -188,18 +192,37 @@ def _analyse(matches, snapshot, fetched, combined: CombinedIndex, fetcher, store
             continue
         if dist not in installed_cache:
             mods = {mod for mod, o in origins.items() if o == dist}
-            installed_cache[dist] = defs_from_tables(combined.index.symbol_index, mods)
+            try:
+                installed_cache[dist] = defs_from_tables(combined.index.symbol_index, mods)
+            except Exception as exc:
+                installed_cache[dist] = None
+                gaps.append(Gap("dist_error", dist, f"{dist}=={m.version}: {type(exc).__name__} while indexing"))
+        if installed_cache[dist] is None:
+            per.append((m, identity, None, _unknown(identity, m, ReasonCode.NO_CANDIDATE)))
+            continue
         fkey = (dist, m.fixed_in)
         if fkey not in fixed_cache:
-            ffd, fgaps = fetch_dist(dist, m.fixed_in, fetcher, store)
+            ffd, fgaps = fetch_dist(dist, m.fixed_in, fetcher, store, budget=budget)
             gaps.extend(fgaps)
-            fixed_cache[fkey] = defs_from_tree(ffd.root) if ffd.status == "fetched" and ffd.root else None
+            fixed_cache[fkey] = None
+            if ffd.status == "fetched" and ffd.root:
+                try:
+                    fixed_cache[fkey] = defs_from_tree(ffd.root)
+                except Exception as exc:
+                    gaps.append(Gap("dist_error", dist, f"{dist}=={m.fixed_in}: {type(exc).__name__} while indexing"))
+                    diff_failed.add(fkey)
         fixed_defs = fixed_cache[fkey]
         if fixed_defs is None:
-            per.append((m, identity, None, _unknown(identity, m, ReasonCode.NO_WHEEL_FOR_FIX)))
+            code = ReasonCode.NO_CANDIDATE if fkey in diff_failed else ReasonCode.NO_WHEEL_FOR_FIX
+            per.append((m, identity, None, _unknown(identity, m, code)))
             continue
-        changes = diff_defs(installed_cache[dist], fixed_defs)
-        targets = resolve_targets(changes, installed_cache[dist], combined, dist)
+        try:
+            changes = diff_defs(installed_cache[dist], fixed_defs)
+            targets = resolve_targets(changes, installed_cache[dist], combined, dist)
+        except Exception as exc:
+            gaps.append(Gap("dist_error", dist, f"{dist}=={m.version}: {type(exc).__name__} while diffing"))
+            per.append((m, identity, None, _unknown(identity, m, ReasonCode.NO_CANDIDATE)))
+            continue
         if not targets:
             per.append((m, identity, None, _unknown(identity, m, ReasonCode.NO_CANDIDATE)))
             continue
