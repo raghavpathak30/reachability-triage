@@ -1,0 +1,9 @@
+from langchain_openai.chat_models.base import _url_to_size
+
+
+def main():
+    return _url_to_size("https://example.com/image.png")
+
+
+if __name__ == "__main__":
+    main()

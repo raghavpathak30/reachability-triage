@@ -1,0 +1,9 @@
+{
+ "id": "E1",
+ "advisory": "GHSA-r7w7-9xr2-qq2r",
+ "verdict": "reachable",
+ "evidence_level": "path_proven",
+ "reason_code": null,
+ "true_symbols": ["langchain_openai.chat_models.base:_url_to_size"],
+ "note": "stand-in wheels (real module/symbol layout) built by scripts/materialize_scan_fixture.py; synthetic call shape, real advisory"
+}
