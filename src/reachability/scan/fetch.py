@@ -1,5 +1,4 @@
 import hashlib
-import json
 import re
 import shutil
 import tempfile
@@ -9,8 +8,10 @@ from urllib.parse import urlsplit
 
 from packaging.utils import canonicalize_name
 
+from reachability.scan.lock_wheels import PYPI_REGISTRY, LockEntry
 from reachability.scan.models import FetchedDist, FetchResult, Gap
 from reachability.scan.wheel_extract import extract_wheel
+from reachability.scan.wheel_select import Candidate, choose_wheel
 
 PYPI_HOST = "pypi.org"
 FILES_HOST = "files.pythonhosted.org"
@@ -68,13 +69,6 @@ def _sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def _choose_wheel(urls: list[dict]) -> dict | None:
-    for entry in urls:
-        if entry.get("packagetype") == "bdist_wheel" and entry.get("filename", "").endswith("-py3-none-any.whl"):
-            return entry
-    return None
-
-
 def _no_wheel(dist: str, version: str, reason: str) -> tuple[FetchedDist, Gap]:
     return (
         FetchedDist(dist, version, "no_wheel", reason=reason),
@@ -82,22 +76,64 @@ def _no_wheel(dist: str, version: str, reason: str) -> tuple[FetchedDist, Gap]:
     )
 
 
-def fetch_dist(dist: str, version: str, fetcher: Fetcher, store: Path) -> tuple[FetchedDist, list[Gap]]:
-    name = canonicalize_name(dist)
-    meta = fetcher.get_json(f"https://{PYPI_HOST}/pypi/{name}/{version}/json")
-    chosen = _choose_wheel(meta.get("urls", []))
+def _candidates(meta: dict) -> list[Candidate]:
+    out = []
+    for entry in meta.get("urls", []):
+        if entry.get("packagetype") != "bdist_wheel" or not entry.get("filename"):
+            continue
+        out.append(Candidate(entry["filename"], entry["url"], (entry.get("digests") or {}).get("sha256") or None))
+    return out
+
+
+def _select(
+    dist: str, version: str, fetcher: Fetcher, lock: LockEntry | None, req_hashes: tuple[str, ...]
+) -> Candidate | str:
+    """Return the chosen candidate, or a no_wheel reason string."""
+    if lock is not None and lock.registry and lock.registry.rstrip("/") != PYPI_REGISTRY:
+        if not lock.wheels or any(urlsplit(w.url).hostname != FILES_HOST for w in lock.wheels):
+            return f"package comes from a non-PyPI registry ({urlsplit(lock.registry).hostname})"
+    if lock is not None and lock.wheels:
+        chosen = choose_wheel(list(lock.wheels))
+        if chosen is None:
+            return "no wheel in the lockfile matches the target environment"
+        return chosen
+    if lock is not None and lock.has_sdist:
+        return "lockfile lists only an sdist"
+    meta = fetcher.get_json(f"https://{PYPI_HOST}/pypi/{canonicalize_name(dist)}/{version}/json")
+    cands = _candidates(meta)
+    if req_hashes:
+        allowed = {h.split(":", 1)[-1].lower() for h in req_hashes}
+        cands = [c for c in cands if c.sha256 in allowed]
+    chosen = choose_wheel(cands)
     if chosen is None:
-        fd, gap = _no_wheel(dist, version, "no suitable wheel")
+        return "no suitable wheel"
+    return chosen
+
+
+def fetch_dist(
+    dist: str,
+    version: str,
+    fetcher: Fetcher,
+    store: Path,
+    *,
+    lock: LockEntry | None = None,
+    req_hashes: tuple[str, ...] = (),
+) -> tuple[FetchedDist, list[Gap]]:
+    name = canonicalize_name(dist)
+    chosen = _select(dist, version, fetcher, lock, req_hashes)
+    if isinstance(chosen, str):
+        fd, gap = _no_wheel(dist, version, chosen)
         return fd, [gap]
-    expected = chosen.get("digests", {}).get("sha256")
+    expected = chosen.sha256
     if not expected:
         fd, gap = _no_wheel(dist, version, "no digest")
         return fd, [gap]
     tree = store / f"{name}-{version}-{expected}" / "tree"
     if not tree.is_dir():
+        store.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=store) as tmp:
             wheel = Path(tmp) / "w.whl"
-            fetcher.download(chosen["url"], wheel, max_bytes=100 * 1024 * 1024, deadline_seconds=120.0)
+            fetcher.download(chosen.url, wheel, max_bytes=100 * 1024 * 1024, deadline_seconds=120.0)
             actual = _sha256_file(wheel)
             if actual != expected:
                 fd, gap = _no_wheel(dist, version, "sha256 mismatch")
@@ -106,14 +142,25 @@ def fetch_dist(dist: str, version: str, fetcher: Fetcher, store: Path) -> tuple[
             extract_wheel(wheel, staging)
             tree.parent.mkdir(parents=True, exist_ok=True)
             staging.rename(tree)
-    return FetchedDist(dist, version, "fetched", chosen["filename"], expected, tree), []
+    return FetchedDist(dist, version, "fetched", chosen.filename, expected, tree), []
 
 
-def fetch_dists(pairs: list[tuple[str, str]], fetcher: Fetcher, store: Path) -> FetchResult:
+def fetch_dists(
+    pairs: list[tuple[str, str]],
+    fetcher: Fetcher,
+    store: Path,
+    *,
+    locks: dict[tuple[str, str], LockEntry] | None = None,
+    req_hashes: dict[tuple[str, str], tuple[str, ...]] | None = None,
+) -> FetchResult:
     store.mkdir(parents=True, exist_ok=True)
     result = FetchResult()
     for dist, version in pairs:
-        fd, gaps = fetch_dist(dist, version, fetcher, store)
+        key = (canonicalize_name(dist), version)
+        fd, gaps = fetch_dist(
+            dist, version, fetcher, store,
+            lock=(locks or {}).get(key), req_hashes=(req_hashes or {}).get(key, ()),
+        )
         result.dists[(dist, version)] = fd
         result.gaps.extend(gaps)
     return result

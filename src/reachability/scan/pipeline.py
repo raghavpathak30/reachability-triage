@@ -10,6 +10,7 @@ from reachability.scan.advisories import NO_FIX, MatchResult, Snapshot, build_re
 from reachability.scan.combined import CombinedIndex, build_combined
 from reachability.scan.fetch import Fetcher, fetch_dist, fetch_dists
 from reachability.scan.inventory import TARGET_ENV, Status, build_inventory
+from reachability.scan.lock_wheels import read_lock_wheels
 from reachability.scan.models import Finding, Gap, ScanResult, Target
 from reachability.scan.query import QueryContext, derive_reason, exact_lookup, make_context
 from reachability.scan.reasons import EvidenceLevel, ReasonCode
@@ -72,7 +73,15 @@ def run_scan(
                 if e.status is Status.PINNED and e.dist and e.version
             }
         )
-        fetched = fetch_dists(pinned, fetcher, store)
+        locks = (
+            read_lock_wheels(Path(inventory.root) / inventory.lockfile) if inventory.lockfile == "uv.lock" else {}
+        )
+        req_hashes = {
+            (canonicalize_name(e.dist), e.version): e.hashes
+            for e in inventory.entries
+            if e.status is Status.PINNED and e.dist and e.version and e.hashes
+        }
+        fetched = fetch_dists(pinned, fetcher, store, locks=locks, req_hashes=req_hashes)
         gaps.extend(fetched.gaps)
         fetch_seconds = clock() - t_fetch
 
