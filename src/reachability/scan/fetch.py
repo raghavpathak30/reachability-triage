@@ -221,6 +221,11 @@ def fetch_dist(
     if isinstance(chosen, str):
         fd, gap = _no_wheel(dist, version, chosen)
         return fd, [gap]
+    try:
+        check_url(chosen.url)
+    except FetchRefused as exc:
+        fd, gap = _no_wheel(dist, version, str(exc))
+        return fd, [gap]
     expected = chosen.sha256
     if not expected:
         fd, gap = _no_wheel(dist, version, "no digest")
