@@ -45,6 +45,8 @@ def test_f1_exact_lookup_raising_for_one_advisory_others_analysed(tmp_path, monk
     bad = by_id["GHSA-aaaa-bbbb-0001"]
     assert bad.verdict == "unknown" and bad.evidence_level is None and bad.reason_code == "NO_CANDIDATE"
     assert "RuntimeError" in bad.detail
+    assert bad.detail == "analysis failed: RuntimeError during exact lookup"
+    assert bad.targets  # failure after target building keeps the targets
     assert by_id["GHSA-aaaa-bbbb-0000"].verdict == "reachable" and by_id["GHSA-aaaa-bbbb-0002"].verdict == "reachable"
     assert any(g.kind == "dist_error" and "RuntimeError" in g.detail and "GHSA-aaaa-bbbb-0001" in g.detail for g in res.gaps)
     assert res.closure_complete is False
@@ -64,6 +66,7 @@ def test_f1_reason_query_raising_is_isolated(tmp_path, monkeypatch):
     res = _run(_setup(tmp_path, _advs(3), app=APP_NO_PATH))
     codes = [f.reason_code for f in res.findings]
     assert codes == ["NO_CANDIDATE", "NO_PATH_FOUND", "NO_PATH_FOUND"]
+    assert res.findings[0].targets and "during reason query" in res.findings[0].detail
     assert res.closure_complete is False
 
 

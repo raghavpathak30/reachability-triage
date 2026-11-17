@@ -280,10 +280,10 @@ def _analyse(matches, snapshot, fetched, fix_fetched, combined: CombinedIndex, c
             return done(m, identity, ReasonCode.NATIVE_ONLY_CHANGE if native else ReasonCode.NO_CANDIDATE)
         per.append((m, identity, targets, truncated, None))
 
-    def failed(m, identity, exc, phase):
+    def failed(m, identity, exc, phase, targets=None, truncated=False):
         gaps.append(Gap("dist_error", canonicalize_name(m.dist),
                         f"{identity[0]}: {type(exc).__name__} during {phase}"))
-        return _unknown(identity, m, ReasonCode.NO_CANDIDATE,
+        return _unknown(identity, m, ReasonCode.NO_CANDIDATE, targets=targets, truncated=truncated,
                         detail=f"analysis failed: {type(exc).__name__} during {phase}")
 
     for m in ordered:
@@ -310,7 +310,7 @@ def _analyse(matches, snapshot, fetched, fix_fetched, combined: CombinedIndex, c
             try:
                 hit = exact_lookup(ctx, targets)
             except Exception as exc:
-                results[i] = failed(m, identity, exc, "exact lookup")
+                results[i] = failed(m, identity, exc, "exact lookup", targets, truncated)
                 continue
             if hit is not None:
                 results[i] = _proven(identity, m, hit, targets, truncated)
@@ -328,7 +328,7 @@ def _analyse(matches, snapshot, fetched, fix_fetched, combined: CombinedIndex, c
                 res = derive_reason(ctx, targets, within_time, clock)
                 why = f"analysis time cap reached ({analysis_seconds:.0f} s)"
         except Exception as exc:
-            results[i] = failed(m, identity, exc, "reason query")
+            results[i] = failed(m, identity, exc, "reason query", targets, truncated)
             continue
         if res is None:
             results[i] = _unknown(identity, m, ReasonCode.SCAN_BUDGET, targets=targets, truncated=truncated,
