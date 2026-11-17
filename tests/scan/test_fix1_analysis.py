@@ -114,7 +114,7 @@ def test_f1_cli_catch_all_exits_2(tmp_path, monkeypatch, capsys):
 
 
 # ---- F2
-def test_f2_clock_crossing_during_targets_cuts_remaining(tmp_path, monkeypatch):
+def test_g1_cut_advisories_had_no_targets_built_and_built_ones_get_exact_lookup(tmp_path, monkeypatch):
     now = [0.0]
     real = pl.resolve_targets
     calls = []
@@ -126,14 +126,25 @@ def test_f2_clock_crossing_during_targets_cuts_remaining(tmp_path, monkeypatch):
             now[0] += 601.0
         return out
 
+    looked_up = []
+    real_exact = pl.exact_lookup
+
+    def spy(ctx, targets):
+        looked_up.append(len(targets))
+        return real_exact(ctx, targets)
+
     monkeypatch.setattr(pl, "resolve_targets", crossing)
+    monkeypatch.setattr(pl, "exact_lookup", spy)
     res = _run(_setup(tmp_path, _advs(3)), clock=lambda: now[0])
     by_id = {f.advisory_id: f for f in res.findings}
-    assert by_id["GHSA-aaaa-bbbb-0000"].verdict == "reachable"  # already proven work is kept
+    # targets were built for 0000 before the clock ran out: its exact lookup still ran and proved it
+    assert by_id["GHSA-aaaa-bbbb-0000"].verdict == "reachable" and by_id["GHSA-aaaa-bbbb-0000"].targets
+    assert len(looked_up) == 1 and looked_up[0] > 0
     for i in ("0001", "0002"):
         f = by_id[f"GHSA-aaaa-bbbb-{i}"]
         assert f.reason_code == "SCAN_BUDGET" and f.verdict == "unknown" and f.evidence_level is None
         assert "analysis time cap" in f.detail
+        assert f.targets == []  # cut advisories never had targets built
 
 
 # ---- F3
