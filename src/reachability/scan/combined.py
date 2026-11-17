@@ -44,18 +44,21 @@ def find_app_files(app_dir: Path, gaps: list[Gap]) -> list[AppFile]:
     def is_root(d: Path, packaged: bool) -> bool:
         if d == app_dir:
             return True
-        if packaged or (d / "__init__.py").is_file():
-            return False
         try:
+            if packaged or (d / "__init__.py").is_file():
+                return False
             children = sorted(os.scandir(d), key=lambda e: e.name)
+            return any(
+                c.is_dir(follow_symlinks=False) and (Path(c.path) / "__init__.py").is_file() for c in children
+            )
         except OSError:
             return False
-        return any(c.is_dir(follow_symlinks=False) and (Path(c.path) / "__init__.py").is_file() for c in children)
 
     def walk(d: Path, root: Path, packaged: bool) -> None:
         try:
             entries = sorted(os.scandir(d), key=lambda e: e.name)
-        except OSError:
+        except OSError as exc:
+            gaps.append(Gap("unreadable_path", None, f"app/{d.relative_to(app_dir).as_posix()}: {type(exc).__name__}"))
             return
         for e in entries:
             p = Path(e.path)
@@ -184,7 +187,10 @@ def _assemble(app_dir: Path, dists: dict[str, Path], tmp_parent: Path | None) ->
     state = CombinedIndex(root, None, {}, {}, gaps)  # type: ignore[arg-type]
     try:
         for af in find_app_files(Path(app_dir), gaps):
-            err = preparse_error(af.source)
+            try:
+                err = preparse_error(af.source)
+            except OSError as exc:
+                err = type(exc).__name__
             if err is not None:
                 gaps.append(Gap("unparsed_file", None, f"app/{af.display}: {err}"))
                 continue
