@@ -23,6 +23,10 @@ from reachability.scan.targets import (
 )
 
 
+ANALYSIS_SECONDS = 600.0
+MAX_ADVISORIES = 200
+
+
 def _advisory_identity(snapshot: Snapshot, ids: tuple[str, ...]) -> tuple[str, list[str]]:
     chosen = next((i for i in ids if i.startswith("GHSA-")), ids[0])
     others = set(ids)
@@ -60,6 +64,8 @@ def run_scan(
     member: str | None = None,
     cache_dir: Path | None = None,
     clock: Callable[[], float] = time.monotonic,
+    analysis_seconds: float = ANALYSIS_SECONDS,
+    max_advisories: int = MAX_ADVISORIES,
 ) -> ScanResult:
     t0 = clock()
     snapshot = load_snapshot(Path(snapshot_path), snapshot_sha256)
@@ -96,13 +102,15 @@ def run_scan(
 
         # combined index
         t_comb = clock()
+        analysis_start = t_comb
         dists = {d: fd.root for (d, _v), fd in fetched.dists.items() if fd.status == "fetched" and fd.root}
         combined = build_combined(app_dir, dists, Path(scratch.name))
         gaps.extend(combined.gaps)
         combine_seconds = clock() - t_comb
         try:
             findings, stats_extra, targets_seconds, query_seconds = _analyse(
-                report.findings, snapshot, fetched, combined, fetcher, store, clock, budget
+                report.findings, snapshot, fetched, combined, fetcher, store, clock, budget,
+                analysis_start, analysis_seconds, max_advisories,
             )
             gaps.extend(stats_extra.pop("gaps"))
             combined_modules = len(combined.index.report.modules)
@@ -176,7 +184,8 @@ def _wheel_status(entry, fetched) -> str:
     return fd.status if fd else "not_fetched"
 
 
-def _analyse(matches, snapshot, fetched, combined: CombinedIndex, fetcher, store, clock, budget):
+def _analyse(matches, snapshot, fetched, combined: CombinedIndex, fetcher, store, clock, budget,
+             analysis_start, analysis_seconds, max_advisories):
     gaps: list[Gap] = []
     t_targets = clock()
     ordered = sorted(matches, key=lambda m: (m.dist, m.version, _advisory_identity(snapshot, m.ids)[0]))
@@ -243,19 +252,36 @@ def _analyse(matches, snapshot, fetched, combined: CombinedIndex, fetcher, store
     targets_seconds = clock() - t_targets
 
     t_query = clock()
-    findings: list[Finding] = []
-    for m, identity, targets, truncated, finished in per:
+    # Phase A: exact-node lookup for every advisory; never cut by the budget.
+    results: dict[int, Finding] = {}
+    pending: list[int] = []
+    for i, (m, identity, targets, truncated, finished) in enumerate(per):
         if finished is not None:
-            findings.append(finished)
+            results[i] = finished
             continue
         hit = exact_lookup(ctx, targets)
         if hit is not None:
-            findings.append(_proven(identity, m, hit, targets, truncated))
-            continue
-        res = derive_reason(ctx, targets, clock=clock)
-        findings.append(
-            _unknown(identity, m, res.code, targets=targets, detail=res.detail, partial=res.partial_path,
-                     truncated=truncated)
-        )
+            results[i] = _proven(identity, m, hit, targets, truncated)
+        else:
+            pending.append(i)
+
+    # Phase B: engine reason queries, clock checked before each one.
+    def within_time() -> bool:
+        return clock() - analysis_start < analysis_seconds
+
+    for i in pending:
+        m, identity, targets, truncated, _ = per[i]
+        res = None
+        why = f"advisory cap reached ({max_advisories} per scan)"
+        if i < max_advisories:
+            res = derive_reason(ctx, targets, within_time, clock)
+            why = f"analysis time cap reached ({analysis_seconds:.0f} s)"
+        if res is None:
+            results[i] = _unknown(identity, m, ReasonCode.SCAN_BUDGET, targets=targets, truncated=truncated,
+                                  detail=f"not analysed: {why}")
+        else:
+            results[i] = _unknown(identity, m, res.code, targets=targets, detail=res.detail,
+                                  partial=res.partial_path, truncated=truncated)
+    findings = [results[i] for i in range(len(per))]
     query_seconds = clock() - t_query
     return findings, {"gaps": gaps, "queries": ctx.queries, "query_seconds_list": ctx.query_seconds}, targets_seconds, query_seconds
