@@ -5,7 +5,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class Gap:
-    kind: str  # no_wheel, unparsed_file, skipped_symlink, budget, collision, dist_error, excluded_dir
+    kind: str  # no_wheel, unparsed_file, skipped_symlink, budget, collision, dist_error, excluded_dir, unreadable_path
     dist: str | None
     detail: str
 
