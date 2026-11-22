@@ -22,7 +22,7 @@ from reachability.scan.reasons import ReasonCode  # noqa: E402
 
 
 def _target(node_id, module, qual):
-    return Target(node_id, module, qual, 0, "d/x.py", 1, "changed")
+    return Target(node_id, module, qual, 0, "d/x.py", 1, "changed", "high")
 
 
 def _combined(tmp_path, app_files, lib_files):

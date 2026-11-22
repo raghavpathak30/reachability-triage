@@ -12,7 +12,7 @@ from reachability.scan.fetch import Fetcher, FetchBudget, fetch_dist, fetch_dist
 from reachability.scan.inventory import TARGET_ENV, Status, build_inventory
 from reachability.scan.lock_wheels import read_lock_wheels
 from reachability.scan.models import FetchedDist, Finding, Gap, ScanResult, Target
-from reachability.scan.query import QueryContext, derive_reason, exact_lookup, make_context
+from reachability.scan.query import QueryContext, derive_reason, exact_lookup, format_path, make_context, unconfirmed_lookup
 from reachability.scan.reasons import EvidenceLevel, ReasonCode
 from reachability.scan.targets import (
     diff_symbols,
@@ -328,13 +328,25 @@ def _analyse(matches, snapshot, fetched, fix_fetched, combined: CombinedIndex, c
         else:
             try:
                 hit = exact_lookup(ctx, targets)
+                weak = None if hit is not None else unconfirmed_lookup(ctx, targets)
             except Exception as exc:
                 results[i] = failed(m, identity, exc, "exact lookup", targets, truncated)
                 continue
             if hit is not None:
                 results[i] = _proven(identity, m, hit, targets, truncated)
             else:
-                pending.append(i)
+                if weak is None:
+                    pending.append(i)
+                else:
+                    results[i] = _unknown(
+                        identity, m, ReasonCode.PATH_TO_UNCONFIRMED_TARGET, targets=targets, truncated=truncated,
+                        partial=weak.path,
+                        detail=(
+                            f"Your code calls `{weak.target.node_id}`, but the advisory does not both name it "
+                            "and change it in the fix, so we do not claim the vulnerable function is reached: "
+                            f"`{format_path(weak.path)}`."
+                        ),
+                    )
 
     # Phase B: engine reason queries, clock checked before each one.
     # The advisory cap counts only advisories that still need a query.

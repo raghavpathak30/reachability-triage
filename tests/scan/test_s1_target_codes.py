@@ -21,7 +21,7 @@ def _scan(tmp_path, wheels, adv=None, pins=None, app=APP_CALLS_F):
         app_files={"main.py": app},
         pins=pins or {"lib": "1.0"},
         wheels=wheels,
-        advisories=[adv or advisory("GHSA-aaaa-bbbb-cccc", "lib")],
+        advisories=[adv or advisory("GHSA-aaaa-bbbb-cccc", "lib", details="")],
     )
 
 

@@ -15,12 +15,16 @@ LIB_NEW = "def f(x):\n    return x + 2\n\n\ndef helper():\n    return 0\n"
 APP_CALLS_F = "from lib.core import f\n\n\ndef main():\n    return f(1)\n\n\nif __name__ == '__main__':\n    main()\n"
 
 
-def advisory(adv_id, dist, fixed="2.0", summary="synthetic", aliases=()):
+DEFAULT_DETAILS = "The function `f()` is vulnerable."
+
+
+def advisory(adv_id, dist, fixed="2.0", summary="synthetic", aliases=(), details=DEFAULT_DETAILS):
     events = [{"introduced": "0"}] + ([{"fixed": fixed}] if fixed else [])
     return {
         "id": adv_id,
         "aliases": list(aliases),
         "summary": summary,
+        "details": details,
         "affected": [
             {"package": {"name": dist, "ecosystem": "PyPI"}, "ranges": [{"type": "ECOSYSTEM", "events": events}]}
         ],

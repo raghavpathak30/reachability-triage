@@ -53,10 +53,11 @@ class ExactHit:
     path: list[PathEdge]
 
 
-def exact_lookup(ctx: QueryContext, targets: list[Target]) -> ExactHit | None:
-    """The target's exact node id must be reached by the confident-edge BFS."""
+def _lookup(ctx: QueryContext, targets: list[Target], confidence: str) -> ExactHit | None:
     best: tuple[tuple[int, int, str], ExactHit] | None = None
     for t in targets:
+        if t.confidence != confidence:
+            continue
         if t.node_id in ctx.paths_non_test:
             verdict, edges = "reachable", ctx.paths_non_test[t.node_id]
         elif t.node_id in ctx.paths_test:
@@ -69,6 +70,20 @@ def exact_lookup(ctx: QueryContext, targets: list[Target]) -> ExactHit | None:
         if best is None or rank < best[0]:
             best = (rank, ExactHit(verdict, t, to_path(ctx, edges)))
     return best[1] if best else None
+
+
+def exact_lookup(ctx: QueryContext, targets: list[Target]) -> ExactHit | None:
+    """A high target's exact node id must be reached by the confident-edge BFS."""
+    return _lookup(ctx, targets, "high")
+
+
+def unconfirmed_lookup(ctx: QueryContext, targets: list[Target]) -> ExactHit | None:
+    """Same lookup over medium targets: a path exists but the target is not named and changed."""
+    return _lookup(ctx, targets, "medium")
+
+
+def format_path(path: list[PathEdge]) -> str:
+    return "; ".join(f"{e.file}:{e.lineno} {e.caller} -> {e.callee}" for e in path)
 
 
 def _clean(ctx: QueryContext, text: str) -> str:
