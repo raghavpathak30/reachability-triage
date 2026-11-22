@@ -129,6 +129,8 @@ def run_scan(
             gaps.extend(stats_extra.pop("gaps"))
             combined_modules = len(combined.index.report.modules)
             combined_edges = len(combined.index.edges)
+            link_counts = dict(combined.link_counts)
+            link_seconds = combined.link_seconds
         finally:
             combined.close()
     finally:
@@ -159,6 +161,9 @@ def run_scan(
         "wheels_no_wheel": sum(1 for fd in fetched.dists.values() if fd.status == "no_wheel"),
         "combined_modules": combined_modules,
         "combined_edges": combined_edges,
+        "link_edges": link_counts,
+        "link_edges_total": sum(link_counts.values()),
+        "link_seconds": link_seconds,
         "queries": stats_extra["queries"],
         "query_seconds_median": statistics.median(qs) if qs else 0.0,
         "query_seconds_max": max(qs) if qs else 0.0,

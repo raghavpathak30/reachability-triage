@@ -1,12 +1,15 @@
 import os
 import shutil
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from reachability.index.discovery import EXCLUDED_DIR_NAMES
 from reachability.scan.inventory import ScanError
+from reachability.scan.link import compute_link_edges
 from reachability.scan.models import Gap
+from reachability.scan.textsafe import strip_control_line
 from reachability.scan.wheel_extract import preparse_error
 from reachability.triage.index_adapter import IndexBuildError, RepoIndex, build_repo_index
 
@@ -91,6 +94,9 @@ class CombinedIndex:
     origin: dict[str, str]  # combined-relative posix path -> "app" or dist name
     display: dict[str, str]  # combined-relative posix path -> output path
     gaps: list[Gap] = field(default_factory=list)
+    link_edges: list = field(default_factory=list)
+    link_counts: dict[str, int] = field(default_factory=dict)
+    link_seconds: float = 0.0
 
     def close(self) -> None:
         shutil.rmtree(self.root, ignore_errors=True)
@@ -206,7 +212,29 @@ def _assemble(app_dir: Path, dists: dict[str, Path], tmp_parent: Path | None) ->
     return state
 
 
+def attach_links(state: CombinedIndex) -> None:
+    """Run the link step; a failure becomes a Gap{link_error} and the scan has no link edges."""
+    start = time.monotonic()
+    try:
+        result = compute_link_edges(state.index.report, state.index.symbol_index, state.index.edges)
+        state.link_edges = list(result.edges)
+        state.link_counts = dict(result.per_rule_counts)
+    except Exception as exc:  # noqa: BLE001 - the link step must never end the scan
+        state.link_edges = []
+        state.link_counts = {}
+        state.gaps.append(Gap("link_error", None, strip_control_line(f"link step: {type(exc).__name__}: {exc}")))
+    state.link_seconds = time.monotonic() - start
+
+
 def build_combined(
+    app_dir: Path, dists: dict[str, Path], tmp_parent: Path | None = None
+) -> CombinedIndex:
+    state = _build_indexed(app_dir, dists, tmp_parent)
+    attach_links(state)
+    return state
+
+
+def _build_indexed(
     app_dir: Path, dists: dict[str, Path], tmp_parent: Path | None = None
 ) -> CombinedIndex:
     """Combined index of the app plus every dist; a dist whose files break the index is dropped.

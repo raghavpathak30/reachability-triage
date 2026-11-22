@@ -20,12 +20,14 @@ class QueryContext:
     paths_test: dict[str, list[CallEdge]]
     queries: int = 0
     query_seconds: list[float] = field(default_factory=list)
+    edges: list = field(default_factory=list)
 
 
 def make_context(combined: CombinedIndex) -> QueryContext:
     app_modules = combined.app_modules
     entrypoints = [ep for ep in combined.index.entrypoints if ep.module in app_modules]
-    by_caller = _build_by_caller(combined.index.edges)
+    all_edges = combined.index.edges + combined.link_edges
+    by_caller = _build_by_caller(all_edges)
     non_test = list(dict.fromkeys(ep.node_id for ep in entrypoints if not ep.is_test))
     test = list(dict.fromkeys(ep.node_id for ep in entrypoints if ep.is_test))
     return QueryContext(
@@ -34,6 +36,7 @@ def make_context(combined: CombinedIndex) -> QueryContext:
         by_caller,
         _bfs(non_test, by_caller, allow_low=False),
         _bfs(test, by_caller, allow_low=False),
+        edges=all_edges,
     )
 
 
@@ -110,7 +113,8 @@ def derive_reason(
             return None
         start = clock() if clock else 0.0
         result = compute_reachability(
-            t.module, t.qualname.split(".")[-1], ctx.entrypoints, ctx.combined.index.edges, ctx.combined.index.report
+            t.module, t.qualname.split(".")[-1], ctx.entrypoints, ctx.edges or ctx.combined.index.edges,
+            ctx.combined.index.report
         )
         ctx.queries += 1
         if clock:
