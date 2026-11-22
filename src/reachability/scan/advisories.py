@@ -55,6 +55,8 @@ class Record:
     aliases: tuple[str, ...]
     affected: tuple[AffectedEntry, ...]
     cwe_ids: tuple[str, ...] = ()
+    summary: str = ""
+    details: str = ""
 
 
 @dataclass(frozen=True)
@@ -335,6 +337,13 @@ def _opt_str_list(member: str, field: str, value: object) -> tuple[str, ...]:
     return tuple(value)
 
 
+_TEXT_CAP = 64 * 1024
+
+
+def _text_or_empty(value: object) -> str:
+    return value[:_TEXT_CAP] if isinstance(value, str) else ""
+
+
 def _opt_dict(member: str, field: str, value: object) -> dict:
     if value is None:
         return {}
@@ -390,6 +399,8 @@ def _reduce(raw: dict, member: str = "?") -> Record:
         _opt_str_list(member, "'aliases'", raw.get("aliases")),
         tuple(entries),
         cwe,
+        _text_or_empty(raw.get("summary")),
+        _text_or_empty(raw.get("details")),
     )
 
 

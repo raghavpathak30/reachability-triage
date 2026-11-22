@@ -23,6 +23,7 @@ class ReasonCode(str, Enum):
     NO_CANDIDATE = "NO_CANDIDATE"
     NO_WHEEL = "NO_WHEEL"
     SCAN_BUDGET = "SCAN_BUDGET"
+    PATH_TO_UNCONFIRMED_TARGET = "PATH_TO_UNCONFIRMED_TARGET"
 
 
 class EvidenceLevel(str, Enum):
@@ -51,6 +52,7 @@ ALLOWED_LEVELS: dict[ReasonCode, frozenset[EvidenceLevel]] = {
     ReasonCode.NO_CANDIDATE: frozenset({_NO_SYMBOL}),
     ReasonCode.NO_WHEEL: frozenset({_NO_SYMBOL}),
     ReasonCode.SCAN_BUDGET: frozenset({_IMPORTED, _NO_SYMBOL}),
+    ReasonCode.PATH_TO_UNCONFIRMED_TARGET: frozenset({_IMPORTED}),
 }
 
 # Codes S1 can produce (the other registry codes are S2a's).
