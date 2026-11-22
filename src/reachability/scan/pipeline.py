@@ -16,6 +16,7 @@ from reachability.scan.query import QueryContext, derive_reason, exact_lookup, m
 from reachability.scan.reasons import EvidenceLevel, ReasonCode
 from reachability.scan.targets import (
     diff_symbols,
+    named_names,
     non_py_changed,
     resolve_targets,
     symbols_from_tables,
@@ -284,7 +285,10 @@ def _analyse(matches, snapshot, fetched, fix_fetched, combined: CombinedIndex, c
                         f"not analysed: analysis time cap reached ({analysis_seconds:.0f} s)")
         try:
             diff = diff_symbols(installed, fixed[0])
-            targets, truncated = resolve_targets(diff.changes, installed, combined, dist)
+            text = "\n".join(
+                f"{r.summary}\n{r.details}" for r in (snapshot.records.get(i) for i in m.ids) if r is not None
+            )
+            targets, truncated = resolve_targets(diff.changes, installed, combined, dist, named_names(text))
             native = (
                 not targets and not diff.py_changed and non_py_changed(fd.root, fixed[1])
             )

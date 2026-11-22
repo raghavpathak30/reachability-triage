@@ -1,5 +1,6 @@
 import ast
 import copy
+import re
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -164,24 +165,81 @@ def non_py_changed(old_tree: Path, new_tree: Path) -> bool:
     return _record_non_py(old_tree) != _record_non_py(new_tree)
 
 
+_IDENT = r"[A-Za-z_][A-Za-z0-9_]*"
+_SPAN = re.compile(r"`([^`\n]+)`")
+_DOTTED_OR_NAME = re.compile(rf"{_IDENT}(?:\.{_IDENT})*")
+
+
+@dataclass(frozen=True)
+class NamedSet:
+    simple: frozenset[str] = frozenset()
+    dotted: frozenset[str] = frozenset()
+
+    def matches(self, module: str, qualname: str) -> bool:
+        qual = _strip(qualname)
+        if qual.rsplit(".", 1)[-1] in self.simple:
+            return True
+        if "." in qual and qual in self.dotted:
+            return True
+        return f"{module}.{qual}" in self.dotted
+
+
+def named_names(text: str) -> NamedSet:
+    """Code-form tokens of advisory text (v0: backticked identifiers and dotted chains only)."""
+    simple: set[str] = set()
+    dotted: set[str] = set()
+    for line in text.splitlines():
+        for span in _SPAN.findall(line):
+            body = re.sub(r"\(.*\)$", "", span.strip())
+            if not _DOTTED_OR_NAME.fullmatch(body):
+                continue
+            (dotted if "." in body else simple).add(body)
+    return NamedSet(frozenset(simple), frozenset(dotted))
+
+
+_CHANGE_RANK = {"changed": 0, "removed": 1, "unchanged": 2}
+
+
 def resolve_targets(
     changes: list[tuple[Key, str]],
     installed: SymbolSet,
     combined: CombinedIndex,
     dist: str,
+    named: NamedSet | None = None,
 ) -> tuple[list[Target], bool]:
-    """Changed/removed symbols present in the installed index and owned by dist, capped at 20."""
+    """Changed/removed (and named) symbols present in the installed index and owned by dist.
+
+    High confidence = named in code form AND changed or removed. All high targets come first;
+    the cap is applied after that ordering.
+    """
     origins = combined.module_origins()
+    named = named or NamedSet()
     targets: list[Target] = []
-    for key, kind in changes:
-        if kind == "added":
-            continue
+    seen: set[Key] = set()
+
+    def add(key: Key, kind: str) -> None:
         module, qual, ordinal = key
         sym = installed.defs.get(key)
-        if sym is None or origins.get(module) != dist:
-            continue
+        if sym is None or origins.get(module) != dist or key in seen:
+            return
+        seen.add(key)
+        is_named = named.matches(module, qual)
+        high = is_named and kind in ("changed", "removed")
         targets.append(
-            Target(sym.node_id, module, qual, ordinal, combined.display_path(sym.file), sym.lineno, kind)
+            Target(
+                sym.node_id, module, qual, ordinal, combined.display_path(sym.file), sym.lineno, kind,
+                "high" if high else "medium", is_named,
+            )
         )
-    targets.sort(key=lambda t: (t.changed != "changed", t.module, t.qualname, t.ordinal))
+
+    for key, kind in changes:
+        if kind != "added":
+            add(key, kind)
+    changed_keys = {key for key, _ in changes}
+    for key in installed.defs:
+        if key not in changed_keys and not is_test_module(key[0]) and named.matches(key[0], key[1]):
+            add(key, "unchanged")
+    targets.sort(
+        key=lambda t: (t.confidence != "high", _CHANGE_RANK[t.changed], t.module, t.qualname, t.ordinal)
+    )
     return targets[:MAX_TARGETS], len(targets) > MAX_TARGETS
