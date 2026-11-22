@@ -700,6 +700,8 @@ in `tests/fixtures/app_scan/advisories/synthetic/`. Their ids start
 **Amendment record:** G3 changed from R §9's "≥ 4 of 5 direct import-resolved
 calls" to the rule above (critique M1/M3), before any run, on 2026-11-12.
 
+2026-11-22 (DECISIONS §30 item 3, before any S3 run): `PATH_TO_UNCONFIRMED_TARGET` is added to the allowed reason_code sets of E1r, E3 and E6.
+
 ## 5. Decisions (recorded 2026-11-12, Raghav)
 
 | # | Decision |
