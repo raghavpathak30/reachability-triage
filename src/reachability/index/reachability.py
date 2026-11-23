@@ -285,4 +285,10 @@ def compute_reachability(
     edges: list[CallEdge],
     report: DiscoveryReport,
 ) -> ReachabilityResult:
+    """One-target wrapper over ReachabilityBatch.query, which holds steps 1-6.
+
+    The four unknown outcomes, in order: no entrypoints (Verdict.UNKNOWN, step 0),
+    low-confidence path (Verdict.UNKNOWN, step 3), reachable opaque call (Verdict.UNKNOWN,
+    step 4), name escape (Verdict.UNKNOWN, step 5).
+    """
     return compute_reachability_batch([(target_module, target_symbol)], entrypoints, edges, report)[0]
