@@ -294,7 +294,7 @@ class _Linker:
             if final.kind == NodeKind.CLASS:
                 init = self.class_init(final)
                 if init is not None:
-                    self.add(edge.caller_id, init.node_id, edge.file, edge.lineno, LinkRule.SUBMODULE_ATTR)
+                    self.add(edge.caller_id, init.node_id, edge.file, edge.lineno, LinkRule.CONSTRUCTOR_INIT)
             return
 
     @staticmethod
