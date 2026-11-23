@@ -1718,4 +1718,21 @@ Recorded before any S1.6 code and before the S1.6 open-webui run. Items 1-5 are 
 
 ### Results
 
-(Filled in after the S1.6 open-webui run; items 1-5 above are not edited.)
+Run 23 Nov 2026 on HEAD `fd6b914` (code loop closed: round-2 critic clean, reviewer MERGE). open-webui at `b0e6098`, same snapshot (reference sha), lock and warm wheel cache as S1.5; fix-commit diffs fetched live from github.com. Nothing was tuned. Outputs, analysis scripts and the fetched diffs: `~/reachability-research/s16-2026-11-23/` (with `SHA256SUMS`; `s16-open-webui.json` sha256 `a6c82be8…1111`).
+
+- Run: exit 0, wall 185.9 s, peak RSS 947,300 KB. Timings: fetch 13.4 s, fix-commit prefetch 46.7 s (outside the analysis clock), combine 67.6 s, targets 41.9 s, queries 14.7 s (batch setup 13.4 s; 1,020 per-target queries, median 1.3 ms).
+- Fix commits: 88 advisories have at least one usable commit (same repo as PACKAGE); 74 diffs fetched, 69 served, 5 `fix_commit_unavailable` gaps, all `HTTP 403` and all pypdf (the known PDF-header coverage gap of item 3; 06593f9, 6427025, a93fe3a, ea4ac66, f176db1). No diff-budget cut. 160 hunks attributed, 306 dropped (not located exactly once, either side, bad header, module level or class body). 52 advisories have a non-empty fix_changed set (stat `fix_advisories_attributed`, `pipeline.py:376-377`); 45 findings carry at least one `in_fix_commit` target after the 20-target cap and 25 at least one `high` target.
+- Findings: 103 = 2 `reachable` (`path_proven`) + 101 `unknown`. Reasons: `LOW_CONFIDENCE_PATH` 57, `NO_FIX_VERSION` 24, `PATH_TO_UNCONFIRMED_TARGET` 17, `NO_WHEEL` 2, `NATIVE_ONLY_CHANGE` 1. `SCAN_BUDGET` 0, `link_error` 0, verdict `not_reachable` 0. Gaps: `budget` 142, `no_wheel` 15, `fix_commit_unavailable` 5, `unparsed_file` 1, `excluded_dir` 1.
+- Pre-registered pairs:
+  - GHSA-3w57: `path_proven`, final callee `anyio._core._subprocesses:open_process`, high and `in_fix_commit` (eb562e6); the only high target (the backend method `AsyncIOBackend.open_process` is no longer named by the bare token). Path identical to §30 Results. **Pass.**
+  - GHSA-w6j9: `path_proven`, final callee `jwt.api_jwk:PyJWK.__init__`, high and `in_fix_commit` (8915570). Path identical to §30 Results. **Pass.**
+  - GHSA-9j54: `unknown` / `PATH_TO_UNCONFIRMED_TARGET` (high target `PyJWS._verify_signature` from f91ed44 is not reached; partial path ends at medium `PyJWKSet.from_dict`). Allowed.
+  - GHSA-pxh4: `unknown` / `PATH_TO_UNCONFIRMED_TARGET` (high target `HMACAlgorithm.from_jwk` from af8181c not reached; partial path ends at medium `PyJWK.__init__`). Allowed.
+  - GHSA-jhr6: `unknown` / `LOW_CONFIDENCE_PATH`; no high target (the text names `import_module_class` only in prose, and the class `SentenceTransformer` is no longer a target). Allowed.
+  - GHSA-5849, GHSA-4vqv, GHSA-x3rh (pypdf): `unknown` / `LOW_CONFIDENCE_PATH`, fix diffs HTTP 403. As expected.
+  - black GHSA-cg8m: `unknown` / `PATH_TO_UNCONFIRMED_TARGET` (ac1f715 changes no wheel module). As expected.
+- Every `path_proven`, hand-checked against its own fix commit: only the two above; both final callees are the functions their fix commits change (Do 0 hunk check), and every link hop on both paths is the one verified in §30 Results. No other `path_proven`; nothing unverified.
+- **Pivot rule, applied as committed:** both expected pairs pass and there are zero wrong-function `path_proven` findings → **continue plan A′ (S2a next).** The three S1.5 wrong-function claims (GHSA-9j54, GHSA-pxh4, GHSA-jhr6) are gone.
+- Eval rows (item 5): E1b `path_proven` to `open_process` (G3 hard, pass); E1 `unknown` / `PATH_TO_UNCONFIRMED_TARGET`, partial path ending at `_url_to_size`.
+- Comparison runs (S1.5 in brackets): flaskr exit 0, 6.4 s, 0 findings [0], 140 / 10,546 [same], `path_proven` 0 [0]; FastAPI template exit 0, 23.6 s, 0 findings [0], 2,157 / 115,885 [same], 13 gaps [13], `path_proven` 0 [0].
+- **Residual limits** (known, not tuned; the control is the hand-check of every `path_proven` against its own fix commit): (a) comment-, docstring- and blank-only changed lines count as a change of the enclosing function; (b) a referenced commit that is not the fix (an introducing or unrelated commit) whose hunks still apply to both wheels would count; (c) a fix commit whose `+` side was changed again before the release no longer locates in the fixed wheel and loses its high target (seen: jhr6 626eb60); (d) github.com refuses `.diff` for commits containing PDF/PS header bytes (all five pypdf commits here).
