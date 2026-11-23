@@ -25,6 +25,9 @@ class SymDef:
     file: Path
     lineno: int
     shape: str
+    end_lineno: int = 0
+    kind: NodeKind = NodeKind.FUNCTION
+    start_lineno: int = 0  # first line of the def, decorators included
 
 
 def _strip(qualname: str) -> str:
@@ -106,7 +109,11 @@ def symbols_from_tables(tables: dict[str, ModuleSymbolTable], modules: set[str] 
             ordinal = counts.get(qual, 0)
             counts[qual] = ordinal + 1
             key = (module, qual, ordinal)
-            defs[key] = SymDef(key, node.node_id, node.file, node.lineno, _shallow_shape(ast_node))
+            start = min([d.lineno for d in ast_node.decorator_list] + [ast_node.lineno])
+            defs[key] = SymDef(
+                key, node.node_id, node.file, node.lineno, _shallow_shape(ast_node),
+                ast_node.end_lineno or node.lineno, node.kind, start,
+            )
     return SymbolSet(defs, shapes)
 
 
