@@ -114,9 +114,6 @@ def _find_match(paths: dict[str, list[CallEdge]], target_module: str, target_sym
     return None
 
 
-_OPAQUE_IDS = {"?:<dynamic>", "ext:builtins.eval", "ext:builtins.exec"}
-
-
 class ReachabilityBatch:
     """Target-independent work (D3 name set, by_caller, three BFS runs, opaque hit) done once.
 
@@ -166,7 +163,14 @@ class ReachabilityBatch:
 
     def _opaque_hit(self) -> str | None:
         paths = self._paths_any()
-        return self._once("opaque", lambda: next((oid for oid in _OPAQUE_IDS if oid in paths), None))
+
+        def find() -> str | None:
+            # Built exactly as the single-target function did, so a tie between opaque ids
+            # resolves the same way.
+            opaque_ids = {"?:<dynamic>", "ext:builtins.eval", "ext:builtins.exec"}
+            return next((oid for oid in opaque_ids if oid in paths), None)
+
+        return self._once("opaque", find)
 
     def prepare(self) -> None:
         """Force every target-independent computation now, so callers can time it separately."""

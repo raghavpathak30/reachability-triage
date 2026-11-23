@@ -359,3 +359,36 @@ def test_batch_results_have_independent_path_lists(tmp_path):
     a.path.clear()
     c.path.clear()
     assert b.path and d.path
+
+
+def test_batch_parity_materialized_e1_every_target(tmp_path):
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    import materialize_scan_fixture as mat
+
+    from reachability.scan.combined import build_combined
+    from reachability.scan.fetch import LocalDirFetcher, fetch_dists
+    from reachability.scan.query import make_context
+
+    r = mat.materialize_e1(tmp_path / "m")
+    res = fetch_dists([("langchain-openai", "1.1.13")], LocalDirFetcher(r["wheels"]), tmp_path / "s")
+    c = build_combined(r["app"], {"langchain-openai": res.dists[("langchain-openai", "1.1.13")].root})
+    try:
+        ctx = make_context(c)
+        idx = c.index
+        edges = idx.edges + c.link_edges
+        targets = []
+        for module, table in idx.symbol_index.items():
+            targets.append((module, None))
+            for node in table.nodes:
+                if node.kind in (NodeKind.FUNCTION, NodeKind.ASYNCFUNCTION, NodeKind.METHOD, NodeKind.CLASS):
+                    targets.append((module, node.qualname.rsplit(".", 1)[-1].split("@")[0]))
+        targets = list(dict.fromkeys(targets))
+        assert len(targets) > 5 and ctx.entrypoints
+        batch = compute_reachability_batch(targets, ctx.entrypoints, edges, idx.report)
+        for (module, symbol), got in zip(targets, batch):
+            want = _frozen_compute_reachability(module, symbol, ctx.entrypoints, edges, idx.report)
+            assert got == want, (module, symbol)
+    finally:
+        c.close()
