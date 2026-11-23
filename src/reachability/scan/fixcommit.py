@@ -13,8 +13,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from reachability.index.symbol_models import NodeKind
 from reachability.scan.advisories import Record
+from reachability.scan.combined import wheel_top_level_files
 from reachability.scan.models import Gap
+from reachability.scan.targets import Key, SymbolSet
 from reachability.scan.textsafe import strip_control_line
 
 OWNER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}")
@@ -351,4 +354,157 @@ def parse_diff(text: str, counters: dict[str, int] | None = None) -> list[FileDi
             counters["too_many_hunks"] = counters.get("too_many_hunks", 0) + len(hunks) - MAX_HUNKS_PER_DIFF
             hunks = hunks[:MAX_HUNKS_PER_DIFF]
         out.append(FileDiff(new, tuple(hunks)))
+    return out
+
+
+# ---- attribution --------------------------------------------------------------------------
+
+FIX_KINDS = frozenset({NodeKind.FUNCTION, NodeKind.ASYNCFUNCTION, NodeKind.METHOD})
+
+
+def _bump(counters: dict[str, int], name: str, n: int = 1) -> None:
+    counters[name] = counters.get(name, 0) + n
+
+
+def _module_of(rel: str) -> str:
+    parts = rel[: -len(".py")].split("/")
+    if parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(parts)
+
+
+def map_path(diff_path: str, rels: list[str], counters: dict[str, int]) -> str | None:
+    """The wheel file a diff path refers to: unique longest common path suffix, on `/` boundaries."""
+    d = diff_path.split("/")
+    best, best_len, tie = None, 0, False
+    for rel in rels:
+        c = rel.split("/")
+        n = 0
+        while n < min(len(c), len(d)) and c[-1 - n] == d[-1 - n]:
+            n += 1
+        if n == 0:
+            continue
+        if n > best_len:
+            best, best_len, tie = rel, n, False
+        elif n == best_len:
+            tie = True
+    if best is None:
+        _bump(counters, "files_unmapped")
+        return None
+    if tie:
+        _bump(counters, "files_suffix_tie")
+        return None
+    if best_len == 1 and d not in ([best], ["src", best]):
+        _bump(counters, "files_one_segment")
+        return None
+    return best
+
+
+def _prepare(text: str) -> list[str]:
+    return [line.rstrip() for line in split_lines(text)]
+
+
+def _index(lines: list[str]) -> dict[str, list[int]]:
+    idx: dict[str, list[int]] = {}
+    for n, line in enumerate(lines):
+        idx.setdefault(line, []).append(n)
+    return idx
+
+
+def locate(lines: list[str], idx: dict[str, list[int]], side: list[str]) -> int | None:
+    """Start of `side` as consecutive lines, only if it occurs exactly once."""
+    if not side:
+        return None
+    found: int | None = None
+    for start in idx.get(side[0], ()):
+        if lines[start : start + len(side)] == side:
+            if found is not None:
+                return None
+            found = start
+    return found
+
+
+def _innermost(defs: list, lineno: int):
+    cover = [d for d in defs if d.start_lineno <= lineno <= d.end_lineno]
+    return max(cover, key=lambda d: (d.start_lineno, -d.end_lineno), default=None)
+
+
+def _common(defs: list, a: int, b: int):
+    cover = [d for d in defs if d.start_lineno <= a <= d.end_lineno and d.start_lineno <= b <= d.end_lineno]
+    return max(cover, key=lambda d: (d.start_lineno, -d.end_lineno), default=None)
+
+
+def _attribute(hunk: Hunk, start: int, defs: list) -> set[Key]:
+    """Changed lines of one located hunk, in installed coordinates, to function/method keys."""
+    out: set[Key] = set()
+    removed_pos = [start + k for k in range(len(hunk.removed_side))]
+    items = hunk.items
+    pos = 0  # index into removed side consumed so far
+    for n, (op, _text) in enumerate(items):
+        if op == " ":
+            pos += 1
+        elif op == "-":
+            d = _innermost(defs, start + pos + 1)
+            if d is not None and d.kind in FIX_KINDS:
+                out.add(d.key)
+            pos += 1
+        else:
+            lo = n
+            while lo > 0 and items[lo - 1][0] != " ":
+                lo -= 1
+            hi = n
+            while hi + 1 < len(items) and items[hi + 1][0] != " ":
+                hi += 1
+            if any(o == "-" for o, _ in items[lo : hi + 1]):
+                continue  # a replacement: its `-` lines already name the function
+            if pos == 0 or pos >= len(removed_pos):
+                continue
+            d = _common(defs, removed_pos[pos - 1] + 1, removed_pos[pos] + 1)
+            if d is not None and d.kind in FIX_KINDS:
+                out.add(d.key)
+    return out
+
+
+def fix_changed(
+    diffs: list[FileDiff],
+    installed_tree: Path,
+    fixed_tree: Path,
+    installed: SymbolSet,
+    counters: dict[str, int],
+) -> set[Key]:
+    """Installed functions and methods changed by hunks that apply to both the installed and fixed wheel."""
+    inst_files = dict(wheel_top_level_files(installed_tree))
+    fixed_files = dict(wheel_top_level_files(fixed_tree))
+    by_module: dict[str, list] = {}
+    for sym in installed.defs.values():
+        by_module.setdefault(sym.key[0], []).append(sym)
+    out: set[Key] = set()
+    rels = sorted(inst_files)
+    for fd in diffs:
+        rel = map_path(fd.path, rels, counters)
+        if rel is None:
+            continue
+        try:
+            ilines = _prepare(inst_files[rel].read_bytes().decode("utf-8", "replace"))
+            flines = _prepare(fixed_files[rel].read_bytes().decode("utf-8", "replace")) if rel in fixed_files else None
+        except OSError:
+            _bump(counters, "files_unreadable")
+            continue
+        iidx = _index(ilines)
+        fidx = _index(flines) if flines is not None else {}
+        defs = by_module.get(_module_of(rel), [])
+        for hunk in fd.hunks:
+            if counters.get("hunks_seen", 0) >= MAX_HUNKS_PER_SCAN:
+                _bump(counters, "hunks_dropped")
+                _bump(counters, "hunks_over_budget")
+                continue
+            _bump(counters, "hunks_seen")
+            at = locate(ilines, iidx, hunk.removed_side)
+            applies = flines is not None and locate(flines, fidx, hunk.added_side) is not None
+            if at is None or not applies:
+                _bump(counters, "hunks_dropped")
+                continue
+            keys = _attribute(hunk, at, defs)
+            _bump(counters, "hunks_attributed" if keys else "hunks_dropped")
+            out |= keys
     return out
