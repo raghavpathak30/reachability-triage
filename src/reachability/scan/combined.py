@@ -51,11 +51,15 @@ def find_app_files(app_dir: Path, gaps: list[Gap]) -> list[AppFile]:
             if packaged or (d / "__init__.py").is_file():
                 return False
             children = sorted(os.scandir(d), key=lambda e: e.name)
-            return any(
-                c.is_dir(follow_symlinks=False) and (Path(c.path) / "__init__.py").is_file() for c in children
-            )
         except OSError:
             return False
+        for c in children:
+            try:
+                if c.is_dir(follow_symlinks=False) and (Path(c.path) / "__init__.py").is_file():
+                    return True
+            except OSError:
+                continue  # an unreadable child is skipped here; walk() records its own Gap
+        return False
 
     def walk(d: Path, root: Path, packaged: bool) -> None:
         try:
