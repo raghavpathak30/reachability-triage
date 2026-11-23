@@ -213,7 +213,8 @@ def named_names(text: str) -> NamedSet:
             continue
         rest = []
         last = 0
-        for m in _SPAN.finditer(line):
+        spans = [] if line.count("`") % 2 else list(_SPAN.finditer(line))
+        for m in spans:
             rest.append(line[last:m.start()])
             last = m.end()
             span = m.group(1)
