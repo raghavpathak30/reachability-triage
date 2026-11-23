@@ -185,9 +185,9 @@ class NamedSet:
         return f"{module}.{qual}" in self.dotted
 
 
-_CALL = re.compile(rf"(?<![\w.\]])({_IDENT})\((?!(?:s|es)\))")
-_CHAIN = re.compile(rf"(?<![\w.\]])({_IDENT}(?:\.{_IDENT})+)(?!\w)")
-_CALL_SUFFIX = re.compile(r"\(.*\)$")
+_CALL = re.compile(rf"(?<![\w.\])\]])({_IDENT})\((?!(?:s|es)\))")
+_CHAIN = re.compile(rf"(?<![\w.\])\]])({_IDENT}(?:\.{_IDENT})+)(?!\w)(?!\([^()]*\)\.)")
+_CALL_SUFFIX = re.compile(r"\([^()]*\)$")
 
 
 def _call_and_chain_tokens(text: str) -> set[str]:
