@@ -6,6 +6,7 @@ them duck-typed. They never replace an edge and always point at an existing node
 """
 
 import ast
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from enum import Enum
@@ -44,6 +45,9 @@ class LinkResult:
 
 
 MAX_HOPS = 8
+
+
+_SINGLETON_CANDIDATE = re.compile(rb"(?m)^[A-Za-z_]\w*[ \t]*=[ \t]*[A-Za-z_]\w*[ \t]*\(")
 
 
 def _parse(path: Path) -> ast.Module:
@@ -155,7 +159,8 @@ class _Linker:
         self.records = {m.dotted_name: m for m in report.modules}
         self._trees: dict[str, ast.Module | None] = {}
         self._bindings: dict[str, Counter | None] = {}
-        self._reexport: dict[tuple[str, str], SymbolNode | None] = {}
+        self._aliases: dict[str, dict[str, list]] = {}
+        self._active: str | None = None
         self._calls: dict[str, dict] = {}
         self.low_count: Counter = Counter()
         self.files_parsed = 0
@@ -190,9 +195,33 @@ class _Linker:
 
     def module_bindings(self, module: str) -> Counter | None:
         if module not in self._bindings:
+            had = module in self._trees
             t = self.tree(module)
             self._bindings[module] = _scope_bindings(t) if t is not None else None
+            if not had and module != self._active:
+                self._trees.pop(module, None)
         return self._bindings[module]
+
+    def aliases(self, table, module: str, name: str) -> list:
+        if module not in self._aliases:
+            by_name: dict[str, list] = {}
+            for a in table.aliases:
+                by_name.setdefault(a.local_name, []).append(a)
+            self._aliases[module] = by_name
+        return self._aliases[module].get(name, [])
+
+    def drop(self, module: str) -> None:
+        self._trees.pop(module, None)
+        self._calls.pop(module, None)
+
+    def singleton_candidate(self, module: str) -> bool:
+        rec = self.records.get(module)
+        if rec is None:
+            return False
+        try:
+            return _SINGLETON_CANDIDATE.search(rec.file_path.read_bytes()) is not None
+        except OSError:
+            return False
 
     def reexport_target(self, module: str, name: str) -> SymbolNode | None:
         """Follow a dangling `module:name` through plain-module from-imports (rule b)."""
@@ -206,7 +235,7 @@ class _Linker:
             table = self.report.import_tables.get(mod)
             if table is None or table.star_imports or nm in self.by_module.get(mod, {}):
                 return None
-            aliases = [a for a in table.aliases if a.local_name == nm]
+            aliases = self.aliases(table, mod, nm)
             if len(aliases) != 1:
                 return None
             alias = aliases[0]
@@ -286,7 +315,7 @@ class _Linker:
             return
         for sub_alias in table.aliases:
             sub = sub_alias.local_name
-            if sub_alias.target_symbol != sub or not self.qualifies_from_import(table, sub, bindings):
+            if sub_alias.target_symbol != sub or not self.qualifies_from_import(table, module, sub, bindings):
                 continue
             pkg = sub_alias.resolved_absolute
             if f"{pkg}.{sub}" not in self.records or pkg not in self.records:
@@ -309,9 +338,8 @@ class _Linker:
                     self.add(edge.caller_id, init.node_id, edge.file, edge.lineno, LinkRule.CONSTRUCTOR_INIT)
             return
 
-    @staticmethod
-    def qualifies_from_import(table, name: str, bindings: Counter) -> bool:
-        aliases = [a for a in table.aliases if a.local_name == name]
+    def qualifies_from_import(self, table, module: str, name: str, bindings: Counter) -> bool:
+        aliases = self.aliases(table, module, name)
         return (
             len(aliases) == 1
             and not aliases[0].conditional
@@ -342,9 +370,9 @@ class _Linker:
                 continue
             cls = self.by_module.get(module, {}).get(cname)
             if cls is None:
-                if not self.qualifies_from_import(table, cname, bindings):
+                if not self.qualifies_from_import(table, module, cname, bindings):
                     continue
-                alias = next(a for a in table.aliases if a.local_name == cname)
+                alias = self.aliases(table, module, cname)[0]
                 if alias.target_symbol is None:
                     continue
                 cls = self.resolve_symbol(alias.resolved_absolute, alias.target_symbol)
@@ -379,11 +407,21 @@ class _Linker:
             elif target is not None and target.kind == NodeKind.CLASS:
                 self.constructor(edge, target)
         singleton_cache: dict[str, dict[str, SymbolNode]] = {}
-        for edge in low:
-            module = edge.caller_id.split(":", 1)[0]
+        modules = [e.caller_id.split(":", 1)[0] for e in low]
+        last = {m: i for i, m in enumerate(modules)}
+        candidates = {m: self.singleton_candidate(m) for m in set(modules)}
+        low_modules = set(modules)
+        self._trees = {m: t for m, t in self._trees.items() if m in low_modules}
+        for i, edge in enumerate(low):
+            module = modules[i]
             name = edge.callee_id[2:]
+            self._active = module
             self.rule_d(edge, module, name)
-            self.rule_e(edge, module, name, singleton_cache)
+            if candidates[module]:
+                self.rule_e(edge, module, name, singleton_cache)
+            if last[module] == i:
+                self.drop(module)
+        self._active = None
 
 
 def compute_link_edges(report: DiscoveryReport, symbol_index: dict[str, ModuleSymbolTable], edges) -> LinkResult:
