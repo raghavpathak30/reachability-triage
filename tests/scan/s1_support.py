@@ -23,7 +23,7 @@ DEFAULT_DETAILS = "The function `f()` is vulnerable."
 
 
 def advisory(adv_id, dist, fixed="2.0", summary="synthetic", aliases=(), details=DEFAULT_DETAILS,
-             references=()):
+             references=None):
     events = [{"introduced": "0"}] + ([{"fixed": fixed}] if fixed else [])
     adv = {
         "id": adv_id,
@@ -34,14 +34,16 @@ def advisory(adv_id, dist, fixed="2.0", summary="synthetic", aliases=(), details
             {"package": {"name": dist, "ecosystem": "PyPI"}, "ranges": [{"type": "ECOSYSTEM", "events": events}]}
         ],
     }
+    if references is None:  # synthetic default: a same-repo fix commit, diff supplied by make_scan
+        references = [("PACKAGE", "https://github.com/owner/repo"), ("WEB", f"https://github.com/owner/repo/commit/{SHA}")]
     if references:
         adv["references"] = [{"type": t, "url": u} for t, u in references]
     return adv
 
 
 def with_fix_commit(adv, sha=SHA, repo="owner/repo"):
-    """Add a PACKAGE reference and a WEB commit reference to a synthetic advisory."""
-    refs = adv.setdefault("references", [])
+    """Replace a synthetic advisory's references with a PACKAGE reference and a WEB commit reference."""
+    refs = adv["references"] = []
     refs.append({"type": "PACKAGE", "url": f"https://github.com/{repo}"})
     refs.append({"type": "WEB", "url": f"https://github.com/{repo}/commit/{sha}"})
     return adv
@@ -67,7 +69,10 @@ def make_scan(tmp_path, *, app_files, pins, wheels=None, advisories=(), snapshot
     wheel_dir.mkdir(exist_ok=True)
     for (dist, version), files in (wheels or {}).items():
         mat.build_wheel_zip(dist, version, files, wheel_dir)
-    for key, text in (fix_diffs or {}).items():
+    fix_diffs = dict(fix_diffs or {})
+    if any(f"/commit/{SHA}" in json.dumps(a.get("references", [])) for a in advisories):
+        fix_diffs.setdefault(FIX_KEY, LIB_F_DIFF)
+    for key, text in fix_diffs.items():
         owner, repo, sha = key.split("/")
         d = wheel_dir / "fix-commits" / owner / repo
         d.mkdir(parents=True, exist_ok=True)
@@ -91,6 +96,5 @@ def simple_lib_scan(tmp_path, *, old=LIB_OLD, new=LIB_NEW, app_files=None, extra
         app_files=app_files if app_files is not None else {"main.py": APP_CALLS_F},
         pins={"lib": "1.0"},
         wheels={("lib", "1.0"): lib_files(old, extra_old), ("lib", "2.0"): lib_files(new, extra_new)},
-        advisories=[with_fix_commit(advisory(adv_id, "lib")) if fix else advisory(adv_id, "lib")],
-        fix_diffs={FIX_KEY: LIB_F_DIFF} if fix else None,
+        advisories=[advisory(adv_id, "lib", references=None if fix else ())],
     )

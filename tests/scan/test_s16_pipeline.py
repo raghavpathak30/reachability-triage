@@ -1,4 +1,4 @@
-import json
+import shutil
 
 from reachability.cli import main
 from reachability.scan.fetch import LocalDirFetcher
@@ -62,9 +62,11 @@ def test_stub_fix_changed_end_to_end(tmp_path):
 
 def test_commit_failure_never_raises(tmp_path):
     setup = simple_lib_scan(tmp_path)
-    res = run_scan(setup["app"], setup["snapshot"], setup["sha256"], LocalDirFetcher(setup["wheels"]))
+    shutil.rmtree(setup["wheels"] / "fix-commits")
+    res = run_scan(setup["app"], setup["snapshot"], setup["sha256"], LocalDirFetcher(setup["wheels"]),
+                   diff_fetcher=None)
     (f,) = res.findings
     assert f.verdict == "unknown" and f.reason_code == "PATH_TO_UNCONFIRMED_TARGET"
     gaps = [g for g in res.gaps if g.kind == "fix_commit_unavailable"]
-    assert len(gaps) == 1 and gaps[0].detail == f"owner/repo@{SHA}: no diff source"
+    assert len(gaps) == 1 and gaps[0].detail == f"owner/repo@{SHA}: no local diff"
     assert all(t.confidence == "medium" for t in f.targets)

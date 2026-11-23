@@ -8,20 +8,21 @@ from reachability.scan.fetch import LocalDirFetcher
 from reachability.scan.models import Target
 from reachability.scan.pipeline import run_scan
 from reachability.scan.render import render_json
-from tests.scan.s1_support import APP_CALLS_F, LIB_NEW, LIB_OLD, advisory, lib_files, make_scan
+from tests.scan.s1_support import APP_CALLS_F, FIX_KEY, FIXCOMMITS, LIB_NEW, LIB_OLD, advisory, lib_files, make_scan
 
 
 def _run(s):
     return run_scan(s["app"], s["snapshot"], s["sha256"], LocalDirFetcher(s["wheels"]))
 
 
-def _scan(tmp_path, details, app=APP_CALLS_F, old=LIB_OLD, new=LIB_NEW):
+def _scan(tmp_path, details, app=APP_CALLS_F, old=LIB_OLD, new=LIB_NEW, fix_diffs=None):
     return make_scan(
         tmp_path,
         app_files={"main.py": app},
         pins={"lib": "1.0"},
         wheels={("lib", "1.0"): lib_files(old), ("lib", "2.0"): lib_files(new)},
         advisories=[advisory("GHSA-aaaa-bbbb-cccc", "lib", details=details)],
+        fix_diffs=fix_diffs,
     )
 
 
@@ -59,7 +60,8 @@ def test_high_target_wins_over_shorter_medium_path(tmp_path):
         "from lib.core import f, g\n\n\ndef helper():\n    return g()\n\n\n"
         "def main():\n    f()\n    return helper()\n\n\nif __name__ == '__main__':\n    main()\n"
     )
-    res = _run(_scan(tmp_path, "The function `g()` is vulnerable.", app, old, new))
+    res = _run(_scan(tmp_path, "The function `g()` is vulnerable.", app, old, new,
+                      {FIX_KEY: (FIXCOMMITS / "lib_g.diff").read_text()}))
     f = res.findings[0]
     assert f.verdict == "reachable" and f.evidence_level == "path_proven"
     assert f.path[-1].callee == "lib.core:g" and len(f.path) == 3

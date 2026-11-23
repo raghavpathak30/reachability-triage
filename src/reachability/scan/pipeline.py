@@ -13,12 +13,13 @@ from reachability.scan.fixcommit import (
     DiffFetcher,
     DiffStore,
     FileDiff,
+    LocalDiffDir,
     fix_changed,
     gap_for,
     parse_diff,
     usable_commits,
 )
-from reachability.scan.fetch import Fetcher, FetchBudget, fetch_dist, fetch_dists
+from reachability.scan.fetch import Fetcher, FetchBudget, LocalDirFetcher, fetch_dist, fetch_dists
 from reachability.scan.inventory import TARGET_ENV, Status, build_inventory
 from reachability.scan.lock_wheels import read_lock_wheels
 from reachability.scan.models import FetchedDist, Finding, Gap, ScanResult, Target
@@ -172,6 +173,8 @@ def run_scan(
 
         # fix-commit diffs: fetched here, before the analysis clock starts
         t_fix = clock()
+        if diff_fetcher is None and isinstance(fetcher, LocalDirFetcher):
+            diff_fetcher = LocalDiffDir(fetcher.wheel_dir / "fix-commits")
         fix = FixContext(DiffStore(store, diff_fetcher, clock=clock))
         _prefetch_diffs(report, snapshot, fetched, fix_fetched, fix, gaps)
         fix_commit_seconds = clock() - t_fix
