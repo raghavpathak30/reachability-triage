@@ -113,7 +113,16 @@ def _locally_bound(scope: ast.AST) -> set[str]:
     return names
 
 
-_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+_SCOPES = (
+    ast.FunctionDef,
+    ast.AsyncFunctionDef,
+    ast.Lambda,
+    ast.ClassDef,
+    ast.ListComp,
+    ast.SetComp,
+    ast.DictComp,
+    ast.GeneratorExp,
+)
 
 
 def _calls_by_line(tree: ast.Module) -> dict[int, list[tuple[ast.Call, list[ast.AST]]]]:
