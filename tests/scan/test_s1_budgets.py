@@ -102,3 +102,25 @@ def test_reason_aggregation_priority():
     from reachability.scan.reasons import aggregate_reasons
 
     assert aggregate_reasons([ReasonCode.NO_PATH_FOUND, ReasonCode.LOW_CONFIDENCE_PATH]) is ReasonCode.LOW_CONFIDENCE_PATH
+
+
+def test_cap_crossed_during_batch_prepare_cuts_every_pending_advisory(tmp_path, monkeypatch):
+    advs = [advisory(f"GHSA-aaaa-bbbb-{i:04d}", "lib") for i in range(3)]
+    now = [0.0]
+    import reachability.scan.query as q
+
+    real = q.ReachabilityBatch.prepare
+
+    def slow_prepare(self):
+        now[0] += 601.0
+        return real(self)
+
+    monkeypatch.setattr(q.ReachabilityBatch, "prepare", slow_prepare)
+    queries = []
+    real_query = q.ReachabilityBatch.query
+    monkeypatch.setattr(q.ReachabilityBatch, "query", lambda *a, **k: queries.append(1) or real_query(*a, **k))
+    res = _run(_scan(tmp_path, advs), clock=lambda: now[0])
+    assert [f.reason_code for f in res.findings] == ["SCAN_BUDGET"] * 3
+    assert all("analysis time cap" in f.detail for f in res.findings)
+    assert queries == []
+    assert res.stats["batch_setup_seconds"] >= 0.0

@@ -141,6 +141,8 @@ def derive_reason(
         if not can_continue():
             return None
         batch = get_batch(ctx)
+        if not can_continue():
+            return None
         start = clock() if clock else 0.0
         result = batch.query(t.module, t.qualname.split(".")[-1])
         ctx.queries += 1
