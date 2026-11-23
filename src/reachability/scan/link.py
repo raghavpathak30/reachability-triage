@@ -204,7 +204,7 @@ class _Linker:
             seen.add(cur)
             mod, nm = cur
             table = self.report.import_tables.get(mod)
-            if table is None or nm in self.by_module.get(mod, {}):
+            if table is None or table.star_imports or nm in self.by_module.get(mod, {}):
                 return None
             aliases = [a for a in table.aliases if a.local_name == nm]
             if len(aliases) != 1:
@@ -276,7 +276,7 @@ class _Linker:
 
     def rule_d(self, edge, module: str, name: str) -> None:
         table = self.report.import_tables.get(module)
-        if table is None or not any(
+        if table is None or table.star_imports or not any(
             a.target_symbol == a.local_name and not a.conditional and not a.type_checking_only
             for a in table.aliases
         ):
@@ -324,7 +324,7 @@ class _Linker:
         tree = self.tree(module)
         bindings = self.module_bindings(module)
         table = self.report.import_tables.get(module)
-        if tree is None or bindings is None or table is None:
+        if tree is None or bindings is None or table is None or table.star_imports:
             return {}
         globals_ = _global_names(tree)
         out: dict[str, SymbolNode] = {}
