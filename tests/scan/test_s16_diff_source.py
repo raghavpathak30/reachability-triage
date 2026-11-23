@@ -127,3 +127,21 @@ def test_diff_budget(tmp_path):
     s = DiffStore(tmp_path / "t", Fake(), clock=clock)
     s.get(C)
     assert s.get(Commit("owner", "repo", "e" * 40))[1] == "diff budget: 300 s"
+
+
+def test_f2_local_dir_never_touches_cache(tmp_path):
+    src, cache = tmp_path / "src", tmp_path / "cache"
+    put(src)
+    assert DiffStore(cache, LocalDiffDir(src)).get(C) == (DIFF, None)
+    assert not (cache / "fix-commits").exists()
+    real = DIFF.replace("+b", "+REAL")
+    f = Fake(real)
+    assert DiffStore(cache, f).get(C) == (real, None) and f.calls == 1
+
+
+def test_f2_local_dir_ignores_poisoned_cache(tmp_path):
+    src, cache = tmp_path / "src", tmp_path / "cache"
+    put(src, DIFF)
+    put(cache / "fix-commits", DIFF.replace("+b", "+POISON"))
+    store = DiffStore(cache, LocalDiffDir(src))
+    assert store.get(C) == (DIFF, None) and store.cached == 0

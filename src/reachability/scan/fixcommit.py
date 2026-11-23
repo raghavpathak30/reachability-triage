@@ -197,7 +197,8 @@ class DiffStore:
 
     def _get(self, commit: Commit) -> tuple[str | None, str | None]:
         cache = safe_path(self.root, commit.owner, commit.repo, commit.sha)
-        if cache.is_file():
+        use_cache = not isinstance(self.fetcher, LocalDiffDir)  # the cache holds network-fetched diffs only
+        if use_cache and cache.is_file():
             try:
                 text = _read_text(cache)
                 if looks_like_diff(text):
@@ -223,7 +224,8 @@ class DiffStore:
             return self._fail(commit, "size cap")
         if not looks_like_diff(text):
             return self._fail(commit, "not a diff")
-        self._write(cache, text)
+        if use_cache:
+            self._write(cache, text)
         self.results[commit] = (text, None)
         return text, None
 
