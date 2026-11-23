@@ -233,3 +233,122 @@ class DiffStore:
                     os.unlink(tmp)
         except OSError:
             pass  # a cache that cannot be written only costs a refetch
+
+
+# ---- unified-diff parser ------------------------------------------------------------------
+
+MAX_HUNKS_PER_DIFF = 2000
+MAX_HUNKS_PER_SCAN = 20000
+_HUNK = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+_SKIP_SEGMENTS = frozenset({"tests", "test", "docs"})
+_LINES = re.compile(r"\r\n|\r|\n")
+
+
+def split_lines(text: str) -> list[str]:
+    """Split on the line boundaries `ast` counts (never str.splitlines)."""
+    return _LINES.split(text)
+
+
+@dataclass(frozen=True)
+class Hunk:
+    items: tuple[tuple[str, str], ...]  # (" " | "-" | "+", text without trailing whitespace)
+
+    @property
+    def removed_side(self) -> list[str]:
+        return [t for op, t in self.items if op in " -"]
+
+    @property
+    def added_side(self) -> list[str]:
+        return [t for op, t in self.items if op in " +"]
+
+
+@dataclass(frozen=True)
+class FileDiff:
+    path: str
+    hunks: tuple[Hunk, ...]
+
+
+def _clean_path(raw: str) -> str | None:
+    raw = raw.split("\t")[0].strip()
+    if raw == "/dev/null" or raw.startswith('"'):
+        return None
+    return raw[2:] if raw[:2] in ("a/", "b/") else raw
+
+
+def _wanted(path: str) -> bool:
+    parts = path.split("/")
+    return path.endswith(".py") and not any(p in _SKIP_SEGMENTS for p in parts[:-1])
+
+
+def parse_diff(text: str, counters: dict[str, int] | None = None) -> list[FileDiff]:
+    """Parse a unified diff into per-file hunks, keeping only .py files outside tests/test/docs.
+
+    A hunk whose body disagrees with its header counts, or that is cut short, is dropped.
+    """
+    counters = counters if counters is not None else {}
+
+    def bump(name: str) -> None:
+        counters[name] = counters.get(name, 0) + 1
+
+    lines = text.split("\n")
+    out: list[FileDiff] = []
+    i, n = 0, len(lines)
+    while i < n:
+        if not lines[i].startswith("diff --git "):
+            i += 1
+            continue
+        i += 1
+        old = new = None
+        saw_old = saw_new = False
+        hunks: list[Hunk] = []
+        while i < n and not lines[i].startswith("diff --git "):
+            line = lines[i]
+            if not hunks and line.startswith("--- "):
+                old, saw_old = _clean_path(line[4:]), True
+            elif not hunks and line.startswith("+++ "):
+                new, saw_new = _clean_path(line[4:]), True
+            elif line.startswith("@@"):
+                m = _HUNK.match(line)
+                i += 1
+                if not m:
+                    bump("bad_header")
+                    continue
+                old_rem = int(m.group(2)) if m.group(2) is not None else 1
+                new_rem = int(m.group(4)) if m.group(4) is not None else 1
+                items: list[tuple[str, str]] = []
+                ok = True
+                while old_rem > 0 or new_rem > 0:
+                    if i >= n or (i == n - 1 and not lines[i]):
+                        ok = False
+                        bump("truncated")
+                        break
+                    body = lines[i]
+                    op, rest = (body[:1] or " "), body[1:]
+                    if op == " " and old_rem > 0 and new_rem > 0:
+                        old_rem -= 1
+                        new_rem -= 1
+                    elif op == "-" and old_rem > 0:
+                        old_rem -= 1
+                    elif op == "+" and new_rem > 0:
+                        new_rem -= 1
+                    else:
+                        ok = False
+                        bump("bad_header")
+                        break
+                    items.append((op, rest.rstrip()))
+                    i += 1
+                while i < n and lines[i].startswith("\\"):
+                    i += 1
+                if ok:
+                    hunks.append(Hunk(tuple(items)))
+                continue
+            i += 1
+        if not (saw_old and saw_new) or old is None or new is None or old != new or not _wanted(new):
+            if saw_old and saw_new and old is not None and new is not None and old != new:
+                bump("rename_skipped")
+            continue
+        if len(hunks) > MAX_HUNKS_PER_DIFF:
+            counters["too_many_hunks"] = counters.get("too_many_hunks", 0) + len(hunks) - MAX_HUNKS_PER_DIFF
+            hunks = hunks[:MAX_HUNKS_PER_DIFF]
+        out.append(FileDiff(new, tuple(hunks)))
+    return out
