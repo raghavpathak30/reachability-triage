@@ -8,6 +8,16 @@ from packaging.utils import canonicalize_name
 
 from reachability.scan.advisories import NO_FIX, MatchResult, Snapshot, build_report, load_snapshot
 from reachability.scan.combined import CombinedIndex, build_combined
+from reachability.scan.fixcommit import (
+    Commit,
+    DiffFetcher,
+    DiffStore,
+    FileDiff,
+    fix_changed,
+    gap_for,
+    parse_diff,
+    usable_commits,
+)
 from reachability.scan.fetch import Fetcher, FetchBudget, fetch_dist, fetch_dists
 from reachability.scan.inventory import TARGET_ENV, Status, build_inventory
 from reachability.scan.lock_wheels import read_lock_wheels
@@ -22,6 +32,50 @@ from reachability.scan.targets import (
     symbols_from_tables,
     symbols_from_tree,
 )
+
+
+class FixContext:
+    """Prefetched fix-commit diffs and their counters; analysis only reads from it."""
+
+    def __init__(self, store: DiffStore):
+        self.store = store
+        self.counters: dict[str, int] = {}
+        self.parsed: dict[Commit, list[FileDiff]] = {}
+        self.advisories_with_commit = 0
+        self.advisories_attributed = 0
+
+    def diffs(self, commits: list[Commit]) -> list[FileDiff]:
+        out: list[FileDiff] = []
+        for c in commits:
+            if c not in self.parsed:
+                text, _reason = self.store.results.get(c, (None, None))
+                self.parsed[c] = parse_diff(text, self.counters) if text is not None else []
+            out.extend(self.parsed[c])
+        return out
+
+
+def _commits_of(snapshot: Snapshot, m: MatchResult) -> list[Commit]:
+    return usable_commits([r for r in (snapshot.records.get(i) for i in m.ids) if r is not None])
+
+
+def _prefetch_diffs(report, snapshot, fetched, fix_fetched, fix: FixContext, gaps: list[Gap]) -> None:
+    seen: set[tuple[str | None, Commit]] = set()
+    for m in sorted(report.findings, key=lambda m: (m.dist, m.version, m.fixed_in, m.ids)):
+        dist = canonicalize_name(m.dist)
+        try:
+            commits = _commits_of(snapshot, m)
+            if commits:
+                fix.advisories_with_commit += 1
+            fd, ffd = fetched.dists.get((dist, m.version)), fix_fetched.get((dist, m.fixed_in))
+            if m.fixed_in == NO_FIX or fd is None or fd.status != "fetched" or ffd is None or ffd.status != "fetched":
+                continue
+            for c in commits:
+                _text, reason = fix.store.get(c)
+                if reason is not None and (dist, c) not in seen:
+                    seen.add((dist, c))
+                    gaps.append(gap_for(dist, c, reason))
+        except Exception as exc:
+            gaps.append(Gap("fix_commit_unavailable", dist, f"{m.ids[0]}: error: {type(exc).__name__}"))
 
 
 ANALYSIS_SECONDS = 600.0
@@ -67,6 +121,7 @@ def run_scan(
     clock: Callable[[], float] = time.monotonic,
     analysis_seconds: float = ANALYSIS_SECONDS,
     max_advisories: int = MAX_ADVISORIES,
+    diff_fetcher: DiffFetcher | None = None,
 ) -> ScanResult:
     t0 = clock()
     snapshot = load_snapshot(Path(snapshot_path), snapshot_sha256)
@@ -115,6 +170,12 @@ def run_scan(
         gaps.extend(fetched.gaps)
         fetch_seconds = clock() - t_fetch
 
+        # fix-commit diffs: fetched here, before the analysis clock starts
+        t_fix = clock()
+        fix = FixContext(DiffStore(store, diff_fetcher, clock=clock))
+        _prefetch_diffs(report, snapshot, fetched, fix_fetched, fix, gaps)
+        fix_commit_seconds = clock() - t_fix
+
         # combined index
         t_comb = clock()
         analysis_start = t_comb
@@ -125,7 +186,7 @@ def run_scan(
         try:
             findings, stats_extra, targets_seconds, query_seconds = _analyse(
                 report.findings, snapshot, fetched, fix_fetched, combined, clock,
-                analysis_start, analysis_seconds, max_advisories,
+                analysis_start, analysis_seconds, max_advisories, fix,
             )
             gaps.extend(stats_extra.pop("gaps"))
             combined_modules = len(combined.index.report.modules)
@@ -170,6 +231,13 @@ def run_scan(
         "link_files_parsed": link_files_parsed,
         "link_files_skipped": link_files_skipped,
         "batch_setup_seconds": stats_extra["batch_setup_seconds"],
+        "fix_commit_advisories": fix.advisories_with_commit,
+        "fix_advisories_attributed": fix.advisories_attributed,
+        "fix_diffs_fetched": fix.store.fetched,
+        "fix_diffs_cached": fix.store.cached,
+        "fix_diffs_unavailable": dict(sorted(fix.store.unavailable.items())),
+        "fix_hunks_attributed": fix.counters.get("hunks_attributed", 0),
+        "fix_hunks_dropped": fix.counters.get("hunks_dropped", 0),
         "queries": stats_extra["queries"],
         "query_seconds_median": statistics.median(qs) if qs else 0.0,
         "query_seconds_max": max(qs) if qs else 0.0,
@@ -190,6 +258,7 @@ def run_scan(
         stats=stats,
         timings={
             "fetch_seconds": fetch_seconds,
+            "fix_commit_seconds": fix_commit_seconds,
             "combine_seconds": combine_seconds,
             "build_seconds": combine_seconds,
             "targets_seconds": targets_seconds,
@@ -210,7 +279,7 @@ def _wheel_status(entry, fetched) -> str:
 
 
 def _analyse(matches, snapshot, fetched, fix_fetched, combined: CombinedIndex, clock,
-             analysis_start, analysis_seconds, max_advisories):
+             analysis_start, analysis_seconds, max_advisories, fix: FixContext):
     gaps: list[Gap] = []
     t_targets = clock()
 
@@ -293,7 +362,20 @@ def _analyse(matches, snapshot, fetched, fix_fetched, combined: CombinedIndex, c
             text = "\n".join(
                 f"{r.summary}\n{r.details}" for r in (snapshot.records.get(i) for i in m.ids) if r is not None
             )
-            targets, truncated = resolve_targets(diff.changes, installed, combined, dist, named_names(text))
+            commits = _commits_of(snapshot, m)
+            changed_by_fix: set = set()
+            if commits:
+                try:
+                    changed_by_fix = fix_changed(fix.diffs(commits), fd.root, fixed[1], installed, fix.counters)
+                except Exception as exc:
+                    gaps.append(Gap("fix_commit_unavailable", dist,
+                                    f"{identity[0]}: error: {type(exc).__name__} while attributing"))
+                if changed_by_fix:
+                    fix.advisories_attributed += 1
+            targets, truncated = resolve_targets(
+                diff.changes, installed, combined, dist, named_names(text),
+                frozenset(changed_by_fix), tuple(c.sha for c in commits),
+            )
             native = (
                 not targets and not diff.py_changed and non_py_changed(fd.root, fixed[1])
             )

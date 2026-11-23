@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 from reachability.scan.fetch import LocalDirFetcher, PyPIFetcher
+from reachability.scan.fixcommit import LocalDiffDir
 from reachability.scan.inventory import ScanError
 from reachability.scan.pipeline import run_scan
 from reachability.scan.render import render_json, render_text
@@ -36,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
             fetcher,
             member=args.member,
             cache_dir=Path(args.cache_dir) if args.cache_dir else None,
+            diff_fetcher=LocalDiffDir(Path(args.wheel_dir) / "fix-commits") if args.wheel_dir else None,
         )
     except (ScanError, OSError) as exc:
         sys.stderr.write(strip_control_line(f"error: {type(exc).__name__}: {exc}") + "\n")

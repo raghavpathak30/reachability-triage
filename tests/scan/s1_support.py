@@ -7,6 +7,10 @@ import zipfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+FIXCOMMITS = REPO_ROOT / "tests" / "fixtures" / "app_scan" / "fixcommits"
+SHA = "a" * 40
+LIB_F_DIFF = (FIXCOMMITS / "lib_f.diff").read_text()
+FIX_KEY = f"owner/repo/{SHA}"
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 import materialize_scan_fixture as mat  # noqa: E402
 
@@ -35,13 +39,22 @@ def advisory(adv_id, dist, fixed="2.0", summary="synthetic", aliases=(), details
     return adv
 
 
+def with_fix_commit(adv, sha=SHA, repo="owner/repo"):
+    """Add a PACKAGE reference and a WEB commit reference to a synthetic advisory."""
+    refs = adv.setdefault("references", [])
+    refs.append({"type": "PACKAGE", "url": f"https://github.com/{repo}"})
+    refs.append({"type": "WEB", "url": f"https://github.com/{repo}/commit/{sha}"})
+    return adv
+
+
 def lib_files(core=LIB_OLD, extra=None, pkg="lib"):
     files = {f"{pkg}/__init__.py": "", f"{pkg}/core.py": core}
     files.update(extra or {})
     return files
 
 
-def make_scan(tmp_path, *, app_files, pins, wheels=None, advisories=(), snapshot_name="osv-pypi-2026-11-12.zip"):
+def make_scan(tmp_path, *, app_files, pins, wheels=None, advisories=(), snapshot_name="osv-pypi-2026-11-12.zip",
+              fix_diffs=None):
     """pins: {dist: version}; wheels: {(dist, version): files dict}; returns paths + snapshot sha."""
     app = tmp_path / "app"
     app.mkdir(parents=True, exist_ok=True)
@@ -54,6 +67,11 @@ def make_scan(tmp_path, *, app_files, pins, wheels=None, advisories=(), snapshot
     wheel_dir.mkdir(exist_ok=True)
     for (dist, version), files in (wheels or {}).items():
         mat.build_wheel_zip(dist, version, files, wheel_dir)
+    for key, text in (fix_diffs or {}).items():
+        owner, repo, sha = key.split("/")
+        d = wheel_dir / "fix-commits" / owner / repo
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{sha}.diff").write_text(text)
     snap = tmp_path / snapshot_name
     with zipfile.ZipFile(snap, "w") as z:
         for adv in advisories:
@@ -67,11 +85,12 @@ def make_scan(tmp_path, *, app_files, pins, wheels=None, advisories=(), snapshot
 
 
 def simple_lib_scan(tmp_path, *, old=LIB_OLD, new=LIB_NEW, app_files=None, extra_old=None, extra_new=None,
-                    adv_id="GHSA-aaaa-bbbb-cccc"):
+                    adv_id="GHSA-aaaa-bbbb-cccc", fix=True):
     return make_scan(
         tmp_path,
         app_files=app_files if app_files is not None else {"main.py": APP_CALLS_F},
         pins={"lib": "1.0"},
         wheels={("lib", "1.0"): lib_files(old, extra_old), ("lib", "2.0"): lib_files(new, extra_new)},
-        advisories=[advisory(adv_id, "lib")],
+        advisories=[with_fix_commit(advisory(adv_id, "lib")) if fix else advisory(adv_id, "lib")],
+        fix_diffs={FIX_KEY: LIB_F_DIFF} if fix else None,
     )
