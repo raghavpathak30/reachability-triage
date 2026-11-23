@@ -165,6 +165,7 @@ def run_scan(
         "link_edges": link_counts,
         "link_edges_total": sum(link_counts.values()),
         "link_seconds": link_seconds,
+        "batch_setup_seconds": stats_extra["batch_setup_seconds"],
         "queries": stats_extra["queries"],
         "query_seconds_median": statistics.median(qs) if qs else 0.0,
         "query_seconds_max": max(qs) if qs else 0.0,
@@ -371,4 +372,5 @@ def _analyse(matches, snapshot, fetched, fix_fetched, combined: CombinedIndex, c
     query_seconds = clock() - t_query
     qn = ctx.queries if ctx else 0
     ql = ctx.query_seconds if ctx else []
-    return findings, {"gaps": gaps, "queries": qn, "query_seconds_list": ql}, targets_seconds, query_seconds
+    return findings, {"gaps": gaps, "queries": qn, "query_seconds_list": ql,
+                              "batch_setup_seconds": ctx.setup_seconds if ctx else 0.0}, targets_seconds, query_seconds

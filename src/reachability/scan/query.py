@@ -1,10 +1,11 @@
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from reachability.index.edges_models import CallEdge
 from reachability.index.entrypoint_models import Entrypoint
-from reachability.index.reachability import _bfs, _build_by_caller, compute_reachability
+from reachability.index.reachability import ReachabilityBatch, _bfs, _build_by_caller
 from reachability.index.reachability_models import ReachabilityResult, Verdict
 from reachability.scan.combined import CombinedIndex
 from reachability.scan.models import PathEdge, Target
@@ -21,6 +22,8 @@ class QueryContext:
     queries: int = 0
     query_seconds: list[float] = field(default_factory=list)
     edges: list = field(default_factory=list)
+    batch: ReachabilityBatch | None = None
+    setup_seconds: float = 0.0
 
 
 def make_context(combined: CombinedIndex) -> QueryContext:
@@ -38,6 +41,17 @@ def make_context(combined: CombinedIndex) -> QueryContext:
         _bfs(test, by_caller, allow_low=False),
         edges=all_edges,
     )
+
+
+def get_batch(ctx: QueryContext) -> ReachabilityBatch:
+    """The per-scan prepared engine batch (index edges + link edges), built once."""
+    if ctx.batch is None:
+        start = time.monotonic()
+        batch = ReachabilityBatch(ctx.entrypoints, ctx.edges or ctx.combined.index.edges, ctx.combined.index.report)
+        batch.prepare()
+        ctx.setup_seconds = time.monotonic() - start
+        ctx.batch = batch
+    return ctx.batch
 
 
 def to_path(ctx: QueryContext, edges: list[CallEdge]) -> list[PathEdge]:
@@ -126,11 +140,9 @@ def derive_reason(
     for t in targets:
         if not can_continue():
             return None
+        batch = get_batch(ctx)
         start = clock() if clock else 0.0
-        result = compute_reachability(
-            t.module, t.qualname.split(".")[-1], ctx.entrypoints, ctx.edges or ctx.combined.index.edges,
-            ctx.combined.index.report
-        )
+        result = batch.query(t.module, t.qualname.split(".")[-1])
         ctx.queries += 1
         if clock:
             ctx.query_seconds.append(clock() - start)

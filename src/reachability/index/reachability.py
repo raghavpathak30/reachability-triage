@@ -168,6 +168,15 @@ class ReachabilityBatch:
         paths = self._paths_any()
         return self._once("opaque", lambda: next((oid for oid in _OPAQUE_IDS if oid in paths), None))
 
+    def prepare(self) -> None:
+        """Force every target-independent computation now, so callers can time it separately."""
+        if not self._entrypoints:
+            return
+        self._referenced()
+        self._opaque_hit()
+        self._paths_confident_non_test()
+        self._paths_confident_test()
+
     def query(self, target_module: str, target_symbol: str | None) -> ReachabilityResult:
         if not self._entrypoints:
             return ReachabilityResult(

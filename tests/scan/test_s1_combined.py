@@ -209,11 +209,12 @@ def test_unmapped_engine_reason_detail_is_scrubbed(tmp_path, monkeypatch):
         advisories=[advisory("GHSA-aaaa-bbbb-cccc", "lib")],
     )
 
-    def fake(module, symbol, eps, edges, report):
+    def fake(self, module, symbol):
+        report = self._report
         root = str(next(iter(report.modules)).file_path.parents[0])
         return ReachabilityResult(module, symbol, Verdict.UNKNOWN, None, f"odd reason in {root}/lib/core.py:3")
 
-    monkeypatch.setattr(q, "compute_reachability", fake)
+    monkeypatch.setattr(q.ReachabilityBatch, "query", fake)
     res = run_scan(s["app"], s["snapshot"], s["sha256"], _Local(s["wheels"]))
     d = res.findings[0].detail
     assert d.startswith("unmapped engine reason") and "rscan-" not in d and "lib/lib/core.py:3" in d

@@ -46,7 +46,7 @@ def test_clock_past_limit_mid_phase_b_cuts_the_rest(tmp_path):
 
     import reachability.scan.query as q
 
-    real = q.compute_reachability
+    real = q.ReachabilityBatch.query
 
     def counting(*a, **k):
         queries.append(1)
@@ -54,11 +54,11 @@ def test_clock_past_limit_mid_phase_b_cuts_the_rest(tmp_path):
             now[0] += 601.0
         return real(*a, **k)
 
-    q.compute_reachability = counting
+    q.ReachabilityBatch.query = counting
     try:
         res = _run(_scan(tmp_path, advs), clock=clock)
     finally:
-        q.compute_reachability = real
+        q.ReachabilityBatch.query = real
     codes = [f.reason_code for f in res.findings]
     assert codes.count("SCAN_BUDGET") == 3 and codes[:2] == ["NO_PATH_FOUND"] * 2
     assert all("analysis time cap" in f.detail for f in res.findings if f.reason_code == "SCAN_BUDGET")
