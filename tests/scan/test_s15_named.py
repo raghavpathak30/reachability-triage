@@ -26,7 +26,7 @@ def test_vanna_prose_ask_matches_nothing():
 
 
 def test_open_process_call_form_matches():
-    text = "Passing input to open_process() allows injection."
+    text = "Passing input to open_process() or AsyncIOBackend.open_process() allows injection."
     assert m(text, "anyio._core._subprocesses", "open_process")
     assert m(text, "anyio._backends._asyncio", "AsyncIOBackend.open_process")
 
@@ -77,8 +77,8 @@ def test_span_with_redaction_marker_dropped():
 def test_sandbox_redacted_long_digit_identifier_is_missed_so_stays_medium():
     # triage/sandbox.py redacts 20+ char identifier-like runs containing a digit; the name is
     # missed and the target stays medium (a missed path_proven, never a wrong one).
-    assert not m("`_read_pdf15_xref_stream` is broken", "pypdf._reader", "PdfReader._read_pdf15_xref_stream")
-    assert m("`_read_xref` is broken", "pypdf._reader", "PdfReader._read_xref")
+    assert not m("`PdfReader._read_pdf15_xref_stream` is broken", "pypdf._reader", "PdfReader._read_pdf15_xref_stream")
+    assert m("`PdfReader._read_xref` is broken", "pypdf._reader", "PdfReader._read_xref")
 
 
 def test_named_computed_over_union_of_group_records(tmp_path):

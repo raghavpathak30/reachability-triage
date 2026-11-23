@@ -185,7 +185,7 @@ class NamedSet:
 
     def matches(self, module: str, qualname: str) -> bool:
         qual = _strip(qualname)
-        if qual.rsplit(".", 1)[-1] in self.simple:
+        if "." not in qual and qual in self.simple:
             return True
         if "." in qual and qual in self.dotted:
             return True
