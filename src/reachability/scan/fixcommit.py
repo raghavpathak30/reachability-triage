@@ -167,14 +167,14 @@ class DiffStore:
         cache_root: Path,
         fetcher: DiffFetcher | None,
         *,
-        max_diffs: int = MAX_DIFFS,
-        max_seconds: float = DIFFS_TOTAL_SECONDS,
+        max_diffs: int | None = None,
+        max_seconds: float | None = None,
         clock: Callable[[], float] = time.monotonic,
     ):
         self.root = Path(cache_root) / "fix-commits"
         self.fetcher = fetcher
-        self.max_diffs = max_diffs
-        self.max_seconds = max_seconds
+        self.max_diffs = MAX_DIFFS if max_diffs is None else max_diffs
+        self.max_seconds = DIFFS_TOTAL_SECONDS if max_seconds is None else max_seconds
         self.clock = clock
         self.results: dict[Commit, tuple[str | None, str | None]] = {}
         self.fetched = 0
