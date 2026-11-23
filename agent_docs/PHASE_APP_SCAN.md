@@ -702,6 +702,8 @@ calls" to the rule above (critique M1/M3), before any run, on 2026-11-12.
 
 2026-11-22 (DECISIONS §30 item 3, before any S3 run): `PATH_TO_UNCONFIRMED_TARGET` is added to the allowed reason_code sets of E1r, E3 and E6.
 
+2026-11-23 (DECISIONS §31 item 5, approved by Raghav, before any S3/A6 run): a new hard row E1b is added (GHSA-3w57-8xmc-8v26, anyio 4.14.0 installed, 4.14.2 first fixed; the app imports `to_process` from `anyio` and calls `to_process.run_sync(...)` from an entrypoint; verdict `reachable`, evidence `path_proven`, true_symbols `anyio._core._subprocesses:open_process`); E1 is relabelled `unknown` / `PATH_TO_UNCONFIRMED_TARGET` (a `partial_path` ending at `_url_to_size` allowed), because its record and alias carry no commit link; G3 now reads "E1b must be `path_proven` with its path ending in `true_symbols`" (the rest of G3 is unchanged, with E1b in place of E1).
+
 ## 5. Decisions (recorded 2026-11-12, Raghav)
 
 | # | Decision |
