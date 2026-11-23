@@ -176,6 +176,8 @@ def test_scenario_invariants(tmp_path, name):
             assert f.path and f.path[0].file.startswith("app/")
             assert f.path[0].caller in app_start_ids
             assert f.path[-1].callee in {t.node_id for t in f.targets}
+            final = [t for t in f.targets if t.node_id == f.path[-1].callee]
+            assert final and all(t.confidence == "high" and t.in_fix_commit is True for t in final)
     assert all(g.kind in {"no_wheel", "unparsed_file", "skipped_symlink", "budget", "collision", "dist_error", "excluded_dir", "link_error", "fix_commit_unavailable"} for g in res.gaps)
 
 

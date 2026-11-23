@@ -74,6 +74,8 @@ def test_findings_respect_s15_invariants(tmp_path, name):
         if f.evidence_level == "path_proven":
             confs = {t.node_id: t.confidence for t in f.targets}
             assert confs[f.path[-1].callee] == "high"
+            final = [t for t in f.targets if t.node_id == f.path[-1].callee]
+            assert final and all(t.in_fix_commit is True for t in final)
         assert f.verdict != "not_reachable"
     assert all(g.kind != "link_error" for g in res.gaps)
 
