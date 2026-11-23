@@ -57,6 +57,7 @@ class Record:
     cwe_ids: tuple[str, ...] = ()
     summary: str = ""
     details: str = ""
+    references: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -344,6 +345,24 @@ def _text_or_empty(value: object) -> str:
     return value[:_TEXT_CAP] if isinstance(value, str) else ""
 
 
+MAX_REFERENCES = 200
+MAX_REFERENCE_URL = 512
+
+
+def _references(value: object) -> tuple[tuple[str, str], ...]:
+    """(type, url) pairs; anything that is not a dict with a string url is skipped, never fatal."""
+    if not isinstance(value, list):
+        return ()
+    out: list[tuple[str, str]] = []
+    for ref in value[:MAX_REFERENCES]:
+        if not isinstance(ref, dict):
+            continue
+        url, rtype = ref.get("url"), ref.get("type")
+        if isinstance(url, str) and len(url) <= MAX_REFERENCE_URL:
+            out.append((rtype if isinstance(rtype, str) else "", url))
+    return tuple(out)
+
+
 def _opt_dict(member: str, field: str, value: object) -> dict:
     if value is None:
         return {}
@@ -401,6 +420,7 @@ def _reduce(raw: dict, member: str = "?") -> Record:
         cwe,
         _text_or_empty(raw.get("summary")),
         _text_or_empty(raw.get("details")),
+        _references(raw.get("references")),
     )
 
 

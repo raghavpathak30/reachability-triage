@@ -18,9 +18,10 @@ APP_CALLS_F = "from lib.core import f\n\n\ndef main():\n    return f(1)\n\n\nif 
 DEFAULT_DETAILS = "The function `f()` is vulnerable."
 
 
-def advisory(adv_id, dist, fixed="2.0", summary="synthetic", aliases=(), details=DEFAULT_DETAILS):
+def advisory(adv_id, dist, fixed="2.0", summary="synthetic", aliases=(), details=DEFAULT_DETAILS,
+             references=()):
     events = [{"introduced": "0"}] + ([{"fixed": fixed}] if fixed else [])
-    return {
+    adv = {
         "id": adv_id,
         "aliases": list(aliases),
         "summary": summary,
@@ -29,6 +30,9 @@ def advisory(adv_id, dist, fixed="2.0", summary="synthetic", aliases=(), details
             {"package": {"name": dist, "ecosystem": "PyPI"}, "ranges": [{"type": "ECOSYSTEM", "events": events}]}
         ],
     }
+    if references:
+        adv["references"] = [{"type": t, "url": u} for t, u in references]
+    return adv
 
 
 def lib_files(core=LIB_OLD, extra=None, pkg="lib"):
