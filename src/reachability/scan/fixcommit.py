@@ -12,6 +12,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+from urllib.parse import urlsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from reachability.index.symbol_models import NodeKind
 from reachability.scan.advisories import Record
@@ -147,6 +149,8 @@ def short_reason(exc: BaseException) -> str:
     code = getattr(exc, "code", None)
     if isinstance(code, int):
         return f"HTTP {code}"
+    if isinstance(exc, OSError):
+        return "network error"
     return f"error: {type(exc).__name__}"
 
 
@@ -508,3 +512,82 @@ def fix_changed(
             _bump(counters, "hunks_attributed" if keys else "hunks_dropped")
             out |= keys
     return out
+
+
+# ---- network fetcher ----------------------------------------------------------------------
+
+GITHUB_HOST = "github.com"
+_DIFF_PATH = re.compile(r"/([^/]+)/([^/]+)/commit/([0-9a-fA-F]{7,40})\.diff")
+
+
+def diff_url(owner: str, repo: str, sha: str) -> str:
+    if not valid_parts(owner, repo, sha):
+        raise DiffUnavailable("invalid owner/repo/sha")
+    return f"https://{GITHUB_HOST}/{owner}/{repo}/commit/{sha.lower()}.diff"
+
+
+def check_diff_url(url: str) -> None:
+    """Only `https://github.com/{owner}/{repo}/commit/{sha}.diff`; nothing else on any host."""
+    parts = urlsplit(url)
+    if parts.scheme != "https":
+        raise DiffUnavailable("only https is allowed")
+    if (
+        parts.hostname != GITHUB_HOST
+        or parts.username
+        or parts.password
+        or parts.port not in (None, 443)
+        or parts.query
+        or parts.fragment
+    ):
+        raise DiffUnavailable("off-host url")
+    m = _DIFF_PATH.fullmatch(parts.path)
+    if not m or not valid_parts(m.group(1), m.group(2), m.group(3)):
+        raise DiffUnavailable("not a commit diff url")
+
+
+class _CheckedGitHubRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        try:
+            check_diff_url(newurl)
+        except DiffUnavailable:
+            raise DiffUnavailable("off-host redirect") from None
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+class GitHubDiffFetcher:
+    """HTTPS GET of a commit's `.diff` on github.com. No API, no token."""
+
+    def __init__(self, opener=None, clock: Callable[[], float] = time.monotonic):
+        self.opener = opener if opener is not None else build_opener(_CheckedGitHubRedirect)
+        self.clock = clock
+
+    def fetch_diff(self, owner: str, repo: str, sha: str) -> str:
+        url = diff_url(owner, repo, sha)
+        check_diff_url(url)
+        resp = self.opener.open(Request(url, headers={"User-Agent": "reachability-scan"}), timeout=DIFF_SECONDS)
+        try:
+            final = getattr(resp, "geturl", None)
+            if final is not None:
+                try:
+                    check_diff_url(final())
+                except DiffUnavailable:
+                    raise DiffUnavailable("off-host redirect") from None
+            start = self.clock()
+            chunks: list[bytes] = []
+            total = 0
+            while True:
+                if self.clock() - start > DIFF_SECONDS:
+                    raise DiffUnavailable("timeout")
+                chunk = resp.read(64 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_DIFF_BYTES:
+                    raise DiffUnavailable("size cap")
+                chunks.append(chunk)
+        finally:
+            resp.close()
+        try:
+            return b"".join(chunks).decode("utf-8")
+        except UnicodeDecodeError:
+            raise DiffUnavailable("decode error") from None
