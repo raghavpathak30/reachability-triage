@@ -10,6 +10,7 @@ from reachability.index import build_l1_index, build_symbol_index
 from reachability.index.symbol_models import ModuleSymbolTable, NodeKind
 from reachability.scan.combined import CombinedIndex, wheel_top_level_files
 from reachability.scan.models import Target
+from reachability.triage.sandbox import sandbox_untrusted_text
 
 TARGET_KINDS = frozenset({NodeKind.FUNCTION, NodeKind.ASYNCFUNCTION, NodeKind.METHOD, NodeKind.CLASS})
 _DEF_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
@@ -184,17 +185,54 @@ class NamedSet:
         return f"{module}.{qual}" in self.dotted
 
 
+_CALL = re.compile(rf"(?<![\w.\]])({_IDENT})\((?!(?:s|es)\))")
+_CHAIN = re.compile(rf"(?<![\w.\]])({_IDENT}(?:\.{_IDENT})+)(?!\w)")
+_CALL_SUFFIX = re.compile(r"\(.*\)$")
+
+
+def _call_and_chain_tokens(text: str) -> set[str]:
+    return {m.group(1) for m in _CALL.finditer(text)} | {m.group(1) for m in _CHAIN.finditer(text)}
+
+
 def named_names(text: str) -> NamedSet:
-    """Code-form tokens of advisory text (v0: backticked identifiers and dotted chains only)."""
-    simple: set[str] = set()
-    dotted: set[str] = set()
-    for line in text.splitlines():
-        for span in _SPAN.findall(line):
-            body = re.sub(r"\(.*\)$", "", span.strip())
-            if not _DOTTED_OR_NAME.fullmatch(body):
+    """Code-form tokens of advisory text, after the sandbox has redacted it.
+
+    Code form: inside a backtick span on one line, an identifier directly followed by `(`, or a
+    dotted chain of two or more identifiers. Fenced blocks give only the last two. A candidate
+    directly after `.` or `]` is a fragment of a longer chain and is never a token.
+    """
+    tokens: set[str] = set()
+    prose: list[str] = []
+    in_fence = False
+    for line in sandbox_untrusted_text(text).splitlines():
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            tokens |= _call_and_chain_tokens(line)
+            continue
+        rest = []
+        last = 0
+        for m in _SPAN.finditer(line):
+            rest.append(line[last:m.start()])
+            last = m.end()
+            span = m.group(1)
+            if "[REDACTED" in span:
                 continue
-            (dotted if "." in body else simple).add(body)
-    return NamedSet(frozenset(simple), frozenset(dotted))
+            before = line[m.start() - 1] if m.start() > 0 else ""
+            body = _CALL_SUFFIX.sub("", span.strip())
+            if _DOTTED_OR_NAME.fullmatch(body):
+                if before not in (".", "]"):
+                    tokens.add(body)
+            else:
+                tokens |= _call_and_chain_tokens(span)
+            rest.append(" ")
+        rest.append(line[last:])
+        prose.append("".join(rest))
+    tokens |= _call_and_chain_tokens("\n".join(prose))
+    return NamedSet(
+        frozenset(t for t in tokens if "." not in t), frozenset(t for t in tokens if "." in t)
+    )
 
 
 _CHANGE_RANK = {"changed": 0, "removed": 1, "unchanged": 2}
