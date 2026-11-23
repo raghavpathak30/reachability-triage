@@ -27,7 +27,8 @@ def _setup(tmp_path, old, new):
 def test_named_and_changed_is_high(tmp_path):
     c, inst, ch = _setup(tmp_path, "def f():\n    return 1\n", "def f():\n    return 2\n")
     try:
-        ts, trunc = resolve_targets(ch, inst, c, "d", named_names("calls `f()` badly"))
+        ts, trunc = resolve_targets(ch, inst, c, "d", named_names("calls `f()` badly"),
+                                  frozenset({("p.a", "f", 0)}))
     finally:
         c.close()
     assert [(t.qualname, t.confidence, t.named) for t in ts] == [("f", "high", True)]
@@ -48,7 +49,8 @@ def test_named_but_unchanged_is_medium_target(tmp_path):
     new = "def f():\n    return 2\n\n\ndef g():\n    return 1\n"
     c, inst, ch = _setup(tmp_path, old, new)
     try:
-        ts, _ = resolve_targets(ch, inst, c, "d", named_names("`g()` and `f()`"))
+        ts, _ = resolve_targets(ch, inst, c, "d", named_names("`g()` and `f()`"),
+                                 frozenset({("p.a", "f", 0)}))
     finally:
         c.close()
     got = {t.qualname: (t.confidence, t.changed, t.named) for t in ts}
@@ -62,7 +64,8 @@ def test_cap_keeps_all_high_before_medium(tmp_path):
     new = old.replace("return 1", "return 2")
     c, inst, ch = _setup(tmp_path, old, new)
     try:
-        ts, trunc = resolve_targets(ch, inst, c, "d", named_names("`zz1()` `zz2()` `zz3()`"))
+        ts, trunc = resolve_targets(ch, inst, c, "d", named_names("`zz1()` `zz2()` `zz3()`"),
+                                  frozenset({("p.a", n, 0) for n in ("zz1", "zz2", "zz3")}))
     finally:
         c.close()
     assert len(ts) == MAX_TARGETS and trunc

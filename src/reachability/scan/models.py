@@ -5,7 +5,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class Gap:
-    kind: str  # no_wheel, unparsed_file, skipped_symlink, budget, collision, dist_error, excluded_dir, unreadable_path
+    kind: str  # no_wheel, unparsed_file, skipped_symlink, budget, collision, dist_error, excluded_dir, unreadable_path, link_error, fix_commit_unavailable
     dist: str | None
     detail: str
 
@@ -24,6 +24,8 @@ class Target:
     changed: str  # changed | added | removed
     confidence: str = "medium"
     named: bool = False
+    in_fix_commit: bool = False
+    fix_commits: tuple[str, ...] = ()
 
     @property
     def key(self) -> tuple[str, str, int]:
@@ -37,6 +39,8 @@ class Target:
             "confidence": self.confidence,
             "named": self.named,
             "changed": self.changed,
+            "fix_commits": list(self.fix_commits),
+            "in_fix_commit": self.in_fix_commit,
         }
 
 

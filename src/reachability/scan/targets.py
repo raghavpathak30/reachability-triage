@@ -252,11 +252,14 @@ def resolve_targets(
     combined: CombinedIndex,
     dist: str,
     named: NamedSet | None = None,
+    fix_changed: frozenset[Key] = frozenset(),
+    fix_commits: tuple[str, ...] = (),
 ) -> tuple[list[Target], bool]:
-    """Changed/removed (and named) symbols present in the installed index and owned by dist.
+    """Changed/removed (and named) function and method symbols present in the installed index and
+    owned by dist. Class nodes are never targets.
 
-    High confidence = named in code form AND changed or removed. All high targets come first;
-    the cap is applied after that ordering.
+    High confidence = named in code form AND changed by the advisory's own fix commit. All high
+    targets come first; the cap is applied after that ordering.
     """
     origins = combined.module_origins()
     named = named or NamedSet()
@@ -266,15 +269,15 @@ def resolve_targets(
     def add(key: Key, kind: str) -> None:
         module, qual, ordinal = key
         sym = installed.defs.get(key)
-        if sym is None or origins.get(module) != dist or key in seen:
+        if sym is None or sym.kind is NodeKind.CLASS or origins.get(module) != dist or key in seen:
             return
         seen.add(key)
         is_named = named.matches(module, qual)
-        high = is_named and kind in ("changed", "removed")
+        high = is_named and key in fix_changed
         targets.append(
             Target(
                 sym.node_id, module, qual, ordinal, combined.display_path(sym.file), sym.lineno, kind,
-                "high" if high else "medium", is_named,
+                "high" if high else "medium", is_named, key in fix_changed, fix_commits,
             )
         )
 
