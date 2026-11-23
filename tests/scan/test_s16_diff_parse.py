@@ -73,3 +73,26 @@ def test_new_and_deleted_files_skipped():
 def test_default_counts_are_one():
     r = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -3 +3 @@\n-x\n+y\n"
     assert parse_diff(r)[0].hunks[0].items == (("-", "x"), ("+", "y"))
+
+
+def test_f4_marker_inside_hunk_keeps_hunk():
+    c: dict = {}
+    text = (
+        "diff --git a/m.py b/m.py\n--- a/m.py\n+++ b/m.py\n@@ -1,2 +1,2 @@\n a\n-last\n"
+        "\\ No newline at end of file\n+LAST\n"
+    )
+    (f,) = parse_diff(text, c)
+    assert len(f.hunks) == 1 and f.hunks[0].removed_side == ["a", "last"] and f.hunks[0].added_side == ["a", "LAST"]
+    assert not c
+
+
+def test_f4_header_lookalike_body_lines_are_body():
+    c: dict = {}
+    text = (
+        "diff --git a/m.py b/m.py\n--- a/m.py\n+++ b/m.py\n@@ -1,3 +1,3 @@\n a\n"
+        "--- old\n+++ new\n"
+        "\\ No newline at end of file\n b\n"
+    )
+    (f,) = parse_diff(text, c)
+    assert f.path == "m.py" and len(f.hunks) == 1
+    assert f.hunks[0].removed_side == ["a", "-- old", "b"] and f.hunks[0].added_side == ["a", "++ new", "b"]

@@ -310,13 +310,15 @@ def parse_diff(text: str, counters: dict[str, int] | None = None) -> list[FileDi
         old = new = None
         saw_old = saw_new = False
         hunks: list[Hunk] = []
+        in_hunks = False
         while i < n and not lines[i].startswith("diff --git "):
             line = lines[i]
-            if not hunks and line.startswith("--- "):
+            if not in_hunks and line.startswith("--- "):
                 old, saw_old = _clean_path(line[4:]), True
-            elif not hunks and line.startswith("+++ "):
+            elif not in_hunks and line.startswith("+++ "):
                 new, saw_new = _clean_path(line[4:]), True
             elif line.startswith("@@"):
+                in_hunks = True
                 m = _HUNK.match(line)
                 i += 1
                 if not m:
@@ -332,6 +334,9 @@ def parse_diff(text: str, counters: dict[str, int] | None = None) -> list[FileDi
                         bump("truncated")
                         break
                     body = lines[i]
+                    if body.startswith("\\"):
+                        i += 1
+                        continue
                     op, rest = (body[:1] or " "), body[1:]
                     if op == " " and old_rem > 0 and new_rem > 0:
                         old_rem -= 1
@@ -346,6 +351,9 @@ def parse_diff(text: str, counters: dict[str, int] | None = None) -> list[FileDi
                         break
                     items.append((op, rest.rstrip()))
                     i += 1
+                if not ok:
+                    while i < n and not lines[i].startswith(("@@", "diff --git ")):
+                        i += 1
                 while i < n and lines[i].startswith("\\"):
                     i += 1
                 if ok:
