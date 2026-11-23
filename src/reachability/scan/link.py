@@ -113,6 +113,24 @@ def _locally_bound(scope: ast.AST) -> set[str]:
     return names
 
 
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+
+
+def _calls_by_line(tree: ast.Module) -> dict[int, list[tuple[ast.Call, list[ast.AST]]]]:
+    """Every attribute call keyed by its line, with the chain of enclosing function/class scopes."""
+    out: dict[int, list[tuple[ast.Call, list[ast.AST]]]] = {}
+
+    def visit(node: ast.AST, scopes: list[ast.AST]) -> None:
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            out.setdefault(node.lineno, []).append((node, scopes))
+        inner = scopes + [node] if isinstance(node, _SCOPES) else scopes
+        for child in ast.iter_child_nodes(node):
+            visit(child, inner)
+
+    visit(tree, [])
+    return out
+
+
 class _Linker:
     def __init__(self, report: DiscoveryReport, symbol_index: dict[str, ModuleSymbolTable]) -> None:
         self.report = report
@@ -123,6 +141,8 @@ class _Linker:
         self._trees: dict[str, ast.Module | None] = {}
         self._bindings: dict[str, Counter | None] = {}
         self._reexport: dict[tuple[str, str], SymbolNode | None] = {}
+        self._calls: dict[str, dict] = {}
+        self.low_count: Counter = Counter()
         self._seen: set[tuple[str, str, int, LinkRule]] = set()
 
     def node(self, node_id: str) -> SymbolNode | None:
@@ -188,6 +208,27 @@ class _Linker:
             return found
         return self.reexport_target(module, name)
 
+    def unique_receiver_call(self, module: str, edge, attr: str, receiver: str) -> bool:
+        """True iff the LOW edge is the one `receiver.attr(...)` call on its line and the bare
+        receiver name is bound nowhere in the call's enclosing scopes."""
+        tree = self.tree(module)
+        if tree is None:
+            return False
+        if module not in self._calls:
+            self._calls[module] = _calls_by_line(tree)
+        same_attr = [
+            (call, scopes)
+            for call, scopes in self._calls[module].get(edge.lineno, [])
+            if call.func.attr == attr
+        ]
+        if len(same_attr) != 1 or self.low_count[(edge.caller_id, edge.callee_id, edge.lineno)] != 1:
+            return False
+        call, scopes = same_attr[0]
+        value = call.func.value
+        if not isinstance(value, ast.Name) or value.id != receiver:
+            return False
+        return not any(receiver in _locally_bound(scope) for scope in scopes)
+
     def class_init(self, cls: SymbolNode) -> SymbolNode | None:
         return _search_class_for_method(cls, "__init__", cls.dotted_module, self.by_module, set())
 
@@ -196,7 +237,112 @@ class _Linker:
         if init is not None:
             self.add(edge.caller_id, init.node_id, edge.file, edge.lineno, LinkRule.CONSTRUCTOR_INIT)
 
+    def edge_method(self, edge, cls: SymbolNode, name: str, rule: LinkRule) -> None:
+        method = _search_class_for_method(cls, name, cls.dotted_module, self.by_module, set())
+        if method is not None:
+            self.add(edge.caller_id, method.node_id, edge.file, edge.lineno, rule)
+
+    def rule_c(self, edge) -> None:
+        mod_part, attr = edge.callee_id.split(":", 1)
+        if "." not in mod_part or "." in attr:
+            return
+        module, name = mod_part.rsplit(".", 1)
+        if module not in self.records or mod_part in self.records:
+            return
+        cls = self.resolve_symbol(module, name)
+        if cls is not None and cls.kind == NodeKind.CLASS:
+            self.edge_method(edge, cls, attr, LinkRule.MODULE_CLASS_ATTR)
+
+    def rule_d(self, edge, module: str, name: str) -> None:
+        table = self.report.import_tables.get(module)
+        if table is None or not any(
+            a.target_symbol == a.local_name and not a.conditional and not a.type_checking_only
+            for a in table.aliases
+        ):
+            return
+        bindings = self.module_bindings(module)
+        if bindings is None:
+            return
+        for sub_alias in table.aliases:
+            sub = sub_alias.local_name
+            if sub_alias.target_symbol != sub or not self.qualifies_from_import(table, sub, bindings):
+                continue
+            pkg = sub_alias.resolved_absolute
+            if f"{pkg}.{sub}" not in self.records or pkg not in self.records:
+                continue
+            pkg_table = self.report.import_tables.get(pkg)
+            if pkg_table is None or pkg_table.star_imports:
+                continue
+            pkg_bindings = self.module_bindings(pkg)
+            if pkg_bindings is None or pkg_bindings[sub] != 0 or sub in self.by_module.get(pkg, {}):
+                continue
+            if not self.unique_receiver_call(module, edge, name, sub):
+                continue
+            final = self.resolve_symbol(f"{pkg}.{sub}", name)
+            if final is None:
+                continue
+            self.add(edge.caller_id, final.node_id, edge.file, edge.lineno, LinkRule.SUBMODULE_ATTR)
+            if final.kind == NodeKind.CLASS:
+                init = self.class_init(final)
+                if init is not None:
+                    self.add(edge.caller_id, init.node_id, edge.file, edge.lineno, LinkRule.SUBMODULE_ATTR)
+            return
+
+    @staticmethod
+    def qualifies_from_import(table, name: str, bindings: Counter) -> bool:
+        aliases = [a for a in table.aliases if a.local_name == name]
+        return (
+            len(aliases) == 1
+            and not aliases[0].conditional
+            and not aliases[0].type_checking_only
+            and bindings[name] == 1
+        )
+
+    def singletons(self, module: str) -> dict[str, SymbolNode]:
+        """`x = C(...)` direct module-body statements where x has no other binding and C is a class."""
+        tree = self.tree(module)
+        bindings = self.module_bindings(module)
+        table = self.report.import_tables.get(module)
+        if tree is None or bindings is None or table is None:
+            return {}
+        globals_ = _global_names(tree)
+        out: dict[str, SymbolNode] = {}
+        for stmt in tree.body:
+            if not (
+                isinstance(stmt, ast.Assign)
+                and len(stmt.targets) == 1
+                and isinstance(stmt.targets[0], ast.Name)
+                and isinstance(stmt.value, ast.Call)
+                and isinstance(stmt.value.func, ast.Name)
+            ):
+                continue
+            x, cname = stmt.targets[0].id, stmt.value.func.id
+            if bindings[x] != 1 or x in globals_ or bindings[cname] != 1:
+                continue
+            cls = self.by_module.get(module, {}).get(cname)
+            if cls is None:
+                if not self.qualifies_from_import(table, cname, bindings):
+                    continue
+                alias = next(a for a in table.aliases if a.local_name == cname)
+                if alias.target_symbol is None:
+                    continue
+                cls = self.resolve_symbol(alias.resolved_absolute, alias.target_symbol)
+            if cls is not None and cls.kind == NodeKind.CLASS:
+                out[x] = cls
+        return out
+
+    def rule_e(self, edge, module: str, name: str, cache: dict[str, dict[str, SymbolNode]]) -> None:
+        if module not in cache:
+            cache[module] = self.singletons(module)
+        for x, cls in cache[module].items():
+            if self.unique_receiver_call(module, edge, name, x):
+                self.edge_method(edge, cls, name, LinkRule.MODULE_SINGLETON)
+                return
+
     def run(self, edges) -> None:
+        low = [e for e in edges if e.confidence == Confidence.LOW and e.callee_id.startswith("?:")]
+        for e in low:
+            self.low_count[(e.caller_id, e.callee_id, e.lineno)] += 1
         for edge in edges:
             target = self.node(edge.callee_id)
             if target is None and ":" in edge.callee_id and not edge.callee_id.startswith(("?:", "ext:")):
@@ -205,12 +351,18 @@ class _Linker:
                     final = self.reexport_target(module, name)
                     if final is not None:
                         self.add(edge.caller_id, final.node_id, edge.file, edge.lineno, LinkRule.REEXPORT_ALIAS)
-                        target = final
                         if final.kind == NodeKind.CLASS:
                             self.constructor(edge, final)
                         continue
-            if target is not None and target.kind == NodeKind.CLASS:
+                self.rule_c(edge)
+            elif target is not None and target.kind == NodeKind.CLASS:
                 self.constructor(edge, target)
+        singleton_cache: dict[str, dict[str, SymbolNode]] = {}
+        for edge in low:
+            module = edge.caller_id.split(":", 1)[0]
+            name = edge.callee_id[2:]
+            self.rule_d(edge, module, name)
+            self.rule_e(edge, module, name, singleton_cache)
 
 
 def compute_link_edges(report: DiscoveryReport, symbol_index: dict[str, ModuleSymbolTable], edges) -> LinkResult:
