@@ -147,3 +147,28 @@ def test_class_only_change_keeps_py_changed(tmp_path):
     new = "class C:\n    k = 2\n"
     a, b, syms = trees(tmp_path, old, new)
     assert diff_symbols(syms, symbols_from_tree(b)).py_changed
+
+
+def test_f1_unrelated_directories_do_not_map():
+    c: dict = {}
+    assert map_path("tools/utils/helpers.py", ["pkg/utils/helpers.py"], c) is None
+    assert map_path("examples/pkg/__init__.py", ["pkg/__init__.py"], c) is None
+
+
+def test_f1_real_layouts_still_map():
+    c: dict = {}
+    assert map_path("src/anyio/_core/_subprocesses.py", ["anyio/_core/_subprocesses.py", "anyio/_core/_x.py"], c) == "anyio/_core/_subprocesses.py"
+    rel = "langchain_openai/chat_models/base.py"
+    assert map_path("libs/partners/openai/" + rel, [rel, "langchain_openai/__init__.py"], c) == rel
+
+
+def test_f1_denied_prefix_segment_skips_and_counts():
+    c: dict = {}
+    assert map_path("examples/pkg/mod.py", ["pkg/mod.py"], c) is None
+    assert map_path("vendor/pkg/mod.py", ["pkg/mod.py"], c) is None
+    assert c["files_denied_prefix"] == 2
+
+
+def test_f1_longest_whole_suffix_wins():
+    c: dict = {}
+    assert map_path("lib/a/b/mod.py", ["b/mod.py", "a/b/mod.py"], c) == "a/b/mod.py"

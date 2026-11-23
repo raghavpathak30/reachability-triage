@@ -377,31 +377,41 @@ def _module_of(rel: str) -> str:
     return ".".join(parts)
 
 
+_DENIED_PREFIX = frozenset({
+    "examples", "example", "docs", "doc", "tests", "test", "testing", "benchmarks", "bench",
+    "scripts", "tools", "vendor", "_vendor", "third_party",
+})
+
+
 def map_path(diff_path: str, rels: list[str], counters: dict[str, int]) -> str | None:
-    """The wheel file a diff path refers to: unique longest common path suffix, on `/` boundaries."""
+    """The wheel file a diff path names: the diff path equals the wheel path or ends with it on a `/` boundary."""
     d = diff_path.split("/")
-    best, best_len, tie = None, 0, False
-    for rel in rels:
-        c = rel.split("/")
-        n = 0
-        while n < min(len(c), len(d)) and c[-1 - n] == d[-1 - n]:
-            n += 1
-        if n == 0:
-            continue
-        if n > best_len:
-            best, best_len, tie = rel, n, False
-        elif n == best_len:
-            tie = True
-    if best is None:
-        _bump(counters, "files_unmapped")
+    matches = [rel for rel in rels if diff_path == rel or diff_path.endswith("/" + rel)]
+    if not matches:
+        shared = [(n, rel) for rel in rels if (n := _common_suffix(d, rel.split("/"))) > 0]
+        top = max((n for n, _ in shared), default=0)
+        _bump(counters, "files_suffix_tie" if sum(1 for n, _ in shared if n == top) > 1 else "files_unmapped")
         return None
-    if tie:
+    best_len = max(len(r.split("/")) for r in matches)
+    best = [r for r in matches if len(r.split("/")) == best_len]
+    if len(best) > 1:
         _bump(counters, "files_suffix_tie")
         return None
-    if best_len == 1 and d not in ([best], ["src", best]):
+    rel = best[0]
+    if best_len == 1 and d not in ([rel], ["src", rel]):
         _bump(counters, "files_one_segment")
         return None
-    return best
+    if _DENIED_PREFIX & set(d[: len(d) - best_len]):
+        _bump(counters, "files_denied_prefix")
+        return None
+    return rel
+
+
+def _common_suffix(a: list[str], b: list[str]) -> int:
+    n = 0
+    while n < min(len(a), len(b)) and a[-1 - n] == b[-1 - n]:
+        n += 1
+    return n
 
 
 def _prepare(text: str) -> list[str]:
