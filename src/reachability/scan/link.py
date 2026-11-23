@@ -197,7 +197,11 @@ class _Linker:
         if module not in self._bindings:
             had = module in self._trees
             t = self.tree(module)
-            self._bindings[module] = _scope_bindings(t) if t is not None else None
+            counts = _scope_bindings(t) if t is not None else None
+            if counts is not None:
+                for g in _global_names(t):
+                    counts[g] += 2
+            self._bindings[module] = counts
             if not had and module != self._active:
                 self._trees.pop(module, None)
         return self._bindings[module]
