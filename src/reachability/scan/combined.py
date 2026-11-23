@@ -101,6 +101,8 @@ class CombinedIndex:
     link_edges: list = field(default_factory=list)
     link_counts: dict[str, int] = field(default_factory=dict)
     link_seconds: float = 0.0
+    link_files_parsed: int = 0
+    link_files_skipped: int = 0
 
     def close(self) -> None:
         shutil.rmtree(self.root, ignore_errors=True)
@@ -223,6 +225,8 @@ def attach_links(state: CombinedIndex) -> None:
         result = compute_link_edges(state.index.report, state.index.symbol_index, state.index.edges)
         state.link_edges = list(result.edges)
         state.link_counts = dict(result.per_rule_counts)
+        state.link_files_parsed = result.files_parsed
+        state.link_files_skipped = result.files_skipped
     except Exception as exc:  # noqa: BLE001 - the link step must never end the scan
         state.link_edges = []
         state.link_counts = {}

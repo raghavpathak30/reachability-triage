@@ -132,6 +132,8 @@ def run_scan(
             combined_edges = len(combined.index.edges)
             link_counts = dict(combined.link_counts)
             link_seconds = combined.link_seconds
+            link_files_parsed = combined.link_files_parsed
+            link_files_skipped = combined.link_files_skipped
         finally:
             combined.close()
     finally:
@@ -165,6 +167,8 @@ def run_scan(
         "link_edges": link_counts,
         "link_edges_total": sum(link_counts.values()),
         "link_seconds": link_seconds,
+        "link_files_parsed": link_files_parsed,
+        "link_files_skipped": link_files_skipped,
         "batch_setup_seconds": stats_extra["batch_setup_seconds"],
         "queries": stats_extra["queries"],
         "query_seconds_median": statistics.median(qs) if qs else 0.0,

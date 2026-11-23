@@ -39,9 +39,15 @@ class LinkEdge:
 class LinkResult:
     edges: list[LinkEdge] = field(default_factory=list)
     per_rule_counts: dict[str, int] = field(default_factory=dict)
+    files_parsed: int = 0
+    files_skipped: int = 0
 
 
 MAX_HOPS = 8
+
+
+def _parse(path: Path) -> ast.Module:
+    return ast.parse(path.read_bytes())
 
 
 def _scope_bindings(tree: ast.Module) -> Counter:
@@ -152,6 +158,8 @@ class _Linker:
         self._reexport: dict[tuple[str, str], SymbolNode | None] = {}
         self._calls: dict[str, dict] = {}
         self.low_count: Counter = Counter()
+        self.files_parsed = 0
+        self.files_skipped = 0
         self._seen: set[tuple[str, str, int, LinkRule]] = set()
 
     def node(self, node_id: str) -> SymbolNode | None:
@@ -170,10 +178,14 @@ class _Linker:
     def tree(self, module: str) -> ast.Module | None:
         if module not in self._trees:
             rec = self.records.get(module)
-            try:
-                self._trees[module] = ast.parse(rec.file_path.read_text()) if rec else None
-            except (OSError, SyntaxError, ValueError):
-                self._trees[module] = None
+            tree = None
+            if rec is not None:
+                self.files_parsed += 1
+                try:
+                    tree = _parse(rec.file_path)
+                except (RecursionError, MemoryError, SyntaxError, ValueError, UnicodeDecodeError, OSError):
+                    self.files_skipped += 1
+            self._trees[module] = tree
         return self._trees[module]
 
     def module_bindings(self, module: str) -> Counter | None:
@@ -380,4 +392,4 @@ def compute_link_edges(report: DiscoveryReport, symbol_index: dict[str, ModuleSy
     counts: dict[str, int] = {}
     for e in linker.out:
         counts[e.resolution_rule.value] = counts.get(e.resolution_rule.value, 0) + 1
-    return LinkResult(linker.out, counts)
+    return LinkResult(linker.out, counts, linker.files_parsed, linker.files_skipped)
