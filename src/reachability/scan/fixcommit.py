@@ -516,7 +516,10 @@ def fix_changed(
             continue
         iidx = _index(ilines)
         fidx = _index(flines) if flines is not None else {}
-        defs = by_module.get(_module_of(rel), [])
+        defs = [
+            d for d in by_module.get(_module_of(rel), [])
+            if d.file.as_posix() == rel or d.file.as_posix().endswith("/" + rel)
+        ]
         for hunk in fd.hunks:
             if counters.get("hunks_seen", 0) >= MAX_HUNKS_PER_SCAN:
                 _bump(counters, "hunks_dropped")

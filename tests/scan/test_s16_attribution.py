@@ -172,3 +172,22 @@ def test_f1_denied_prefix_segment_skips_and_counts():
 def test_f1_longest_whole_suffix_wins():
     c: dict = {}
     assert map_path("lib/a/b/mod.py", ["b/mod.py", "a/b/mod.py"], c) == "a/b/mod.py"
+
+
+def test_f5_defs_selected_by_file_not_module_name(tmp_path):
+    a, b = tmp_path / "old", tmp_path / "new"
+    mod = "def one():\n    x = 1\n    return x\n\n\ndef two():\n    return 2\n"
+    pkg = "def three():\n    return 3\n\n\ndef four():\n    y = 1\n    return y\n"
+    for root, new in ((a, False), (b, True)):
+        write_tree(root, {
+            "foo.py": mod.replace("x = 1", "x = 9") if new else mod,
+            "foo/__init__.py": pkg.replace("y = 1", "y = 9") if new else pkg,
+        })
+    syms = symbols_from_tree(a)
+    h = hunk(("-", "    y = 1"), ("+", "    y = 9"))
+    keys = fix_changed([FileDiff("foo/__init__.py", (h,))], a, b, syms, {})
+    assert {k[1] for k in keys} <= {"four"}
+    h2 = hunk(("-", "    x = 1"), ("+", "    x = 9"))
+    keys = fix_changed([FileDiff("foo.py", (h2,))], a, b, syms, {})
+    assert {k[1] for k in keys} <= {"one"}
+    assert {k[1] for k in fix_changed([FileDiff("foo.py", (h,))], a, b, syms, {})} == set()
