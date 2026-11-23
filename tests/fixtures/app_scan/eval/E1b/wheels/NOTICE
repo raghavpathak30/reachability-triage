@@ -1,0 +1,7 @@
+anyio-4.14.0-py3-none-any.whl and anyio-4.14.2-py3-none-any.whl are the unmodified PyPI wheels
+of AnyIO (https://github.com/agronholm/anyio), Copyright (c) Alex Gronholm, MIT licence (the
+licence text is inside each wheel under anyio-*.dist-info/licenses/LICENSE). They are used only
+as test fixtures.
+
+fix-commits/agronholm/anyio/eb562e6462ee46b1904e50b02ce00a858cdeb200.diff is the unmodified output
+of https://github.com/agronholm/anyio/commit/eb562e6462ee46b1904e50b02ce00a858cdeb200.diff.

@@ -22,6 +22,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 E1_DIR = REPO_ROOT / "tests" / "fixtures" / "app_scan" / "eval" / "E1"
+E1B_DIR = REPO_ROOT / "tests" / "fixtures" / "app_scan" / "eval" / "E1b"
 FIXED_DATE_TIME = (2026, 1, 1, 0, 0, 0)
 SNAPSHOT_NAME = "osv-pypi-2026-11-12.zip"
 
@@ -140,11 +141,40 @@ def materialize_e1(outdir: Path) -> dict[str, Path | str]:
     return {"app": app, "wheels": wheels, "snapshot": snapshot, "sha256": sha}
 
 
+def materialize_e1b(outdir: Path) -> dict[str, Path | str]:
+    """E1b: real anyio wheels, the verbatim GHSA-3w57 record and its fix-commit diff."""
+    outdir = Path(outdir)
+    app = outdir / "app"
+    if app.exists():
+        shutil.rmtree(app)
+    app.mkdir(parents=True)
+    shutil.copy(E1B_DIR / "requirements.txt", app / "requirements.txt")
+    for src in sorted((E1B_DIR / "app").rglob("*.py.txt")):
+        rel = src.relative_to(E1B_DIR / "app")
+        dest = app / rel.with_name(rel.name[: -len(".txt")])
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(src, dest)
+    wheels = outdir / "wheels"
+    if wheels.exists():
+        shutil.rmtree(wheels)
+    shutil.copytree(E1B_DIR / "wheels", wheels)
+    (wheels / "NOTICE").unlink()
+    for whl in sorted(wheels.glob("*.whl")):
+        whl.with_name(whl.name + ".sha256").write_text(hashlib.sha256(whl.read_bytes()).hexdigest() + "\n")
+    snapshot = outdir / SNAPSHOT_NAME
+    with zipfile.ZipFile(snapshot, "w") as z:
+        for rec in sorted((E1B_DIR / "advisories").glob("*.json")):
+            z.writestr(rec.name, rec.read_bytes())
+    sha = hashlib.sha256(snapshot.read_bytes()).hexdigest()
+    return {"app": app, "wheels": wheels, "snapshot": snapshot, "sha256": sha}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("outdir")
+    parser.add_argument("--fixture", choices=["E1", "E1b"], default="E1")
     args = parser.parse_args()
-    result = materialize_e1(Path(args.outdir))
+    result = (materialize_e1b if args.fixture == "E1b" else materialize_e1)(Path(args.outdir))
     sys.stdout.write(
         f"app: {result['app']}\nwheels: {result['wheels']}\nsnapshot: {result['snapshot']}\nsha256: {result['sha256']}\n"
     )

@@ -1,0 +1,13 @@
+from anyio import to_process
+
+
+def work(n):
+    return n + 1
+
+
+def main():
+    return to_process.run_sync(work, 1)
+
+
+if __name__ == "__main__":
+    main()

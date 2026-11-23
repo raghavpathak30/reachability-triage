@@ -1,9 +1,9 @@
 {
  "id": "E1",
  "advisory": "GHSA-r7w7-9xr2-qq2r",
- "verdict": "reachable",
- "evidence_level": "path_proven",
- "reason_code": null,
- "true_symbols": ["langchain_openai.chat_models.base:_url_to_size"],
- "note": "stand-in wheels (real module/symbol layout) built by scripts/materialize_scan_fixture.py; synthetic call shape, real advisory"
+ "verdict": "unknown",
+ "evidence_level": null,
+ "reason_code": "PATH_TO_UNCONFIRMED_TARGET",
+ "partial_path_may_end_at": ["langchain_openai.chat_models.base:_url_to_size"],
+ "note": "stand-in wheels (real module/symbol layout) built by scripts/materialize_scan_fixture.py; synthetic call shape, real advisory. Relabelled in S1.6 (DECISIONS §31 item 5): neither this record nor its alias PYSEC-2026-76 carries a commit link, so no target is high; the S1 path_proven label moved to E1b."
 }
