@@ -330,7 +330,9 @@ def test_every_engine_unknown_return_classifies_not_unclassified(tmp_path, site,
 def test_compute_reachability_has_exactly_four_unknown_returns():
     import inspect
 
-    assert inspect.getsource(compute_reachability).count("Verdict.UNKNOWN") == 4
+    from reachability.index.reachability import ReachabilityBatch
+
+    assert inspect.getsource(ReachabilityBatch.query).count("Verdict.UNKNOWN") == 4
 
 
 def test_index_package_does_not_import_triage():

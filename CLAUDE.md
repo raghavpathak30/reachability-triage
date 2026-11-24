@@ -45,8 +45,50 @@ section, DEMO.md browser walkthrough, `DECISIONS.md` §20; plan
 not do is listed in the web UI bullet of NOT BUILT above. The web container
 resolves `api` once at nginx startup, so restart `web` after recreating `api`. The CI
 `web` job has run and passed on GitHub.
+Also not built (app scan): evidence levels 2-4 (`module_imported_by_app`,
+`no_target_symbol`, `package_installed_not_imported`) and the import closure
+(unit S2a) — every `unknown` finding has `evidence_level: null` and the text
+output says the import closure was not evaluated
+(`src/reachability/scan/render.py`); the registry codes
+`NOT_IMPORTED_BY_APP_CODE` and `DEPENDENCY_PIN_FIX` are never emitted
+(`src/reachability/scan/reasons.py`); per-dist cached indexes (S2b); the §4
+eval corpus and a `scan-eval` CI job (S3: no workflow in `.github/workflows/`
+runs a scan); S4's product shell (no `pyproject.toml` or console script — the
+CLI runs as `PYTHONPATH=src python -m reachability.cli scan`; no `db update`,
+SARIF, or exit-code policy for findings: exit 0 with output, 2 on error; the
+FastAPI/Postgres/LangGraph/web service is not archived); the advisory-to-symbol
+dataset; `Pipfile.lock`/`pylock.toml` inventory (1.0.1); live OSV queries (the
+scan reads a pinned snapshot zip given with `--snapshot`); any scan API, table
+or UI (`/v1/scans` does not exist).
 These are in DECISIONS.md as intent. Check the code before claiming any
 of them work — in a README, docstring, commit message or comment.
+
+App scan (CLI), units S1, S1.5 and S1.6 (`DECISIONS.md` §26-§31, spec
+`agent_docs/PHASE_APP_SCAN.md`), is built:
+`PYTHONPATH=src python -m reachability.cli scan <app dir> --snapshot <OSV zip>`
+(`src/reachability/cli.py`) reads the app's pinned `requirements.txt`, `uv.lock`
+or `poetry.lock` (`src/reachability/scan/inventory.py`), matches it against the
+snapshot (`src/reachability/scan/advisories.py`), fetches the installed and
+first-fixed wheels from `pypi.org`/`files.pythonhosted.org` with sha256 checks
+and caps (`src/reachability/scan/fetch.py`), builds one combined index of app
+plus wheels with the unchanged `build_repo_index`
+(`src/reachability/scan/combined.py`), adds scan-only `medium` link edges from
+five rules — `constructor_init`, `reexport_alias`, `module_class_attr`,
+`submodule_attr`, `module_singleton` (`src/reachability/scan/link.py`) — runs
+one batch reachability pass per scan (`compute_reachability_batch`,
+`src/reachability/index/reachability.py`), and writes JSON
+(`schema_version "0"`) or text (`src/reachability/scan/render.py`). A target is
+`high` only when the advisory names it in code form and the advisory's own fix
+commit changes it (`src/reachability/scan/targets.py`,
+`src/reachability/scan/fixcommit.py`); for that the scan fetches
+`https://github.com/{owner}/{repo}/commit/{sha}.diff` for same-repo commit URLs
+in the record (no API, no token; every failure is a `fix_commit_unavailable`
+gap). Class nodes are never targets. Only a confident path to a `high` target is
+`path_proven`; a confident path to a `medium` target is `unknown` /
+`PATH_TO_UNCONFIRMED_TARGET`. Scans never say `not_reachable`: the engine's
+`NOT_REACHABLE` maps to `unknown` / `NO_PATH_FOUND`
+(`src/reachability/scan/query.py`). App and wheel source is parsed with `ast`,
+never imported or run.
 
 Live LLM API integration and content-hash caching, previously listed
 here, are now built — see the Phase 5 paragraph below and

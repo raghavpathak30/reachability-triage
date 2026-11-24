@@ -1,0 +1,9 @@
+diff --git a/lib/core.py b/lib/core.py
+--- a/lib/core.py
++++ b/lib/core.py
+@@ -3,4 +3,4 @@
+ 
+ 
+ def helper():
+-    return 0
++    return 1

@@ -1,0 +1,16 @@
+{
+ "fixture": "E1",
+ "source": "agent_docs/PHASE_APP_SCAN.md section 4, E1 row (frozen)",
+ "advisory": "GHSA-r7w7-9xr2-qq2r",
+ "installed": {"dist": "langchain-openai", "version": "1.1.13"},
+ "fixed_in": "1.1.14",
+ "app": "imports langchain_openai.chat_models.base and calls _url_to_size(url) directly (synthetic call shape, real advisory)",
+ "expected": {
+  "verdict": "reachable",
+  "evidence_level": "path_proven",
+  "reason_code": null,
+  "final_callee": "langchain_openai.chat_models.base:_url_to_size",
+  "text_fix_line": "fix: upgrade langchain-openai 1.1.13 -> 1.1.14"
+ },
+ "note": "S1 uses stand-in wheels with the real module and symbol layout; the advisory record is the real OSV record."
+}

@@ -1,0 +1,15 @@
+The *.json files in this directory are byte-for-byte copies of members of the
+OSV PyPI export (osv-pypi-2026-11-12.zip, sha256
+c7ea4e15b83912960fc5cbd42c6003dd630e422ec4dfbfc4ed19445573e1b08c) and are
+used only as test fixtures.
+
+Sources and licences (each record names its own origin in its `id` prefix):
+- GitHub Advisory Database (GHSA-*): CC-BY-4.0, https://github.com/github/advisory-database
+- PyPA Advisory Database (PYSEC-*): CC-BY-4.0, https://github.com/pypa/advisory-database
+- OpenSSF Malicious Packages (MAL-*): CC-BY-4.0, https://github.com/ossf/malicious-packages
+- OSV schema and aggregation: OSV.dev, https://osv.dev, data licensed CC-BY-4.0 unless a record states otherwise.
+
+Attribution: "OSV data (c) the respective database maintainers, licensed under
+CC-BY-4.0." Records are unmodified unless listed under "Derived records" below.
+
+Derived records: none.

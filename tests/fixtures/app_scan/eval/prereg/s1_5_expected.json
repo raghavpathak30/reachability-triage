@@ -1,0 +1,153 @@
+{
+ "app": "open-webui @ b0e6098e940942281d9c83f3529ea117287a3a22, scanned from /tmp/spike/open-webui",
+ "snapshot": "osv-pypi-2026-11-12.zip, sha256 c7ea4e15b83912960fc5cbd42c6003dd630e422ec4dfbfc4ed19445573e1b08c (cli.py REFERENCE_SHA256)",
+ "recorded": "2026-11-22, DECISIONS §30 item 5, before any S1.5 code and before the S1.5 run; not edited after the run",
+ "source": "agent_docs/spike-2026-11-17.md E table; true symbols as in s1_openwebui_expected.json",
+ "expected_path_proven": [
+  {
+   "advisory_id": "GHSA-3w57-8xmc-8v26",
+   "dist_version": "anyio 4.14.0",
+   "final_callee": "anyio._core._subprocesses:open_process",
+   "final_callee_confidence": "high",
+   "spike": "spike pair 16",
+   "true_symbols": [
+    "anyio._core._subprocesses:open_process"
+   ],
+   "true_symbols_source": "fix eb562e6 touches only src/anyio/_core/_subprocesses.py; AsyncIOBackend.open_process and _ProcessStreamProtocol.__init__ also change in the 4.14.0->4.14.2 wheel diff but belong to other changes in the release, so a path_proven to either is a wrong-function stop"
+  },
+  {
+   "advisory_id": "GHSA-w6j9-cwv2-h6wq",
+   "dist_version": "pyjwt 2.13.0",
+   "final_callee": "jwt.api_jwk:PyJWK.__init__",
+   "final_callee_confidence": "high",
+   "spike": "spike pair 11",
+   "true_symbols": [
+    "jwt.api_jwk:PyJWK.__init__"
+   ],
+   "true_symbols_source": "fix 8915570 touches only PyJWK.__init__ in jwt/api_jwk.py"
+  }
+ ],
+ "expected_unknown": [
+  {
+   "advisory_id": "GHSA-5849-834g-hvw5",
+   "dist_version": "pypdf 6.21.2",
+   "spike": "spike pair 12",
+   "why": "advisory names no function, so no target is high; app side reaches PDFLoader.lazy_load only through a local-variable method call (out of scope)",
+   "true_symbols": [
+    "pypdf._reader:PdfReader._read_standard_xref_table"
+   ]
+  },
+  {
+   "advisory_id": "GHSA-4vqv-7265-gm2w",
+   "dist_version": "pypdf 6.21.2",
+   "spike": "spike pair 13",
+   "why": "advisory names no function, so no target is high; app side reaches PDFLoader.lazy_load only through a local-variable method call (out of scope)",
+   "true_symbols": [
+    "pypdf._reader:PdfReader._read_standard_xref_table",
+    "pypdf._reader:PdfReader._read_xref",
+    "pypdf._reader:PdfReader._read_xref_tables_and_trailers"
+   ]
+  },
+  {
+   "advisory_id": "GHSA-x3rh-gjgm-fmqc",
+   "dist_version": "pypdf 6.21.2",
+   "spike": "spike pair 14",
+   "why": "advisory names no function, so no target is high; app side reaches PDFLoader.lazy_load only through a local-variable method call (out of scope)",
+   "true_symbols": [
+    "pypdf._reader:PdfReader.__init__",
+    "pypdf._reader:PdfReader._read_pdf15_xref_stream"
+   ]
+  },
+  {
+   "advisory_id": "GHSA-cg8m-r9f2-5wm2",
+   "dist_version": "black 26.5.1",
+   "spike": "X bucket (fix in action/main.py, not in the wheel)",
+   "why": "measurement 3 path_proven to black:format_str was a wrong-function claim; no high target expected",
+   "true_symbols": []
+  }
+ ],
+ "reported_no_expectation": [
+  {
+   "advisory_id": "GHSA-8wjv-2p76-3863",
+   "true_symbols": [
+    "jwt.api_jws:PyJWS._load"
+   ]
+  },
+  {
+   "advisory_id": "GHSA-hxm8-2xgr-2p9m",
+   "true_symbols": [
+    "jwt.api_jws:PyJWS._load"
+   ]
+  },
+  {
+   "advisory_id": "GHSA-gvp8-978c-rx2q",
+   "true_symbols": [
+    "jwt.api_jwt:PyJWT._merge_options"
+   ]
+  },
+  {
+   "advisory_id": "GHSA-42vr-xj54-vc7v",
+   "true_symbols": [
+    "jwt.api_jwt:PyJWT._decode_payload"
+   ]
+  },
+  {
+   "advisory_id": "GHSA-9j54-fg26-wv3r",
+   "true_symbols": [
+    "jwt.api_jws:PyJWS._verify_signature"
+   ]
+  },
+  {
+   "advisory_id": "GHSA-r6x4-923q-g947",
+   "true_symbols": [
+    "jwt.algorithms:HMACAlgorithm.prepare_key"
+   ]
+  },
+  {
+   "advisory_id": "GHSA-p4g4-x82p-q773",
+   "true_symbols": [
+    "jwt.algorithms:HMACAlgorithm.prepare_key"
+   ]
+  },
+  {
+   "advisory_id": "GHSA-w2cx-738m-mc7w",
+   "true_symbols": [
+    "jwt.algorithms:HMACAlgorithm.prepare_key"
+   ]
+  },
+  {
+   "advisory_id": "GHSA-jwrc-g2q2-pq5p",
+   "true_symbols": [
+    "jwt.utils:is_pem_format"
+   ]
+  },
+  {
+   "advisory_id": "GHSA-ffc3-869f-jxw9",
+   "true_symbols": [
+    "jwt.utils:is_pem_format"
+   ]
+  },
+  {
+   "advisory_id": "GHSA-jhr6-gm9c-rqjv",
+   "true_symbols": [
+    "(short names from the spike, module path not verified) import_module_class",
+    "_load_module_class_from_ref",
+    "_load_config_modules"
+   ]
+  }
+ ],
+ "pivot_rule": [
+  "both expected path_proven pairs pass and zero wrong-function path_proven: continue plan A' (S2a next)",
+  "exactly one passes: continue, dataset-led headline",
+  "neither passes: plan C'",
+  "any path_proven whose final callee is not a hand-checked true symbol: stop, no merge until Raghav decides fix or amendment",
+  "a pre-registered pair ending in SCAN_BUDGET is not evidence (DECISIONS §13): report it, fix the cause, re-run; it never counts as a pass or a fail",
+  "the other 11 spike E pairs are reported one by one, with no expectation",
+  "any link_error gap in the run makes it invalid: report it, fix the cause, re-run; it never counts toward the pivot rule"
+ ],
+ "true_symbols_note": "Functions each fix commit changes (tests and docs excluded), from agent_docs/spike-2026-11-17.md E table; GHSA-3w57 and GHSA-w6j9 lists set by Raghav at the S1.5 GATE (2026-11-22). The S1.5 open-webui measurement hand-check compares every path_proven final callee and every link hop against these lists.",
+ "comparison_runs": {
+  "flaskr": "pallets/flask examples/tutorial @ 49943b5, requirements.txt rebuilt from the pins DECISIONS §29 recorded: blinker==1.9.0 click==8.5.1 flask==3.1.3 itsdangerous==2.2.0 jinja2==3.1.6 markupsafe==3.0.4 werkzeug==3.1.9",
+  "fastapi_template": "fastapi/full-stack-fastapi-template @ aabb901 (matching S1; the Day 1 spike used 77e550a)"
+ }
+}

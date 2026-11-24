@@ -1,0 +1,136 @@
+{
+ "app": "open-webui @ b0e6098e940942281d9c83f3529ea117287a3a22, scanned from /tmp/spike/open-webui",
+ "snapshot": "osv-pypi-2026-11-12.zip, sha256 c7ea4e15b83912960fc5cbd42c6003dd630e422ec4dfbfc4ed19445573e1b08c (cli.py REFERENCE_SHA256)",
+ "recorded": "2026-11-23, DECISIONS §31 item 4, before any S1.6 code and before the S1.6 run; not edited after the run",
+ "source": "true_symbols found by hand from each advisory's own fix commit (GitHub commit .diff) and confirmed against the installed wheel source (/tmp/app-scan-research/s16/do0_hunks.py, do0_summary.md)",
+ "expected_path_proven": [
+  {
+   "advisory_id": "GHSA-3w57-8xmc-8v26",
+   "dist_version": "anyio 4.14.0",
+   "fix_commits": [
+    "eb562e6462ee46b1904e50b02ce00a858cdeb200"
+   ],
+   "true_symbols": [
+    "anyio._core._subprocesses:open_process"
+   ],
+   "note": "hunk @@ -176,7 +176,7 @@ in src/anyio/_core/_subprocesses.py, inside open_process"
+  },
+  {
+   "advisory_id": "GHSA-w6j9-cwv2-h6wq",
+   "dist_version": "pyjwt 2.13.0",
+   "fix_commits": [
+    "8915570a0bfda9f0ff0e34e7fb09bdb9d71580cf"
+   ],
+   "true_symbols": [
+    "jwt.api_jwk:PyJWK.__init__"
+   ],
+   "note": "hunk @@ -79,7 +79,12 @@ in jwt/api_jwk.py, inside PyJWK.__init__"
+  }
+ ],
+ "unknown_or_path_proven_to_true_symbol": [
+  {
+   "advisory_id": "GHSA-9j54-fg26-wv3r",
+   "dist_version": "pyjwt 2.13.0",
+   "fix_commits": [
+    "f91ed44dd65baaf457f4b3353ed35e98a753934c"
+   ],
+   "true_symbols": [
+    "jwt.api_jws:PyJWS._verify_signature"
+   ],
+   "note": "hunk @@ -414,7 +414,7 @@ in jwt/api_jws.py, inside PyJWS._verify_signature"
+  },
+  {
+   "advisory_id": "GHSA-pxh4-856f-4h89",
+   "dist_version": "pyjwt 2.13.0",
+   "fix_commits": [
+    "af8181ca0bec5e6b372fbba9afbe23702b787ceb"
+   ],
+   "true_symbols": [
+    "jwt.algorithms:HMACAlgorithm.from_jwk"
+   ],
+   "note": "hunk @@ -428,7 +428,10 @@ in jwt/algorithms.py, inside HMACAlgorithm.from_jwk"
+  },
+  {
+   "advisory_id": "GHSA-jhr6-gm9c-rqjv",
+   "dist_version": "sentence-transformers 5.5.1",
+   "fix_commits": [
+    "626eb602b088878a8173bcab69225f68411b99e1",
+    "ae1acc3fb2aa2004577b297eb4a915ce7a03316a"
+   ],
+   "true_symbols": [
+    "sentence_transformers.util.misc:import_module_class"
+   ],
+   "note": "ae1acc3: 3 hunks in sentence_transformers/util/misc.py, inside import_module_class; 626eb60 (v6 refactor) has no hunk whose both sides locate in the 5.5.1/5.6.0 wheels"
+  }
+ ],
+ "expected_unknown": [
+  {
+   "advisory_id": "GHSA-5849-834g-hvw5",
+   "dist_version": "pypdf 6.21.2",
+   "true_symbols": [
+    "pypdf._reader:PdfReader._read_standard_xref_table"
+   ],
+   "note": "fix commit .diff expected HTTP 403 from github.com (PDF header bytes, Do 0) -> fix_commit_unavailable, no high; the advisory also names no function"
+  },
+  {
+   "advisory_id": "GHSA-4vqv-7265-gm2w",
+   "dist_version": "pypdf 6.21.2",
+   "true_symbols": [
+    "pypdf._reader:PdfReader._read_standard_xref_table",
+    "pypdf._reader:PdfReader._read_xref",
+    "pypdf._reader:PdfReader._read_xref_tables_and_trailers"
+   ],
+   "note": "fix commit .diff expected HTTP 403 from github.com (PDF header bytes, Do 0) -> fix_commit_unavailable, no high; the advisory also names no function"
+  },
+  {
+   "advisory_id": "GHSA-x3rh-gjgm-fmqc",
+   "dist_version": "pypdf 6.21.2",
+   "true_symbols": [
+    "pypdf._reader:PdfReader.__init__",
+    "pypdf._reader:PdfReader._read_pdf15_xref_stream"
+   ],
+   "note": "fix commit .diff expected HTTP 403 from github.com (PDF header bytes, Do 0) -> fix_commit_unavailable, no high; the advisory also names no function"
+  },
+  {
+   "advisory_id": "GHSA-cg8m-r9f2-5wm2",
+   "dist_version": "black 26.5.1",
+   "true_symbols": [],
+   "note": "fix commit ac1f715 changes only action/main.py, CHANGES.md and tests: no wheel module, no high"
+  }
+ ],
+ "pivot_rule": [
+  "both expected path_proven pairs pass and zero wrong-function path_proven: continue plan A' (S2a next)",
+  "exactly one passes: continue, dataset-led headline",
+  "neither passes: plan C'",
+  "any path_proven whose final callee is not a hand-checked true symbol: stop, no merge until Raghav decides fix or amendment",
+  "a pre-registered pair ending in SCAN_BUDGET is not evidence (DECISIONS §13): report it, fix the cause, re-run; it never counts as a pass or a fail",
+  "the other 11 spike E pairs are reported one by one, with no expectation",
+  "any link_error gap in the run makes it invalid: report it, fix the cause, re-run; it never counts toward the pivot rule",
+  "every other path_proven in the run is checked by hand against its own fix commit; one that cannot be checked is reported as 'unverified' and blocks the merge like a wrong-function claim",
+  "a pre-registered pair whose fix commit was cut by the per-scan diff budget (fix_commit_unavailable, reason 'diff budget') is not evidence: report it, fix the cause, re-run; it never counts as a pass or a fail"
+ ],
+ "comparison_runs": {
+  "flaskr": "pallets/flask examples/tutorial @ 49943b5, requirements.txt rebuilt from the pins DECISIONS §29 recorded: blinker==1.9.0 click==8.5.1 flask==3.1.3 itsdangerous==2.2.0 jinja2==3.1.6 markupsafe==3.0.4 werkzeug==3.1.9",
+  "fastapi_template": "fastapi/full-stack-fastapi-template @ aabb901 (matching S1; the Day 1 spike used 77e550a)"
+ },
+ "eval_rows": {
+  "E1b": {
+   "advisory_id": "GHSA-3w57-8xmc-8v26",
+   "dist_version": "anyio 4.14.0 -> 4.14.2",
+   "fix_commit": "eb562e6462ee46b1904e50b02ce00a858cdeb200",
+   "verdict": "reachable",
+   "evidence_level": "path_proven",
+   "true_symbols": [
+    "anyio._core._subprocesses:open_process"
+   ],
+   "gate": "G3 (hard); regression gate, not independent evidence (same advisory as the open-webui pair)"
+  },
+  "E1": {
+   "advisory_id": "GHSA-r7w7-9xr2-qq2r",
+   "verdict": "unknown",
+   "reason_code": "PATH_TO_UNCONFIRMED_TARGET",
+   "partial_path_may_end_at": "langchain_openai.chat_models.base:_url_to_size",
+   "why": "record and alias PYSEC-2026-76 carry no commit link"
+  }
+ }
+}

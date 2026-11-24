@@ -1,0 +1,100 @@
+diff --git a/docs/versionhistory.rst b/docs/versionhistory.rst
+index 22c03a49c..409613762 100644
+--- a/docs/versionhistory.rst
++++ b/docs/versionhistory.rst
+@@ -13,6 +13,9 @@ This library adheres to `Semantic Versioning 2.0 <http://semver.org/>`_.
+   identity (``value is math.inf``), so only the exact ``math.inf`` singleton was accepted,
+   while every backend setter (using ``math.isinf()``) accepts any positive infinity
+   (`#1189 <https://github.com/agronholm/anyio/pull/1189>`_; PR by @greymoth-jp).
++- Fixed ``anyio.open_process()`` (and ``run_process()``) ignoring the ``extra_groups``
++  argument, as it mistakenly passed the value of the ``group`` argument instead
++  (`#1209 <https://github.com/agronholm/anyio/pull/1209>`_)
+ 
+ **4.14.1**
+ 
+diff --git a/src/anyio/_core/_subprocesses.py b/src/anyio/_core/_subprocesses.py
+index 9796f8bb9..a6590ca62 100644
+--- a/src/anyio/_core/_subprocesses.py
++++ b/src/anyio/_core/_subprocesses.py
+@@ -176,7 +176,7 @@ async def open_process(
+         kwargs["group"] = group
+ 
+     if extra_groups is not None:
+-        kwargs["extra_groups"] = group
++        kwargs["extra_groups"] = extra_groups
+ 
+     if umask >= 0:
+         kwargs["umask"] = umask
+diff --git a/tests/test_subprocesses.py b/tests/test_subprocesses.py
+index 4ee4a2f11..132a78833 100644
+--- a/tests/test_subprocesses.py
++++ b/tests/test_subprocesses.py
+@@ -5,11 +5,12 @@
+ import sys
+ from collections.abc import Callable
+ from pathlib import Path
+-from subprocess import CalledProcessError
++from subprocess import DEVNULL, CalledProcessError
+ from textwrap import dedent
+ from typing import Any
+ 
+ import pytest
++from pytest_mock.plugin import MockerFixture
+ 
+ from anyio import (
+     BrokenResourceError,
+@@ -21,6 +22,7 @@
+     open_process,
+     run_process,
+ )
++from anyio._core._eventloop import get_async_backend
+ from anyio.streams.buffered import BufferedByteReceiveStream
+ 
+ 
+@@ -348,11 +350,10 @@ async def test_exceptions_after_subprocess_closes_standard_streams() -> None:
+                 )
+             ],
+         ),
+-        pytest.param("extra_groups", list, id="extra_groups"),
+         pytest.param("umask", lambda: 0, id="umask"),
+     ],
+ )
+-async def test_py39_arguments(
++async def test_user_group_arguments(
+     argname: str,
+     argvalue_factory: Callable[[], Any],
+     event_loop_implementation_name: str | None,
+@@ -375,6 +376,33 @@ async def test_py39_arguments(
+         raise
+ 
+ 
++async def test_arguments_passed_through(mocker: MockerFixture) -> None:
++    """
++    Regression test ensuring all arguments accepted by ``open_process()``
++    are passed through to the backend's ``open_process()``.
++    """
++
++    command = [sys.executable, "-c", "pass"]
++    kwargs: dict[str, Any] = {
++        "stdin": DEVNULL,
++        "stdout": DEVNULL,
++        "stderr": DEVNULL,
++        "cwd": "/tmp",
++        "env": {"FOO": "bar"},
++        "startupinfo": object(),
++        "creationflags": 4,
++        "start_new_session": True,
++        "pass_fds": (5, 6),
++        "user": "myuser",
++        "group": "mygroup",
++        "extra_groups": [1, 2, "foo"],
++        "umask": 123,
++    }
++    mock_open_process = mocker.patch.object(get_async_backend(), "open_process")
++    await open_process(command, **kwargs)
++    mock_open_process.assert_called_once_with(command, **kwargs)
++
++
+ async def test_close_early() -> None:
+     """Regression test for #490."""
+     code = dedent("""\
