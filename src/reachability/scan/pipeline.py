@@ -237,6 +237,7 @@ def run_scan(
         "fix_commit_advisories": fix.advisories_with_commit,
         "fix_advisories_attributed": fix.advisories_attributed,
         "fix_diffs_fetched": fix.store.fetched,
+        "fix_diffs_attempted": fix.store.attempted,
         "fix_diffs_cached": fix.store.cached,
         "fix_diffs_unavailable": dict(sorted(fix.store.unavailable.items())),
         "fix_hunks_attributed": fix.counters.get("hunks_attributed", 0),

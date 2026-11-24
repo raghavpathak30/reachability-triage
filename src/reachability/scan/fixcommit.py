@@ -177,8 +177,9 @@ class DiffStore:
         self.max_seconds = DIFFS_TOTAL_SECONDS if max_seconds is None else max_seconds
         self.clock = clock
         self.results: dict[Commit, tuple[str | None, str | None]] = {}
-        self.fetched = 0
-        self.cached = 0
+        self.fetched = 0  # diffs obtained: cache hits plus successful source reads with a valid diff
+        self.cached = 0  # the cache-hit part of `fetched`
+        self.attempted = 0  # source (network or local-dir) tries; the per-scan diff budget counts these
         self.unavailable: dict[str, int] = {}
         self.spent = 0.0
 
@@ -203,6 +204,7 @@ class DiffStore:
                 text = _read_text(cache)
                 if looks_like_diff(text):
                     self.cached += 1
+                    self.fetched += 1
                     self.results[commit] = (text, None)
                     return text, None
             except DiffUnavailable:
@@ -210,12 +212,12 @@ class DiffStore:
             cache.unlink(missing_ok=True)  # corrupt: refetch once
         if self.fetcher is None:
             return self._fail(commit, "no diff source")
-        if self.fetched >= self.max_diffs:
+        if self.attempted >= self.max_diffs:
             return self._fail(commit, f"diff budget: {self.max_diffs}")
         if self.spent >= self.max_seconds:
             return self._fail(commit, f"diff budget: {self.max_seconds:.0f} s")
         start = self.clock()
-        self.fetched += 1
+        self.attempted += 1
         try:
             text = self.fetcher.fetch_diff(commit.owner, commit.repo, commit.sha)
         finally:
@@ -226,6 +228,7 @@ class DiffStore:
             return self._fail(commit, "not a diff")
         if use_cache:
             self._write(cache, text)
+        self.fetched += 1
         self.results[commit] = (text, None)
         return text, None
 
